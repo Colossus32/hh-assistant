@@ -7,12 +7,11 @@ import org.springframework.stereotype.Repository
 
 @Repository
 interface VacancyAnalysisRepository : JpaRepository<VacancyAnalysis, Long> {
-    
+
     fun findByVacancyId(vacancyId: String): VacancyAnalysis?
-    
+
     fun findByIsRelevant(isRelevant: Boolean): List<VacancyAnalysis>
-    
+
     @Query("SELECT va FROM VacancyAnalysis va WHERE va.isRelevant = true AND va.relevanceScore >= :minScore")
     fun findRelevantByMinScore(minScore: Double): List<VacancyAnalysis>
 }
-

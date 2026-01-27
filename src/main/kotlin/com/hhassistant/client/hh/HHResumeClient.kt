@@ -9,9 +9,9 @@ import org.springframework.web.reactive.function.client.bodyToMono
 
 @Component
 class HHResumeClient(
-    @Qualifier("hhWebClient") private val webClient: WebClient
+    @Qualifier("hhWebClient") private val webClient: WebClient,
 ) {
-    
+
     suspend fun getMyResumes(): List<ResumeDto> {
         return webClient.get()
             .uri("/resumes/mine")
@@ -19,7 +19,7 @@ class HHResumeClient(
             .bodyToMono<List<ResumeDto>>()
             .awaitSingle()
     }
-    
+
     suspend fun getResumeDetails(id: String): ResumeDto {
         return webClient.get()
             .uri("/resumes/$id")
@@ -28,4 +28,3 @@ class HHResumeClient(
             .awaitSingle()
     }
 }
-

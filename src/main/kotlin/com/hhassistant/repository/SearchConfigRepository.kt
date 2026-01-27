@@ -6,7 +6,6 @@ import org.springframework.stereotype.Repository
 
 @Repository
 interface SearchConfigRepository : JpaRepository<SearchConfig, Long> {
-    
+
     fun findByIsActiveTrue(): List<SearchConfig>
 }
-

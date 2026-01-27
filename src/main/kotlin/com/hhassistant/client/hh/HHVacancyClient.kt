@@ -14,9 +14,9 @@ import org.springframework.web.reactive.function.client.bodyToMono
 class HHVacancyClient(
     @Qualifier("hhWebClient") private val webClient: WebClient,
     @Value("\${hh.api.search.per-page}") private val perPage: Int,
-    @Value("\${hh.api.search.default-page}") private val defaultPage: Int
+    @Value("\${hh.api.search.default-page}") private val defaultPage: Int,
 ) {
-    
+
     suspend fun searchVacancies(config: SearchConfig): List<VacancyDto> {
         val response = webClient.get()
             .uri { builder ->
@@ -34,10 +34,10 @@ class HHVacancyClient(
             .retrieve()
             .bodyToMono<VacancySearchResponse>()
             .awaitSingle()
-        
+
         return response.items
     }
-    
+
     suspend fun getVacancyDetails(id: String): VacancyDto {
         return webClient.get()
             .uri("/vacancies/$id")
@@ -46,4 +46,3 @@ class HHVacancyClient(
             .awaitSingle()
     }
 }
-

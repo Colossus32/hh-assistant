@@ -6,9 +6,8 @@ import org.springframework.stereotype.Repository
 
 @Repository
 interface ResumeRepository : JpaRepository<Resume, Long> {
-    
+
     fun findByIsActiveTrue(): List<Resume>
-    
+
     fun findFirstByIsActiveTrue(): Resume?
 }
-

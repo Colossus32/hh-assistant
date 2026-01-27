@@ -12,12 +12,11 @@ fun VacancyDto.toEntity(formattingConfig: FormattingConfig): Vacancy {
         salary = this.toSalaryString(formattingConfig.defaultCurrency),
         area = this.toAreaString(formattingConfig.areaNotSpecified),
         url = this.url,
-        description = this.description ?: this.snippet?.let { 
+        description = this.description ?: this.snippet?.let {
             "${it.requirement ?: ""}\n${it.responsibility ?: ""}".trim()
         },
         experience = this.toExperienceString(),
         publishedAt = this.toPublishedAt(),
-        status = VacancyStatus.NEW
+        status = VacancyStatus.NEW,
     )
 }
-

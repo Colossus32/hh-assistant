@@ -7,7 +7,7 @@ data class OllamaGenerateRequest(
     val prompt: String,
     val system: String? = null,
     val temperature: Double = 0.7,
-    val stream: Boolean = false
+    val stream: Boolean = false,
 )
 
 data class OllamaGenerateResponse(
@@ -27,19 +27,19 @@ data class OllamaGenerateResponse(
     @JsonProperty("eval_count")
     val evalCount: Int?,
     @JsonProperty("eval_duration")
-    val evalDuration: Long?
+    val evalDuration: Long?,
 )
 
 data class OllamaChatRequest(
     val model: String,
     val messages: List<ChatMessage>,
     val temperature: Double = 0.7,
-    val stream: Boolean = false
+    val stream: Boolean = false,
 )
 
 data class ChatMessage(
     val role: String, // "system", "user", "assistant"
-    val content: String
+    val content: String,
 )
 
 data class OllamaChatResponse(
@@ -47,6 +47,6 @@ data class OllamaChatResponse(
     @JsonProperty("created_at")
     val createdAt: String,
     val message: ChatMessage,
-    val done: Boolean
+    val done: Boolean,
 )
 

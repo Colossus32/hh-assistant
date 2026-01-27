@@ -14,7 +14,7 @@ data class VacancyDto(
     val experience: ExperienceDto?,
     @JsonProperty("published_at")
     val publishedAt: String?,
-    val snippet: SnippetDto?
+    val snippet: SnippetDto?,
 ) {
     fun toSalaryString(defaultCurrency: String = "RUR"): String? {
         return salary?.let {
@@ -27,15 +27,15 @@ data class VacancyDto(
             }
         }
     }
-    
+
     fun toAreaString(areaNotSpecified: String = "Не указан"): String {
         return area?.name ?: areaNotSpecified
     }
-    
+
     fun toExperienceString(): String? {
         return experience?.name
     }
-    
+
     fun toPublishedAt(): LocalDateTime? {
         return publishedAt?.let {
             try {
@@ -49,27 +49,26 @@ data class VacancyDto(
 
 data class EmployerDto(
     val id: String?,
-    val name: String
+    val name: String,
 )
 
 data class SalaryDto(
     val from: Int?,
     val to: Int?,
-    val currency: String?
+    val currency: String?,
 )
 
 data class AreaDto(
     val id: String?,
-    val name: String
+    val name: String,
 )
 
 data class ExperienceDto(
     val id: String?,
-    val name: String
+    val name: String,
 )
 
 data class SnippetDto(
     val requirement: String?,
-    val responsibility: String?
+    val responsibility: String?,
 )
-

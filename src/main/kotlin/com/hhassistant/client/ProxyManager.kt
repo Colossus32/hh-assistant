@@ -13,9 +13,9 @@ class ProxyManager(
     @Value("\${hh.proxy.host:}") private val proxyHost: String,
     @Value("\${hh.proxy.port:8080}") private val proxyPort: Int,
     @Value("\${hh.proxy.type:HTTP}") private val proxyType: String,
-    @Value("\${hh.proxy.timeout-seconds}") private val timeoutSeconds: Long
+    @Value("\${hh.proxy.timeout-seconds}") private val timeoutSeconds: Long,
 ) {
-    
+
     fun getConnector(): ReactorClientHttpConnector {
         val httpClient = if (proxyEnabled && proxyHost.isNotBlank()) {
             when (proxyType.uppercase()) {
@@ -23,7 +23,7 @@ class ProxyManager(
                     HttpClient.create()
                         .proxy { proxySpec ->
                             proxySpec.type(
-                                reactor.netty.transport.ProxyProvider.Proxy.HTTP
+                                reactor.netty.transport.ProxyProvider.Proxy.HTTP,
                             ).address(InetSocketAddress(proxyHost, proxyPort))
                         }
                         .responseTimeout(Duration.ofSeconds(timeoutSeconds))
@@ -32,7 +32,7 @@ class ProxyManager(
                     HttpClient.create()
                         .proxy { proxySpec ->
                             proxySpec.type(
-                                reactor.netty.transport.ProxyProvider.Proxy.SOCKS5
+                                reactor.netty.transport.ProxyProvider.Proxy.SOCKS5,
                             ).address(InetSocketAddress(proxyHost, proxyPort))
                         }
                         .responseTimeout(Duration.ofSeconds(timeoutSeconds))
@@ -46,8 +46,7 @@ class ProxyManager(
             HttpClient.create()
                 .responseTimeout(Duration.ofSeconds(30))
         }
-        
+
         return ReactorClientHttpConnector(httpClient)
     }
 }
-

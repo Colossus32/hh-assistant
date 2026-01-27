@@ -6,7 +6,6 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpHeaders
-import org.springframework.http.client.reactive.ReactorClientHttpConnector
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction
 import org.springframework.web.reactive.function.client.WebClient
 import reactor.core.publisher.Mono
@@ -19,9 +18,9 @@ class WebClientConfig(
     @Value("\${hh.retry.max-attempts}") private val retryMaxAttempts: Long,
     @Value("\${hh.retry.initial-delay-seconds}") private val retryInitialDelaySeconds: Long,
     @Value("\${hh.retry.max-backoff-seconds}") private val retryMaxBackoffSeconds: Long,
-    @Value("\${hh.retry.rate-limit-status-code}") private val retryRateLimitStatusCode: Int
+    @Value("\${hh.retry.rate-limit-status-code}") private val retryRateLimitStatusCode: Int,
 ) {
-    
+
     @Bean
     @Qualifier("hhWebClient")
     fun hhWebClient(
@@ -29,7 +28,7 @@ class WebClientConfig(
         @Value("\${hh.api.access-token}") accessToken: String,
         @Value("\${hh.api.user-agent}") userAgent: String,
         @Value("\${hh.api.auth-prefix}") authPrefix: String,
-        @Value("\${hh.api.accept-header}") acceptHeader: String
+        @Value("\${hh.api.accept-header}") acceptHeader: String,
     ): WebClient {
         return WebClient.builder()
             .baseUrl(baseUrl)
@@ -41,13 +40,13 @@ class WebClientConfig(
             .filter(errorLoggingFilter())
             .build()
     }
-    
+
     @Bean
     @Qualifier("ollamaWebClient")
     fun ollamaWebClient(
         @Value("\${ollama.base-url}") baseUrl: String,
         @Value("\${ollama.timeout-seconds}") timeoutSeconds: Long,
-        @Value("\${ollama.max-in-memory-size-mb}") maxInMemorySizeMb: Int
+        @Value("\${ollama.max-in-memory-size-mb}") maxInMemorySizeMb: Int,
     ): WebClient {
         return WebClient.builder()
             .baseUrl(baseUrl)
@@ -55,12 +54,12 @@ class WebClientConfig(
             .filter(timeoutFilter(Duration.ofSeconds(timeoutSeconds)))
             .build()
     }
-    
+
     @Bean
     @Qualifier("telegramWebClient")
     fun telegramWebClient(
         @Value("\${telegram.api.base-url}") baseUrl: String,
-        @Value("\${telegram.content-type}") contentType: String
+        @Value("\${telegram.content-type}") contentType: String,
     ): WebClient {
         return WebClient.builder()
             .baseUrl(baseUrl)
@@ -68,20 +67,21 @@ class WebClientConfig(
             .filter(retryFilter())
             .build()
     }
-    
+
     private fun retryFilter(): ExchangeFilterFunction {
         return ExchangeFilterFunction.ofResponseProcessor { response ->
-            if (response.statusCode().is5xxServerError || 
-                response.statusCode().value() == retryRateLimitStatusCode) {
+            if (response.statusCode().is5xxServerError ||
+                response.statusCode().value() == retryRateLimitStatusCode
+            ) {
                 response.bodyToMono(String::class.java)
                     .flatMap { body ->
                         Mono.error<org.springframework.web.reactive.function.client.ClientResponse>(
-                            RuntimeException("Server error: ${response.statusCode()} - $body")
+                            RuntimeException("Server error: ${response.statusCode()} - $body"),
                         )
                     }
                     .retryWhen(
                         Retry.backoff(retryMaxAttempts, Duration.ofSeconds(retryInitialDelaySeconds))
-                            .maxBackoff(Duration.ofSeconds(retryMaxBackoffSeconds))
+                            .maxBackoff(Duration.ofSeconds(retryMaxBackoffSeconds)),
                     )
                     .cast(org.springframework.web.reactive.function.client.ClientResponse::class.java)
             } else {
@@ -89,13 +89,13 @@ class WebClientConfig(
             }
         }
     }
-    
+
     private fun timeoutFilter(@Suppress("UNUSED_PARAMETER") timeout: Duration): ExchangeFilterFunction {
         // Timeout is handled by ReactorClientHttpConnector
         // This is a placeholder for future timeout logic
         return ExchangeFilterFunction.ofRequestProcessor { Mono.just(it) }
     }
-    
+
     private fun errorLoggingFilter(): ExchangeFilterFunction {
         return ExchangeFilterFunction.ofResponseProcessor { response ->
             if (response.statusCode().isError) {
@@ -110,4 +110,3 @@ class WebClientConfig(
         }
     }
 }
-

@@ -13,11 +13,11 @@ data class ResumeDto(
     val experience: List<ExperienceItemDto>?,
     val education: List<EducationDto>?,
     val totalExperience: TotalExperienceDto?,
-    val url: String?
+    val url: String?,
 )
 
 data class SkillDto(
-    val name: String
+    val name: String,
 )
 
 data class ExperienceItemDto(
@@ -25,15 +25,15 @@ data class ExperienceItemDto(
     val company: String?,
     val description: String?,
     val start: String?,
-    val end: String?
+    val end: String?,
 )
 
 data class EducationDto(
     val name: String?,
-    val year: Int?
+    val year: Int?,
 )
 
 data class TotalExperienceDto(
-    val months: Int?
+    val months: Int?,
 )
 
