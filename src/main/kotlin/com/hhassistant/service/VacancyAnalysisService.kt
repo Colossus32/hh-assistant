@@ -1,10 +1,12 @@
 package com.hhassistant.service
 
+import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.hhassistant.client.ollama.OllamaClient
 import com.hhassistant.client.ollama.dto.ChatMessage
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
+import com.hhassistant.exception.OllamaException
 import com.hhassistant.repository.VacancyAnalysisRepository
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
@@ -20,6 +22,13 @@ class VacancyAnalysisService(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
+    /**
+     * Анализирует вакансию на релевантность для кандидата с использованием LLM.
+     *
+     * @param vacancy Вакансия для анализа
+     * @return Результат анализа с оценкой релевантности и обоснованием
+     * @throws OllamaException если не удалось связаться с LLM или получить ответ
+     */
     suspend fun analyzeVacancy(vacancy: Vacancy): VacancyAnalysis {
         // Проверяем, не анализировалась ли вакансия ранее
         repository.findByVacancyId(vacancy.id)?.let {
@@ -37,25 +46,42 @@ class VacancyAnalysisService(
         val analysisPrompt = buildAnalysisPrompt(vacancy, resume, resumeStructure)
 
         // Анализируем через LLM
-        val analysisResponse = ollamaClient.chat(
-            listOf(
-                ChatMessage(
-                    role = "system",
-                    content = buildSystemPrompt(),
+        val analysisResponse = try {
+            ollamaClient.chat(
+                listOf(
+                    ChatMessage(
+                        role = "system",
+                        content = buildSystemPrompt(),
+                    ),
+                    ChatMessage(
+                        role = "user",
+                        content = analysisPrompt,
+                    ),
                 ),
-                ChatMessage(
-                    role = "user",
-                    content = analysisPrompt,
-                ),
-            ),
-        )
+            )
+        } catch (e: Exception) {
+            log.error("Failed to analyze vacancy ${vacancy.id} via Ollama: ${e.message}", e)
+            throw OllamaException.ConnectionException(
+                "Failed to connect to Ollama service for vacancy analysis: ${e.message}",
+                e,
+            )
+        }
 
         // Парсим ответ
-        val analysisResult = parseAnalysisResponse(analysisResponse)
+        val analysisResult = parseAnalysisResponse(analysisResponse, vacancy.id)
+
+        // Валидируем результат анализа
+        val validatedResult = validateAnalysisResult(analysisResult)
 
         // Генерируем сопроводительное письмо для релевантных вакансий
-        val coverLetter = if (analysisResult.isRelevant && analysisResult.relevanceScore >= minRelevanceScore) {
-            generateCoverLetter(vacancy, resume, resumeStructure, analysisResult)
+        val coverLetter = if (validatedResult.isRelevant && validatedResult.relevanceScore >= minRelevanceScore) {
+            try {
+                generateCoverLetter(vacancy, resume, resumeStructure, validatedResult)
+            } catch (e: Exception) {
+                log.warn("Failed to generate cover letter for vacancy ${vacancy.id}: ${e.message}", e)
+                // Не прерываем процесс, просто не генерируем письмо
+                null
+            }
         } else {
             null
         }
@@ -63,10 +89,10 @@ class VacancyAnalysisService(
         // Сохраняем результат
         val analysis = VacancyAnalysis(
             vacancyId = vacancy.id,
-            isRelevant = analysisResult.isRelevant,
-            relevanceScore = analysisResult.relevanceScore,
-            reasoning = analysisResult.reasoning,
-            matchedSkills = objectMapper.writeValueAsString(analysisResult.matchedSkills),
+            isRelevant = validatedResult.isRelevant,
+            relevanceScore = validatedResult.relevanceScore,
+            reasoning = validatedResult.reasoning,
+            matchedSkills = objectMapper.writeValueAsString(validatedResult.matchedSkills),
             suggestedCoverLetter = coverLetter,
         )
 
@@ -139,7 +165,7 @@ class VacancyAnalysisService(
         return sb.toString()
     }
 
-    private fun parseAnalysisResponse(response: String): AnalysisResult {
+    private fun parseAnalysisResponse(response: String, vacancyId: String): AnalysisResult {
         return try {
             // Пытаемся извлечь JSON из ответа (на случай, если LLM добавит текст до/после JSON)
             val jsonStart = response.indexOf('{')
@@ -150,21 +176,24 @@ class VacancyAnalysisService(
                 val parsed = objectMapper.readValue(jsonString, AnalysisResult::class.java)
                 parsed
             } else {
-                log.warn("Failed to parse analysis response, using defaults. Response: $response")
-                AnalysisResult(
-                    isRelevant = false,
-                    relevanceScore = 0.0,
-                    reasoning = "Не удалось распарсить ответ LLM",
-                    matchedSkills = emptyList(),
+                log.warn("Failed to find JSON in LLM response for vacancy $vacancyId. Response: $response")
+                throw OllamaException.ParsingException(
+                    "No valid JSON found in LLM response for vacancy $vacancyId",
                 )
             }
+        } catch (e: JsonProcessingException) {
+            log.error("Invalid JSON from LLM for vacancy $vacancyId: ${e.message}. Response: $response", e)
+            throw OllamaException.ParsingException(
+                "Failed to parse JSON response from LLM for vacancy $vacancyId: ${e.message}",
+                e,
+            )
+        } catch (e: OllamaException) {
+            throw e
         } catch (e: Exception) {
-            log.error("Error parsing analysis response: ${e.message}", e)
-            AnalysisResult(
-                isRelevant = false,
-                relevanceScore = 0.0,
-                reasoning = "Ошибка парсинга ответа: ${e.message}",
-                matchedSkills = emptyList(),
+            log.error("Unexpected error parsing analysis response for vacancy $vacancyId: ${e.message}", e)
+            throw OllamaException.ParsingException(
+                "Unexpected error parsing LLM response for vacancy $vacancyId: ${e.message}",
+                e,
             )
         }
     }
@@ -179,30 +208,38 @@ class VacancyAnalysisService(
 
         val coverLetterPrompt = buildCoverLetterPrompt(vacancy, resume, resumeStructure, analysisResult)
 
-        return ollamaClient.chat(
-            listOf(
-                ChatMessage(
-                    role = "system",
-                    content = """
-                        Ты - эксперт по написанию сопроводительных писем. Напиши профессиональное, 
-                        краткое (до 200 слов) сопроводительное письмо на русском языке для отклика на вакансию.
-                        
-                        Письмо должно:
-                        - Быть персонализированным под конкретную вакансию
-                        - Подчеркивать релевантный опыт и навыки
-                        - Быть профессиональным, но не шаблонным
-                        - Показывать заинтересованность в позиции
-                        
-                        Начни с обращения к работодателю, затем кратко представься и объясни, 
-                        почему ты подходишь для этой позиции.
-                    """.trimIndent(),
+        return try {
+            ollamaClient.chat(
+                listOf(
+                    ChatMessage(
+                        role = "system",
+                        content = """
+                            Ты - эксперт по написанию сопроводительных писем. Напиши профессиональное, 
+                            краткое (до 200 слов) сопроводительное письмо на русском языке для отклика на вакансию.
+                            
+                            Письмо должно:
+                            - Быть персонализированным под конкретную вакансию
+                            - Подчеркивать релевантный опыт и навыки
+                            - Быть профессиональным, но не шаблонным
+                            - Показывать заинтересованность в позиции
+                            
+                            Начни с обращения к работодателю, затем кратко представься и объясни, 
+                            почему ты подходишь для этой позиции.
+                        """.trimIndent(),
+                    ),
+                    ChatMessage(
+                        role = "user",
+                        content = coverLetterPrompt,
+                    ),
                 ),
-                ChatMessage(
-                    role = "user",
-                    content = coverLetterPrompt,
-                ),
-            ),
-        )
+            )
+        } catch (e: Exception) {
+            log.error("Failed to generate cover letter for vacancy ${vacancy.id}: ${e.message}", e)
+            throw OllamaException.CoverLetterGenerationException(
+                "Failed to generate cover letter for vacancy ${vacancy.id}: ${e.message}",
+                e,
+            )
+        }
     }
 
     private fun buildCoverLetterPrompt(
@@ -227,6 +264,20 @@ class VacancyAnalysisService(
         }
 
         return sb.toString()
+    }
+
+    /**
+     * Валидирует результат анализа от LLM.
+     *
+     * @param result Результат анализа для валидации
+     * @return Валидированный результат
+     * @throws IllegalArgumentException если relevanceScore вне допустимого диапазона
+     */
+    private fun validateAnalysisResult(result: AnalysisResult): AnalysisResult {
+        require(result.relevanceScore in 0.0..1.0) {
+            "Relevance score must be between 0.0 and 1.0, got: ${result.relevanceScore}"
+        }
+        return result
     }
 
     private data class AnalysisResult(

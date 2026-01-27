@@ -8,6 +8,7 @@ import com.hhassistant.domain.entity.ResumeSource
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.domain.model.ResumeStructure
+import com.hhassistant.exception.OllamaException
 import com.hhassistant.repository.VacancyAnalysisRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -16,6 +17,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.LocalDateTime
@@ -152,6 +154,139 @@ class VacancyAnalysisServiceTest {
             assertThat(result).isEqualTo(existingAnalysis)
             coVerify(exactly = 0) { ollamaClient.chat(any()) }
             verify(exactly = 0) { repository.save(any()) }
+        }
+    }
+
+    @Test
+    fun `should throw OllamaException when LLM connection fails`() {
+        val vacancy = createTestVacancy()
+        val resume = createTestResume()
+        val resumeStructure = createTestResumeStructure()
+
+        every { repository.findByVacancyId(vacancy.id) } returns null
+        coEvery { resumeService.loadResume() } returns resume
+        every { resumeService.getResumeStructure(resume) } returns resumeStructure
+
+        coEvery { ollamaClient.chat(any()) } throws RuntimeException("Connection refused")
+
+        assertThatThrownBy {
+            runBlocking {
+                service.analyzeVacancy(vacancy)
+            }
+        }.isInstanceOf(OllamaException.ConnectionException::class.java)
+            .hasMessageContaining("Failed to connect to Ollama service")
+
+        coVerify { ollamaClient.chat(any()) }
+        verify(exactly = 0) { repository.save(any()) }
+    }
+
+    @Test
+    fun `should throw OllamaException when LLM returns invalid JSON`() {
+        val vacancy = createTestVacancy()
+        val resume = createTestResume()
+        val resumeStructure = createTestResumeStructure()
+
+        every { repository.findByVacancyId(vacancy.id) } returns null
+        coEvery { resumeService.loadResume() } returns resume
+        every { resumeService.getResumeStructure(resume) } returns resumeStructure
+
+        val invalidResponse = "This is not a valid JSON response"
+        coEvery { ollamaClient.chat(any()) } returns invalidResponse
+
+        assertThatThrownBy {
+            runBlocking {
+                service.analyzeVacancy(vacancy)
+            }
+        }.isInstanceOf(OllamaException.ParsingException::class.java)
+            .hasMessageContaining("No valid JSON found")
+
+        coVerify { ollamaClient.chat(any()) }
+        verify(exactly = 0) { repository.save(any()) }
+    }
+
+    @Test
+    fun `should throw OllamaException when relevance score is out of range`() {
+        val vacancy = createTestVacancy()
+        val resume = createTestResume()
+        val resumeStructure = createTestResumeStructure()
+
+        every { repository.findByVacancyId(vacancy.id) } returns null
+        coEvery { resumeService.loadResume() } returns resume
+        every { resumeService.getResumeStructure(resume) } returns resumeStructure
+
+        val invalidResponse = """
+            {
+                "is_relevant": true,
+                "relevance_score": 1.5,
+                "reasoning": "Test",
+                "matched_skills": []
+            }
+        """.trimIndent()
+
+        coEvery { ollamaClient.chat(any()) } returns invalidResponse
+
+        assertThatThrownBy {
+            runBlocking {
+                service.analyzeVacancy(vacancy)
+            }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("Relevance score must be between 0.0 and 1.0")
+
+        coVerify { ollamaClient.chat(any()) }
+        verify(exactly = 0) { repository.save(any()) }
+    }
+
+    @Test
+    fun `should handle cover letter generation failure gracefully`() {
+        runBlocking {
+            val vacancy = createTestVacancy()
+            val resume = createTestResume()
+            val resumeStructure = createTestResumeStructure()
+
+            every { repository.findByVacancyId(vacancy.id) } returns null
+            coEvery { resumeService.loadResume() } returns resume
+            every { resumeService.getResumeStructure(resume) } returns resumeStructure
+
+            val analysisResponse = """
+                {
+                    "is_relevant": true,
+                    "relevance_score": 0.85,
+                    "reasoning": "Вакансия хорошо подходит",
+                    "matched_skills": ["Kotlin", "Spring Boot"]
+                }
+            """.trimIndent()
+
+            // Первый вызов (анализ) успешен, второй (cover letter) падает
+            var callCount = 0
+            coEvery { ollamaClient.chat(any()) } answers {
+                callCount++
+                if (callCount == 1) {
+                    analysisResponse
+                } else {
+                    throw RuntimeException("Connection error")
+                }
+            }
+
+            val savedAnalysis = com.hhassistant.domain.entity.VacancyAnalysis(
+                id = 1L,
+                vacancyId = vacancy.id,
+                isRelevant = true,
+                relevanceScore = 0.85,
+                reasoning = "Вакансия хорошо подходит",
+                matchedSkills = """["Kotlin", "Spring Boot"]""",
+                suggestedCoverLetter = null, // Cover letter не сгенерирован из-за ошибки
+            )
+
+            every { repository.save(any()) } returns savedAnalysis
+
+            val result = service.analyzeVacancy(vacancy)
+
+            assertThat(result).isNotNull
+            assertThat(result.isRelevant).isTrue
+            assertThat(result.suggestedCoverLetter).isNull() // Должен быть null при ошибке генерации
+
+            coVerify(exactly = 2) { ollamaClient.chat(any()) } // Анализ + попытка генерации письма
+            verify { repository.save(any()) }
         }
     }
 
