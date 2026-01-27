@@ -1,7 +1,6 @@
 package com.hhassistant.client.hh
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.hhassistant.client.hh.dto.*
 import com.hhassistant.domain.entity.SearchConfig
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
