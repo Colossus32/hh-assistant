@@ -49,6 +49,9 @@ dependencies {
     // Logging
     implementation("io.github.microutils:kotlin-logging-jvm:3.0.5")
 
+    // Rate Limiting
+    implementation("com.bucket4j:bucket4j-core:8.10.1")
+
     // Testing
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test")

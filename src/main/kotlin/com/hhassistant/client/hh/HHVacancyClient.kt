@@ -4,6 +4,7 @@ import com.hhassistant.client.hh.dto.VacancyDto
 import com.hhassistant.client.hh.dto.VacancySearchResponse
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.exception.HHAPIException
+import com.hhassistant.ratelimit.RateLimitService
 import kotlinx.coroutines.reactor.awaitSingle
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
@@ -19,10 +20,14 @@ class HHVacancyClient(
     @Qualifier("hhWebClient") private val webClient: WebClient,
     @Value("\${hh.api.search.per-page}") private val perPage: Int,
     @Value("\${hh.api.search.default-page}") private val defaultPage: Int,
+    private val rateLimitService: RateLimitService,
 ) {
     private val log = KotlinLogging.logger {}
 
     suspend fun searchVacancies(config: SearchConfig): List<VacancyDto> {
+        // Проверяем rate limit перед запросом
+        rateLimitService.tryConsume()
+
         return try {
             val response = webClient.get()
                 .uri { builder ->
@@ -52,6 +57,9 @@ class HHVacancyClient(
     }
 
     suspend fun getVacancyDetails(id: String): VacancyDto {
+        // Проверяем rate limit перед запросом
+        rateLimitService.tryConsume()
+
         return try {
             webClient.get()
                 .uri("/vacancies/$id")

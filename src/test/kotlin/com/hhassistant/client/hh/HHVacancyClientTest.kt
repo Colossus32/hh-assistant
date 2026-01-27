@@ -3,6 +3,9 @@ package com.hhassistant.client.hh
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.exception.HHAPIException
+import com.hhassistant.ratelimit.RateLimitService
+import io.mockk.coEvery
+import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -17,6 +20,7 @@ class HHVacancyClientTest {
 
     private lateinit var mockWebServer: MockWebServer
     private lateinit var client: HHVacancyClient
+    private lateinit var rateLimitService: RateLimitService
     private val objectMapper = ObjectMapper()
 
     @BeforeEach
@@ -28,7 +32,10 @@ class HHVacancyClientTest {
             .baseUrl(mockWebServer.url("/").toString())
             .build()
 
-        client = HHVacancyClient(webClient, perPage = 50, defaultPage = 0)
+        rateLimitService = mockk<RateLimitService>(relaxed = true)
+        coEvery { rateLimitService.tryConsume() } returns true
+
+        client = HHVacancyClient(webClient, perPage = 50, defaultPage = 0, rateLimitService)
     }
 
     @AfterEach

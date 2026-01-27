@@ -71,6 +71,10 @@ hh:
     initial-delay-seconds: 2
     max-backoff-seconds: 10
     rate-limit-status-code: 429
+  rate-limit:
+    requests-per-minute: 20  # Лимит запросов в минуту (HH.ru обычно позволяет 20-30)
+    burst-capacity: 30  # Максимальное количество одновременных запросов
+    wait-on-limit-seconds: 60  # Время ожидания при превышении лимита (в секундах)
   currency:
     default: RUR
   vacancy:
