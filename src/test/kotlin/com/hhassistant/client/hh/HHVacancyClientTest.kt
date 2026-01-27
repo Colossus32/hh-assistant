@@ -2,10 +2,12 @@ package com.hhassistant.client.hh
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.hhassistant.domain.entity.SearchConfig
+import com.hhassistant.exception.HHAPIException
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -134,5 +136,96 @@ class HHVacancyClientTest {
         assertThat(vacancy.id).isEqualTo("12345")
         assertThat(vacancy.name).isEqualTo("Kotlin Developer")
         assertThat(vacancy.description).isEqualTo("Full description here")
+    }
+
+    @Test
+    fun `should throw UnauthorizedException on 401`() = runBlocking {
+        mockWebServer.enqueue(
+            MockResponse()
+                .setResponseCode(401)
+                .setBody("Unauthorized"),
+        )
+
+        val config = SearchConfig(
+            keywords = "Kotlin",
+            minSalary = null,
+            maxSalary = null,
+            area = null,
+            experience = null,
+            isActive = true,
+        )
+
+        assertThatThrownBy {
+            runBlocking {
+                client.searchVacancies(config)
+            }
+        }.isInstanceOf(HHAPIException.UnauthorizedException::class.java)
+            .hasMessageContaining("Unauthorized access")
+    }
+
+    @Test
+    fun `should throw NotFoundException on 404`() = runBlocking {
+        mockWebServer.enqueue(
+            MockResponse()
+                .setResponseCode(404)
+                .setBody("Not Found"),
+        )
+
+        assertThatThrownBy {
+            runBlocking {
+                client.getVacancyDetails("99999")
+            }
+        }.isInstanceOf(HHAPIException.NotFoundException::class.java)
+            .hasMessageContaining("Resource not found")
+    }
+
+    @Test
+    fun `should throw RateLimitException on 429`() = runBlocking {
+        mockWebServer.enqueue(
+            MockResponse()
+                .setResponseCode(429)
+                .setBody("Too Many Requests"),
+        )
+
+        val config = SearchConfig(
+            keywords = "Kotlin",
+            minSalary = null,
+            maxSalary = null,
+            area = null,
+            experience = null,
+            isActive = true,
+        )
+
+        assertThatThrownBy {
+            runBlocking {
+                client.searchVacancies(config)
+            }
+        }.isInstanceOf(HHAPIException.RateLimitException::class.java)
+            .hasMessageContaining("Rate limit exceeded")
+    }
+
+    @Test
+    fun `should throw ConnectionException on 500`() = runBlocking {
+        mockWebServer.enqueue(
+            MockResponse()
+                .setResponseCode(500)
+                .setBody("Internal Server Error"),
+        )
+
+        val config = SearchConfig(
+            keywords = "Kotlin",
+            minSalary = null,
+            maxSalary = null,
+            area = null,
+            experience = null,
+            isActive = true,
+        )
+
+        assertThatThrownBy {
+            runBlocking {
+                client.searchVacancies(config)
+            }
+        }.isInstanceOf(HHAPIException.ConnectionException::class.java)
+            .hasMessageContaining("Server error")
     }
 }

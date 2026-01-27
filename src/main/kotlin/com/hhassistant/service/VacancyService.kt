@@ -6,6 +6,8 @@ import com.hhassistant.config.FormattingConfig
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
+import com.hhassistant.exception.HHAPIException
+import com.hhassistant.exception.VacancyProcessingException
 import com.hhassistant.repository.SearchConfigRepository
 import com.hhassistant.repository.VacancyRepository
 import mu.KotlinLogging
@@ -47,8 +49,16 @@ class VacancyService(
                     log.info("Reached max vacancies limit ($maxVacanciesPerCycle), stopping fetch")
                     break
                 }
+            } catch (e: HHAPIException.RateLimitException) {
+                log.warn("Rate limit exceeded for config ${config.id}, skipping: ${e.message}")
+                // Прерываем загрузку при rate limit, чтобы не усугубить ситуацию
+                break
+            } catch (e: HHAPIException) {
+                log.error("HH.ru API error fetching vacancies for config ${config.id}: ${e.message}", e)
+                // Продолжаем с другими конфигурациями
             } catch (e: Exception) {
-                log.error("Error fetching vacancies for config ${config.id}: ${e.message}", e)
+                log.error("Unexpected error fetching vacancies for config ${config.id}: ${e.message}", e)
+                // Продолжаем с другими конфигурациями
             }
         }
 
@@ -74,9 +84,18 @@ class VacancyService(
      * @param newStatus Новый статус
      */
     fun updateVacancyStatus(vacancy: Vacancy, newStatus: VacancyStatus) {
-        val updatedVacancy = vacancy.copy(status = newStatus)
-        vacancyRepository.save(updatedVacancy)
-        log.debug("Updated vacancy ${vacancy.id} status to $newStatus")
+        try {
+            val updatedVacancy = vacancy.copy(status = newStatus)
+            vacancyRepository.save(updatedVacancy)
+            log.debug("Updated vacancy ${vacancy.id} status to $newStatus")
+        } catch (e: Exception) {
+            log.error("Error updating vacancy ${vacancy.id} status: ${e.message}", e)
+            throw VacancyProcessingException(
+                "Failed to update vacancy status",
+                vacancy.id,
+                e,
+            )
+        }
     }
 
     private suspend fun fetchVacanciesForConfig(config: SearchConfig): List<Vacancy> {

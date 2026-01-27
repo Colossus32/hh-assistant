@@ -4,6 +4,9 @@ import com.hhassistant.client.telegram.TelegramClient
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.domain.entity.VacancyStatus
+import com.hhassistant.exception.OllamaException
+import com.hhassistant.exception.TelegramException
+import com.hhassistant.exception.VacancyProcessingException
 import kotlinx.coroutines.runBlocking
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
@@ -61,11 +64,31 @@ class VacancySchedulerService(
                         // 4. Отправляем релевантные вакансии в Telegram
                         if (analysis.isRelevant) {
                             relevantCount++
-                            sendVacancyToTelegram(vacancy, analysis)
-                            vacancyService.updateVacancyStatus(vacancy, VacancyStatus.SENT_TO_USER)
+                            try {
+                                sendVacancyToTelegram(vacancy, analysis)
+                                vacancyService.updateVacancyStatus(vacancy, VacancyStatus.SENT_TO_USER)
+                            } catch (e: TelegramException.RateLimitException) {
+                                log.warn("Rate limit exceeded for Telegram, skipping vacancy ${vacancy.id}")
+                                // Не обновляем статус, попробуем отправить в следующий раз
+                            } catch (e: TelegramException) {
+                                log.error("Telegram error for vacancy ${vacancy.id}: ${e.message}", e)
+                                // Вакансия уже проанализирована, но не отправлена
+                            }
                         }
-                    } catch (e: Exception) {
+                    } catch (e: OllamaException) {
+                        log.error("Ollama error analyzing vacancy ${vacancy.id}: ${e.message}", e)
+                        // Помечаем как пропущенную, чтобы не анализировать снова
+                        try {
+                            vacancyService.updateVacancyStatus(vacancy, VacancyStatus.SKIPPED)
+                        } catch (updateError: Exception) {
+                            log.error("Failed to update status for vacancy ${vacancy.id} after Ollama error", updateError)
+                        }
+                    } catch (e: VacancyProcessingException) {
                         log.error("Error processing vacancy ${vacancy.id}: ${e.message}", e)
+                        // Продолжаем обработку других вакансий
+                    } catch (e: Exception) {
+                        log.error("Unexpected error processing vacancy ${vacancy.id}: ${e.message}", e)
+                        // Продолжаем обработку других вакансий
                     }
                 }
 
@@ -85,11 +108,16 @@ class VacancySchedulerService(
     ) {
         val message = buildTelegramMessage(vacancy, analysis)
 
-        val sent = telegramClient.sendMessage(message)
-        if (sent) {
-            log.info("Sent vacancy ${vacancy.id} to Telegram")
-        } else {
-            log.warn("Failed to send vacancy ${vacancy.id} to Telegram")
+        try {
+            val sent = telegramClient.sendMessage(message)
+            if (sent) {
+                log.info("Sent vacancy ${vacancy.id} to Telegram")
+            } else {
+                log.warn("Failed to send vacancy ${vacancy.id} to Telegram (returned false)")
+            }
+        } catch (e: TelegramException) {
+            log.error("Telegram exception sending vacancy ${vacancy.id}: ${e.message}", e)
+            throw e // Пробрасываем для обработки в вызывающем коде
         }
     }
 

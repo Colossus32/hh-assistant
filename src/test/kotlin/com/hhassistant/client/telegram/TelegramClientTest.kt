@@ -1,9 +1,11 @@
 package com.hhassistant.client.telegram
 
+import com.hhassistant.exception.TelegramException
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -67,7 +69,7 @@ class TelegramClientTest {
     }
 
     @Test
-    fun `should return false when Telegram API returns error`() {
+    fun `should throw exception when Telegram API returns error`() {
         runBlocking {
             val responseBody = """
                 {
@@ -84,9 +86,39 @@ class TelegramClientTest {
                     .addHeader("Content-Type", "application/json"),
             )
 
-            val result = telegramClient.sendMessage("Test message")
+            assertThatThrownBy {
+                runBlocking {
+                    telegramClient.sendMessage("Test message")
+                }
+            }.isInstanceOf(TelegramException.InvalidChatException::class.java)
+                .hasMessageContaining("Invalid chat ID")
+        }
+    }
 
-            assertThat(result).isFalse()
+    @Test
+    fun `should throw rate limit exception`() {
+        runBlocking {
+            val responseBody = """
+                {
+                    "ok": false,
+                    "error_code": 429,
+                    "description": "Too Many Requests"
+                }
+            """.trimIndent()
+
+            mockWebServer.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setBody(responseBody)
+                    .addHeader("Content-Type", "application/json"),
+            )
+
+            assertThatThrownBy {
+                runBlocking {
+                    telegramClient.sendMessage("Test message")
+                }
+            }.isInstanceOf(TelegramException.RateLimitException::class.java)
+                .hasMessageContaining("Rate limit exceeded")
         }
     }
 
