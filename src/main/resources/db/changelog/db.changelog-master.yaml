@@ -3,12 +3,3 @@ databaseChangeLog:
       file: db/changelog/v1.0/001-init-schema.yaml
   - include:
       file: db/changelog/v1.0/002-create-tables.yaml
-
-
-
-
-
-
-
-
-
