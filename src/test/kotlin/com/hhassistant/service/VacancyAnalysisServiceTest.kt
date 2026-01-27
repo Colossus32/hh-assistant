@@ -3,6 +3,7 @@ package com.hhassistant.service
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.hhassistant.client.ollama.OllamaClient
+import com.hhassistant.config.PromptConfig
 import com.hhassistant.domain.entity.Resume
 import com.hhassistant.domain.entity.ResumeSource
 import com.hhassistant.domain.entity.Vacancy
@@ -36,7 +37,8 @@ class VacancyAnalysisServiceTest {
         resumeService = mockk()
         repository = mockk()
         objectMapper = jacksonObjectMapper()
-        service = VacancyAnalysisService(ollamaClient, resumeService, repository, objectMapper, 0.6)
+        val promptConfig = PromptConfig() // Используем значения по умолчанию
+        service = VacancyAnalysisService(ollamaClient, resumeService, repository, objectMapper, promptConfig, 0.6)
     }
 
     @Test

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.hhassistant.client.ollama.OllamaClient
 import com.hhassistant.client.ollama.dto.ChatMessage
+import com.hhassistant.config.PromptConfig
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.exception.OllamaException
@@ -18,6 +19,7 @@ class VacancyAnalysisService(
     private val resumeService: ResumeService,
     private val repository: VacancyAnalysisRepository,
     private val objectMapper: ObjectMapper,
+    private val promptConfig: PromptConfig,
     @Value("\${app.analysis.min-relevance-score:0.6}") private val minRelevanceScore: Double,
 ) {
     private val log = KotlinLogging.logger {}
@@ -100,26 +102,7 @@ class VacancyAnalysisService(
     }
 
     private fun buildSystemPrompt(): String {
-        return """
-            Ты - эксперт по подбору персонала. Твоя задача - проанализировать вакансию и резюме кандидата, 
-            определить релевантность вакансии для кандидата и предоставить структурированный ответ в формате JSON.
-            
-            Формат ответа:
-            {
-                "is_relevant": true/false,
-                "relevance_score": 0.0-1.0,
-                "reasoning": "Обоснование решения на русском языке",
-                "matched_skills": ["навык1", "навык2", ...]
-            }
-            
-            Критерии релевантности:
-            - Совпадение ключевых навыков (вес: 40%)
-            - Соответствие опыта работы требованиям (вес: 30%)
-            - Соответствие желаемой позиции (вес: 20%)
-            - Соответствие зарплатных ожиданий (вес: 10%)
-            
-            Отвечай ТОЛЬКО валидным JSON, без дополнительных комментариев.
-        """.trimIndent()
+        return promptConfig.analysisSystem
     }
 
     private fun buildAnalysisPrompt(
@@ -127,42 +110,33 @@ class VacancyAnalysisService(
         resume: com.hhassistant.domain.entity.Resume,
         resumeStructure: com.hhassistant.domain.model.ResumeStructure?,
     ): String {
-        val sb = StringBuilder()
-
-        sb.appendLine("ВАКАНСИЯ:")
-        sb.appendLine("Название: ${vacancy.name}")
-        sb.appendLine("Работодатель: ${vacancy.employer}")
-        sb.appendLine("Зарплата: ${vacancy.salary ?: "Не указана"}")
-        sb.appendLine("Регион: ${vacancy.area}")
-        sb.appendLine("Требуемый опыт: ${vacancy.experience ?: "Не указан"}")
-        sb.appendLine()
-        sb.appendLine("Описание вакансии:")
-        sb.appendLine(vacancy.description ?: "Описание отсутствует")
-        sb.appendLine()
-        sb.appendLine("---")
-        sb.appendLine()
-
-        sb.appendLine("РЕЗЮМЕ КАНДИДАТА:")
-        if (resumeStructure != null) {
-            sb.appendLine("Навыки: ${resumeStructure.skills.joinToString(", ")}")
-            resumeStructure.desiredPosition?.let {
-                sb.appendLine("Желаемая позиция: $it")
-            }
-            resumeStructure.desiredSalary?.let {
-                sb.appendLine("Желаемая зарплата: от $it руб")
-            }
-            resumeStructure.summary?.let {
-                sb.appendLine("О себе: $it")
+        // Формируем содержимое резюме
+        val resumeContent = if (resumeStructure != null) {
+            buildString {
+                appendLine("Навыки: ${resumeStructure.skills.joinToString(", ")}")
+                resumeStructure.desiredPosition?.let {
+                    appendLine("Желаемая позиция: $it")
+                }
+                resumeStructure.desiredSalary?.let {
+                    appendLine("Желаемая зарплата: от $it руб")
+                }
+                resumeStructure.summary?.let {
+                    appendLine("О себе: $it")
+                }
             }
         } else {
-            sb.appendLine("Полный текст резюме:")
-            sb.appendLine(resume.rawText)
+            "Полный текст резюме:\n${resume.rawText}"
         }
 
-        sb.appendLine()
-        sb.appendLine("Проанализируй релевантность вакансии для кандидата и верни JSON ответ.")
-
-        return sb.toString()
+        // Заменяем переменные в шаблоне
+        return promptConfig.analysisTemplate
+            .replace("{vacancyName}", vacancy.name)
+            .replace("{employer}", vacancy.employer)
+            .replace("{salary}", vacancy.salary ?: "Не указана")
+            .replace("{area}", vacancy.area)
+            .replace("{experience}", vacancy.experience ?: "Не указан")
+            .replace("{description}", vacancy.description ?: "Описание отсутствует")
+            .replace("{resumeContent}", resumeContent)
     }
 
     private fun parseAnalysisResponse(response: String, vacancyId: String): AnalysisResult {
@@ -213,19 +187,7 @@ class VacancyAnalysisService(
                 listOf(
                     ChatMessage(
                         role = "system",
-                        content = """
-                            Ты - эксперт по написанию сопроводительных писем. Напиши профессиональное, 
-                            краткое (до 200 слов) сопроводительное письмо на русском языке для отклика на вакансию.
-                            
-                            Письмо должно:
-                            - Быть персонализированным под конкретную вакансию
-                            - Подчеркивать релевантный опыт и навыки
-                            - Быть профессиональным, но не шаблонным
-                            - Показывать заинтересованность в позиции
-                            
-                            Начни с обращения к работодателю, затем кратко представься и объясни, 
-                            почему ты подходишь для этой позиции.
-                        """.trimIndent(),
+                        content = promptConfig.coverLetterSystem,
                     ),
                     ChatMessage(
                         role = "user",
@@ -248,22 +210,19 @@ class VacancyAnalysisService(
         resumeStructure: com.hhassistant.domain.model.ResumeStructure?,
         analysisResult: AnalysisResult,
     ): String {
-        val sb = StringBuilder()
-
-        sb.appendLine("Напиши сопроводительное письмо для следующей вакансии:")
-        sb.appendLine()
-        sb.appendLine("Вакансия: ${vacancy.name}")
-        sb.appendLine("Работодатель: ${vacancy.employer}")
-        sb.appendLine("Описание: ${vacancy.description?.take(500) ?: "Не указано"}")
-        sb.appendLine()
-        sb.appendLine("Релевантные навыки кандидата: ${analysisResult.matchedSkills.joinToString(", ")}")
-        if (resumeStructure != null) {
-            resumeStructure.summary?.let {
-                sb.appendLine("О кандидате: $it")
-            }
+        val summary = if (resumeStructure?.summary != null) {
+            "О кандидате: ${resumeStructure.summary}"
+        } else {
+            ""
         }
 
-        return sb.toString()
+        // Заменяем переменные в шаблоне
+        return promptConfig.coverLetterTemplate
+            .replace("{vacancyName}", vacancy.name)
+            .replace("{employer}", vacancy.employer)
+            .replace("{description}", vacancy.description?.take(500) ?: "Не указано")
+            .replace("{matchedSkills}", analysisResult.matchedSkills.joinToString(", "))
+            .replace("{summary}", summary)
     }
 
     /**
