@@ -1,6 +1,7 @@
 package com.hhassistant.config
 
 import com.hhassistant.client.ProxyManager
+import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
@@ -20,6 +21,7 @@ class WebClientConfig(
     @Value("\${hh.retry.max-backoff-seconds}") private val retryMaxBackoffSeconds: Long,
     @Value("\${hh.retry.rate-limit-status-code}") private val retryRateLimitStatusCode: Int,
 ) {
+    private val log = KotlinLogging.logger {}
 
     @Bean
     @Qualifier("hhWebClient")
@@ -101,7 +103,7 @@ class WebClientConfig(
             if (response.statusCode().isError) {
                 response.bodyToMono(String::class.java)
                     .doOnNext { body ->
-                        println("Error response: ${response.statusCode()} - $body")
+                        log.error { "Error response: ${response.statusCode()} - $body" }
                     }
                     .then(Mono.just(response))
             } else {

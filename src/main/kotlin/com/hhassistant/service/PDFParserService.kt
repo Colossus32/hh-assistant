@@ -4,9 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.hhassistant.domain.model.Education
 import com.hhassistant.domain.model.Experience
 import com.hhassistant.domain.model.ResumeStructure
+import mu.KotlinLogging
 import org.apache.pdfbox.Loader
 import org.apache.pdfbox.text.PDFTextStripper
-import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.io.File
 import java.util.regex.Pattern
@@ -15,7 +15,7 @@ import java.util.regex.Pattern
 class PDFParserService(
     private val objectMapper: ObjectMapper,
 ) {
-    private val log = LoggerFactory.getLogger(javaClass)
+    private val log = KotlinLogging.logger {}
 
     fun extractText(pdfFile: File): String {
         require(pdfFile.exists()) { "PDF file does not exist: ${pdfFile.absolutePath}" }

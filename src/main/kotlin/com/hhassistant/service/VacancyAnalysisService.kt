@@ -8,7 +8,7 @@ import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.exception.OllamaException
 import com.hhassistant.repository.VacancyAnalysisRepository
-import org.slf4j.LoggerFactory
+import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 
@@ -20,7 +20,7 @@ class VacancyAnalysisService(
     private val objectMapper: ObjectMapper,
     @Value("\${app.analysis.min-relevance-score:0.6}") private val minRelevanceScore: Double,
 ) {
-    private val log = LoggerFactory.getLogger(javaClass)
+    private val log = KotlinLogging.logger {}
 
     /**
      * Анализирует вакансию на релевантность для кандидата с использованием LLM.

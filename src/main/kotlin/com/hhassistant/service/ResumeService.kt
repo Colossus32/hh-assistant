@@ -5,7 +5,7 @@ import com.hhassistant.client.hh.HHResumeClient
 import com.hhassistant.domain.entity.Resume
 import com.hhassistant.domain.entity.ResumeSource
 import com.hhassistant.repository.ResumeRepository
-import org.slf4j.LoggerFactory
+import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import java.io.File
@@ -18,7 +18,7 @@ class ResumeService(
     private val objectMapper: ObjectMapper,
     @Value("\${app.resume.path:./resumes/resume.pdf}") private val resumePath: String,
 ) {
-    private val log = LoggerFactory.getLogger(javaClass)
+    private val log = KotlinLogging.logger {}
 
     suspend fun loadResume(): Resume {
         // 1. Проверяем, есть ли активное резюме в БД
