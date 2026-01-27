@@ -1,0 +1,97 @@
+spring:
+  application:
+    name: hh-assistant
+  
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/hh_assistant}
+    username: ${SPRING_DATASOURCE_USERNAME:hh_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:hh_pass}
+    driver-class-name: org.postgresql.Driver
+  
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+    enabled: true
+  
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    default-property-inclusion: non_null
+
+app:
+  schedule:
+    vacancy-check: "0 */15 * * * *"  # Every 15 minutes
+  max-vacancies-per-cycle: 50
+  dry-run: false
+
+ollama:
+  base-url: ${OLLAMA_BASE_URL:http://localhost:11434}  # For local Ollama (default)
+  # For Docker: use http://host.docker.internal:11434
+  model: ${OLLAMA_MODEL:qwen2.5:7b}
+  temperature: 0.7
+  timeout-seconds: 120
+  max-in-memory-size-mb: 10
+
+telegram:
+  api:
+    base-url: https://api.telegram.org
+  bot-token: ${TELEGRAM_BOT_TOKEN:}
+  chat-id: ${TELEGRAM_CHAT_ID:}
+  enabled: ${TELEGRAM_ENABLED:true}
+  content-type: application/json
+
+hh:
+  api:
+    base-url: https://api.hh.ru
+    access-token: ${HH_ACCESS_TOKEN:}
+    user-agent: ${HH_USER_AGENT:HH-Assistant/1.0}
+    accept-header: application/json
+    auth-prefix: Bearer
+    search:
+      per-page: 50
+      default-page: 0
+  proxy:
+    enabled: ${PROXY_ENABLED:false}
+    host: ${PROXY_HOST:}
+    port: ${PROXY_PORT:8080}
+    type: ${PROXY_TYPE:HTTP}
+    timeout-seconds: 30
+  retry:
+    max-attempts: 3
+    initial-delay-seconds: 2
+    max-backoff-seconds: 10
+    rate-limit-status-code: 429
+  currency:
+    default: RUR
+  vacancy:
+    area-not-specified: "Не указан"
+
+logging:
+  level:
+    root: INFO
+    com.hhassistant: DEBUG
+    org.springframework.web: INFO
+    org.hibernate: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/hh-assistant.log
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+

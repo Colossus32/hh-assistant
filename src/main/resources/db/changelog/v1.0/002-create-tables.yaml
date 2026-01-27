@@ -1,0 +1,219 @@
+databaseChangeLog:
+  - changeSet:
+      id: create-vacancies-table
+      author: system
+      changes:
+        - createTable:
+            tableName: vacancies
+            columns:
+              - column:
+                  name: id
+                  type: varchar(50)
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: name
+                  type: varchar(500)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: employer
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: salary
+                  type: varchar(100)
+              - column:
+                  name: area
+                  type: varchar(255)
+              - column:
+                  name: url
+                  type: varchar(1000)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: description
+                  type: text
+              - column:
+                  name: experience
+                  type: varchar(100)
+              - column:
+                  name: published_at
+                  type: timestamp
+              - column:
+                  name: fetched_at
+                  type: timestamp
+                  constraints:
+                    nullable: false
+              - column:
+                  name: status
+                  type: varchar(20)
+                  constraints:
+                    nullable: false
+            indexes:
+              - index:
+                  name: idx_vacancies_status
+                  columns:
+                    - column:
+                        name: status
+              - index:
+                  name: idx_vacancies_fetched_at
+                  columns:
+                    - column:
+                        name: fetched_at
+
+  - changeSet:
+      id: create-vacancy-analyses-table
+      author: system
+      changes:
+        - createTable:
+            tableName: vacancy_analyses
+            columns:
+              - column:
+                  name: id
+                  type: bigint
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+                  autoIncrement: true
+              - column:
+                  name: vacancy_id
+                  type: varchar(50)
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_analysis_vacancy
+                    references: vacancies(id)
+              - column:
+                  name: analyzed_at
+                  type: timestamp
+                  constraints:
+                    nullable: false
+              - column:
+                  name: is_relevant
+                  type: boolean
+                  constraints:
+                    nullable: false
+              - column:
+                  name: relevance_score
+                  type: double precision
+                  constraints:
+                    nullable: false
+              - column:
+                  name: reasoning
+                  type: text
+                  constraints:
+                    nullable: false
+              - column:
+                  name: matched_skills
+                  type: text
+              - column:
+                  name: suggested_cover_letter
+                  type: text
+            indexes:
+              - index:
+                  name: idx_analyses_vacancy_id
+                  columns:
+                    - column:
+                        name: vacancy_id
+              - index:
+                  name: idx_analyses_relevant
+                  columns:
+                    - column:
+                        name: is_relevant
+
+  - changeSet:
+      id: create-resumes-table
+      author: system
+      changes:
+        - createTable:
+            tableName: resumes
+            columns:
+              - column:
+                  name: id
+                  type: bigint
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+                  autoIncrement: true
+              - column:
+                  name: file_name
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: raw_text
+                  type: text
+                  constraints:
+                    nullable: false
+              - column:
+                  name: structured_data
+                  type: text
+              - column:
+                  name: uploaded_at
+                  type: timestamp
+                  constraints:
+                    nullable: false
+              - column:
+                  name: source
+                  type: varchar(20)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: is_active
+                  type: boolean
+                  constraints:
+                    nullable: false
+                  defaultValueBoolean: true
+            indexes:
+              - index:
+                  name: idx_resumes_active
+                  columns:
+                    - column:
+                        name: is_active
+
+  - changeSet:
+      id: create-search-configs-table
+      author: system
+      changes:
+        - createTable:
+            tableName: search_configs
+            columns:
+              - column:
+                  name: id
+                  type: bigint
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+                  autoIncrement: true
+              - column:
+                  name: keywords
+                  type: varchar(500)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: min_salary
+                  type: integer
+              - column:
+                  name: max_salary
+                  type: integer
+              - column:
+                  name: area
+                  type: varchar(255)
+              - column:
+                  name: experience
+                  type: varchar(100)
+              - column:
+                  name: is_active
+                  type: boolean
+                  constraints:
+                    nullable: false
+                  defaultValueBoolean: true
+            indexes:
+              - index:
+                  name: idx_search_configs_active
+                  columns:
+                    - column:
+                        name: is_active
+

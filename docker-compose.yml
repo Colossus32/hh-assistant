@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hh-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: hh_assistant
+      POSTGRES_USER: hh_user
+      POSTGRES_PASSWORD: hh_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - hh-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hh_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Ollama runs locally (not in Docker)
+  # Install Ollama from https://ollama.ai/download
+  # Run: ollama serve (starts on http://localhost:11434)
+  # Pull model: ollama pull qwen2.5:7b
+
+  app:
+    build: .
+    container_name: hh-assistant
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hh_assistant
+      SPRING_DATASOURCE_USERNAME: hh_user
+      SPRING_DATASOURCE_PASSWORD: hh_pass
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      HH_ACCESS_TOKEN: ${HH_ACCESS_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      PROXY_ENABLED: ${PROXY_ENABLED:-false}
+      PROXY_HOST: ${PROXY_HOST:-}
+      PROXY_PORT: ${PROXY_PORT:-}
+    volumes:
+      - ./resumes:/app/resumes
+    networks:
+      - hh-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  hh-network:
+    driver: bridge
+

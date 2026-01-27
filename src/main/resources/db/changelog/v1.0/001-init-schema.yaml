@@ -1,0 +1,11 @@
+databaseChangeLog:
+  - changeSet:
+      id: init-schema
+      author: system
+      changes:
+        - sql:
+            sql: |
+              -- Schema initialization
+              -- This changelog ensures the database exists
+            endDelimiter: ;
+
