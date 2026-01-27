@@ -32,6 +32,7 @@ class VacancySchedulerServiceTest {
             vacancyAnalysisService = vacancyAnalysisService,
             telegramClient = telegramClient,
             dryRun = false,
+            maxConcurrentRequests = 3,
         )
     }
 
@@ -42,6 +43,7 @@ class VacancySchedulerServiceTest {
             vacancyAnalysisService = vacancyAnalysisService,
             telegramClient = telegramClient,
             dryRun = true,
+            maxConcurrentRequests = 3,
         )
 
         dryRunService.checkNewVacancies()

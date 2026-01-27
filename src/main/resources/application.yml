@@ -33,6 +33,7 @@ app:
   dry-run: false
   analysis:
     min-relevance-score: 0.6  # Minimum score to consider vacancy relevant
+    max-concurrent-requests: 3  # Maximum concurrent requests to LLM for analysis
 
 ollama:
   base-url: ${OLLAMA_BASE_URL:http://localhost:11434}  # For local Ollama (default)
