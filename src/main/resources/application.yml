@@ -101,4 +101,14 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+      show-components: always
+  health:
+    indicators:
+      enabled: true
+    ollama:
+      enabled: true
+    hhapi:
+      enabled: true
+    telegram:
+      enabled: true
 
