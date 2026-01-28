@@ -47,7 +47,8 @@ try {
     # Используем application/x-www-form-urlencoded
     $formData = @()
     foreach ($key in $body.Keys) {
-        $formData += "$key=$([System.Web.HttpUtility]::UrlEncode($body[$key]))"
+        $encodedValue = [System.Uri]::EscapeDataString($body[$key])
+        $formData += "$key=$encodedValue"
     }
     $bodyString = $formData -join "&"
 
