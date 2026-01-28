@@ -43,7 +43,7 @@ cd hh-helper
 3. Создайте `.env` файл:
 ```bash
 # Windows PowerShell
-Copy-Item .env.example .env
+Copy-Item .env .env
 # Отредактируйте .env и заполните токены
 ```
 

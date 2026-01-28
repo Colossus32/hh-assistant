@@ -30,7 +30,7 @@ app:
   schedule:
     vacancy-check: "0 */15 * * * *"  # Every 15 minutes
   max-vacancies-per-cycle: 50
-  dry-run: false
+  dry-run: true
   analysis:
     min-relevance-score: 0.6  # Minimum score to consider vacancy relevant
     max-concurrent-requests: 3  # Maximum concurrent requests to LLM for analysis
