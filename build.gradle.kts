@@ -53,6 +53,9 @@ dependencies {
     // Rate Limiting
     implementation("com.bucket4j:bucket4j-core:8.10.1")
 
+    // Environment variables (.env file support)
+    implementation("io.github.cdimascio:dotenv-java:3.0.0")
+
     // Testing
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test")
