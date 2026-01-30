@@ -44,7 +44,11 @@ class WebClientConfig(
 
         // Добавляем Authorization header только если токен указан
         if (accessToken.isNotBlank()) {
-            builder.defaultHeader(HttpHeaders.AUTHORIZATION, "$authPrefix $accessToken")
+            val authHeader = "$authPrefix $accessToken"
+            builder.defaultHeader(HttpHeaders.AUTHORIZATION, authHeader)
+            log.debug("✅ [WebClient] HH.ru WebClient configured with Authorization header (token length: ${accessToken.length}, prefix: $authPrefix)")
+        } else {
+            log.warn("⚠️ [WebClient] HH.ru WebClient configured WITHOUT Authorization header (accessToken is blank)")
         }
 
         return builder.build()

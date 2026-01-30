@@ -21,8 +21,11 @@ class TokenRefreshService(
     /**
      * Проверяет и обновляет токен, если он истек или скоро истечет
      * Запускается каждые 12 часов (токен обычно живет 14 дней)
+     * 
+     * Примечание: Не обновляет токен при старте, так как токен может быть еще валидным.
+     * Обновление происходит только при ошибках 401/403 или по расписанию.
      */
-    @Scheduled(fixedRate = 12 * 60 * 60 * 1000) // 12 hours
+    @Scheduled(fixedRate = 12 * 60 * 60 * 1000, initialDelay = 12 * 60 * 60 * 1000) // 12 hours, delay first run
     fun checkAndRefreshToken() {
         val refreshToken = envFileService.readEnvVariable("HH_REFRESH_TOKEN")
         if (refreshToken.isNullOrBlank()) {
