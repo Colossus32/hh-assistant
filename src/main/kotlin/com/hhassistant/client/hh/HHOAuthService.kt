@@ -105,18 +105,54 @@ class HHOAuthService(
             log.info { "Successfully refreshed access token (expires in: ${response.expiresIn}s)" }
             response
         } catch (e: WebClientResponseException) {
-            log.error("Failed to refresh token: ${e.statusCode} - ${e.responseBodyAsString}", e)
+            val responseBody = e.responseBodyAsString
+            log.error("Failed to refresh token: ${e.statusCode} - $responseBody", e)
+            
+            // Парсим error_description из ответа для более точной обработки
+            val errorDescription = extractErrorDescription(responseBody)
+            
             throw when (e.statusCode.value()) {
-                400 -> HHAPIException.APIException(
-                    "Invalid refresh token or request parameters: ${e.responseBodyAsString}",
-                    e,
-                )
+                400 -> {
+                    // Специальная обработка для разных типов ошибок 400
+                    when {
+                        errorDescription.contains("token not expired", ignoreCase = true) -> {
+                            // Токен еще валиден - это не ошибка, но мы не можем обновить неистекший токен
+                            log.info("ℹ️ [OAuth] Token is still valid (not expired), no need to refresh")
+                            HHAPIException.APIException(
+                                "Token is still valid and not expired. No refresh needed.",
+                                e,
+                            )
+                        }
+                        errorDescription.contains("token is empty", ignoreCase = true) -> {
+                            HHAPIException.APIException(
+                                "Refresh token is empty. Please provide a valid refresh token.",
+                                e,
+                            )
+                        }
+                        errorDescription.contains("token not found", ignoreCase = true) -> {
+                            HHAPIException.UnauthorizedException(
+                                "Refresh token not found or invalid. Please obtain a new token via OAuth flow.",
+                                e,
+                            )
+                        }
+                        errorDescription.contains("invalid_grant", ignoreCase = true) -> {
+                            HHAPIException.UnauthorizedException(
+                                "Invalid grant (refresh token): $errorDescription",
+                                e,
+                            )
+                        }
+                        else -> HHAPIException.APIException(
+                            "Invalid refresh token or request parameters: $responseBody",
+                            e,
+                        )
+                    }
+                }
                 401 -> HHAPIException.UnauthorizedException(
-                    "Invalid client credentials or refresh token expired: ${e.responseBodyAsString}",
+                    "Invalid client credentials or refresh token expired: $responseBody",
                     e,
                 )
                 else -> HHAPIException.APIException(
-                    "Failed to refresh access token: ${e.statusCode} - ${e.responseBodyAsString}",
+                    "Failed to refresh access token: ${e.statusCode} - $responseBody",
                     e,
                 )
             }
@@ -190,6 +226,19 @@ class HHOAuthService(
         } catch (e: Exception) {
             log.error("Unexpected error getting application token: ${e.message}", e)
             throw HHAPIException.ConnectionException("Failed to connect to HH.ru API: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Извлекает error_description из JSON ответа об ошибке
+     */
+    private fun extractErrorDescription(responseBody: String): String {
+        return try {
+            // Пытаемся найти error_description в JSON
+            val errorDescMatch = Regex("\"error_description\"\\s*:\\s*\"([^\"]+)\"").find(responseBody)
+            errorDescMatch?.groupValues?.get(1) ?: ""
+        } catch (e: Exception) {
+            ""
         }
     }
 

@@ -62,6 +62,16 @@ class TokenRefreshService(
                 } else {
                     log.warn("⚠️ [TokenRefresh] Token refreshed but failed to save to .env file")
                 }
+            } catch (e: HHAPIException.APIException) {
+                // Проверяем, не является ли это случаем "token not expired"
+                if (e.message?.contains("Token is still valid", ignoreCase = true) == true ||
+                    e.message?.contains("not expired", ignoreCase = true) == true
+                ) {
+                    log.info("ℹ️ [TokenRefresh] Token is still valid, no refresh needed: ${e.message}")
+                    // Это не ошибка - токен еще валиден
+                } else {
+                    log.error("❌ [TokenRefresh] Failed to refresh token: ${e.message}", e)
+                }
             } catch (e: HHAPIException.UnauthorizedException) {
                 log.error("❌ [TokenRefresh] Refresh token expired or invalid: ${e.message}", e)
                 log.error("❌ [TokenRefresh] Please obtain a new token via OAuth flow")
@@ -106,6 +116,18 @@ class TokenRefreshService(
                     true
                 } else {
                     log.warn("⚠️ [TokenRefresh] Token refreshed but failed to save to .env file")
+                    false
+                }
+            } catch (e: HHAPIException.APIException) {
+                // Проверяем, не является ли это случаем "token not expired"
+                if (e.message?.contains("Token is still valid", ignoreCase = true) == true ||
+                    e.message?.contains("not expired", ignoreCase = true) == true
+                ) {
+                    log.info("ℹ️ [TokenRefresh] Token is still valid, no refresh needed: ${e.message}")
+                    // Токен валиден, возвращаем true (не ошибка)
+                    true
+                } else {
+                    log.error("❌ [TokenRefresh] Failed to refresh token: ${e.message}", e)
                     false
                 }
             } catch (e: Exception) {
