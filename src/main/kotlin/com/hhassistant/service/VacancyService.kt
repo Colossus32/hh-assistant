@@ -30,23 +30,27 @@ class VacancyService(
      * @return Список новых вакансий для анализа
      */
     suspend fun fetchAndSaveNewVacancies(): List<Vacancy> {
-        log.info("Starting to fetch new vacancies")
+        log.info("🚀 [VacancyService] Starting to fetch new vacancies from HH.ru API")
 
         val activeConfigs = searchConfigRepository.findByIsActiveTrue()
         if (activeConfigs.isEmpty()) {
-            log.warn("No active search configurations found")
+            log.warn("⚠️ [VacancyService] No active search configurations found in database")
             return emptyList()
         }
+
+        log.info("📊 [VacancyService] Found ${activeConfigs.size} active search configuration(s)")
 
         val allNewVacancies = mutableListOf<Vacancy>()
 
         for (config in activeConfigs) {
             try {
+                log.info("🔎 [VacancyService] Processing search config ID=${config.id}: '${config.keywords}'")
                 val vacancies = fetchVacanciesForConfig(config)
                 allNewVacancies.addAll(vacancies)
+                log.info("✅ [VacancyService] Config ID=${config.id}: found ${vacancies.size} new vacancies")
 
                 if (allNewVacancies.size >= maxVacanciesPerCycle) {
-                    log.info("Reached max vacancies limit ($maxVacanciesPerCycle), stopping fetch")
+                    log.info("⏸️ [VacancyService] Reached max vacancies limit ($maxVacanciesPerCycle), stopping fetch")
                     break
                 }
             } catch (e: HHAPIException.RateLimitException) {
@@ -63,7 +67,10 @@ class VacancyService(
         }
 
         val newVacancies = allNewVacancies.take(maxVacanciesPerCycle)
-        log.info("Fetched ${newVacancies.size} new vacancies")
+        log.info("✅ [VacancyService] Total fetched and saved: ${newVacancies.size} new vacancies")
+        if (newVacancies.isNotEmpty()) {
+            log.info("📝 [VacancyService] Sample vacancies: ${newVacancies.take(3).joinToString(", ") { "${it.name} (${it.id})" }}")
+        }
 
         return newVacancies
     }
@@ -99,19 +106,29 @@ class VacancyService(
     }
 
     private suspend fun fetchVacanciesForConfig(config: SearchConfig): List<Vacancy> {
-        log.debug("Fetching vacancies for config: ${config.keywords}")
+        log.info("🔍 [VacancyService] Fetching vacancies for config ID=${config.id}: '${config.keywords}'")
 
         val vacancyDtos = hhVacancyClient.searchVacancies(config)
+        log.info("📥 [VacancyService] Received ${vacancyDtos.size} vacancies from HH.ru API for config ID=${config.id}")
+
         val existingIds = vacancyRepository.findAllIds().toSet()
+        log.debug("💾 [VacancyService] Checking against ${existingIds.size} existing vacancies in database")
 
         val newVacancies = vacancyDtos
             .filter { !existingIds.contains(it.id) }
             .map { it.toEntity(formattingConfig) }
             .take(maxVacanciesPerCycle)
 
+        log.info("🆕 [VacancyService] Found ${newVacancies.size} new vacancies (${vacancyDtos.size - newVacancies.size} already exist)")
+
         if (newVacancies.isNotEmpty()) {
             vacancyRepository.saveAll(newVacancies)
-            log.info("Saved ${newVacancies.size} new vacancies for config ${config.id}")
+            log.info("💾 [VacancyService] ✅ Saved ${newVacancies.size} new vacancies to database for config ID=${config.id}")
+            newVacancies.forEach { vacancy ->
+                log.debug("   - Saved: ${vacancy.name} (ID: ${vacancy.id}, Employer: ${vacancy.employer}, Salary: ${vacancy.salary})")
+            }
+        } else {
+            log.info("ℹ️ [VacancyService] No new vacancies to save for config ID=${config.id}")
         }
 
         return newVacancies

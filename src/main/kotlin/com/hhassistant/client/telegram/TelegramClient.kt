@@ -31,14 +31,16 @@ class TelegramClient(
      */
     suspend fun sendMessage(text: String): Boolean {
         if (!enabled) {
-            log.debug("Telegram notifications are disabled, skipping message")
+            log.debug("📱 [Telegram] Notifications are disabled, skipping message")
             return false
         }
 
         if (botToken.isBlank() || chatId.isBlank()) {
-            log.warn("Telegram bot token or chat ID is not configured, skipping message")
+            log.warn("⚠️ [Telegram] Bot token or chat ID is not configured, skipping message")
             return false
         }
+
+        log.info("📱 [Telegram] Sending message to chat ID: $chatId (message length: ${text.length} chars)")
 
         return try {
             val request = SendMessageRequest(
@@ -48,15 +50,17 @@ class TelegramClient(
                 disableWebPagePreview = false,
             )
 
+            val sendStartTime = System.currentTimeMillis()
             val response = webClient.post()
                 .uri("/bot$botToken/sendMessage")
                 .bodyValue(request)
                 .retrieve()
                 .bodyToMono<SendMessageResponse>()
                 .awaitSingle()
+            val sendDuration = System.currentTimeMillis() - sendStartTime
 
             if (response.ok) {
-                log.debug("Message sent successfully to Telegram chat $chatId")
+                log.info("✅ [Telegram] Message sent successfully to chat $chatId (took ${sendDuration}ms, message_id: ${response.result?.messageId ?: "N/A"})")
                 true
             } else {
                 val errorMessage = "Failed to send message to Telegram: ${response.description} (code: ${response.errorCode})"

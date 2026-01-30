@@ -38,16 +38,20 @@ class VacancyAnalysisService(
             return it
         }
 
-        log.info("Analyzing vacancy: ${vacancy.id} - ${vacancy.name}")
+        log.info("🤖 [Ollama] Starting analysis for vacancy: ${vacancy.id} - '${vacancy.name}' (${vacancy.employer})")
 
         // Загружаем резюме
         val resume = resumeService.loadResume()
         val resumeStructure = resumeService.getResumeStructure(resume)
+        log.debug("📄 [Ollama] Loaded resume for analysis (skills: ${resumeStructure?.skills?.size ?: 0})")
 
         // Формируем промпт для анализа
         val analysisPrompt = buildAnalysisPrompt(vacancy, resume, resumeStructure)
+        log.debug("📝 [Ollama] Analysis prompt prepared (length: ${analysisPrompt.length} chars)")
 
         // Анализируем через LLM
+        log.info("🔄 [Ollama] Sending analysis request to Ollama...")
+        val analysisStartTime = System.currentTimeMillis()
         val analysisResponse = try {
             ollamaClient.chat(
                 listOf(
@@ -62,29 +66,38 @@ class VacancyAnalysisService(
                 ),
             )
         } catch (e: Exception) {
-            log.error("Failed to analyze vacancy ${vacancy.id} via Ollama: ${e.message}", e)
+            log.error("❌ [Ollama] Failed to analyze vacancy ${vacancy.id} via Ollama: ${e.message}", e)
             throw OllamaException.ConnectionException(
                 "Failed to connect to Ollama service for vacancy analysis: ${e.message}",
                 e,
             )
         }
+        val analysisDuration = System.currentTimeMillis() - analysisStartTime
+        log.info("✅ [Ollama] Received analysis response from Ollama (took ${analysisDuration}ms, response length: ${analysisResponse.length} chars)")
 
         // Парсим ответ
         val analysisResult = parseAnalysisResponse(analysisResponse, vacancy.id)
+        log.debug("📊 [Ollama] Parsed analysis result: isRelevant=${analysisResult.isRelevant}, score=${analysisResult.relevanceScore}")
 
         // Валидируем результат анализа
         val validatedResult = validateAnalysisResult(analysisResult)
 
+        log.info("📊 [Ollama] Analysis result for '${vacancy.name}': isRelevant=${validatedResult.isRelevant}, relevanceScore=${String.format("%.2f", validatedResult.relevanceScore * 100)}%, matchedSkills=${validatedResult.matchedSkills.size}")
+
         // Генерируем сопроводительное письмо для релевантных вакансий
         val coverLetter = if (validatedResult.isRelevant && validatedResult.relevanceScore >= minRelevanceScore) {
             try {
-                generateCoverLetter(vacancy, resume, resumeStructure, validatedResult)
+                log.info("✍️ [Ollama] Generating cover letter for relevant vacancy ${vacancy.id}...")
+                val coverLetterResult = generateCoverLetter(vacancy, resume, resumeStructure, validatedResult)
+                log.info("✅ [Ollama] Cover letter generated (length: ${coverLetterResult.length} chars)")
+                coverLetterResult
             } catch (e: Exception) {
-                log.warn("Failed to generate cover letter for vacancy ${vacancy.id}: ${e.message}", e)
+                log.warn("⚠️ [Ollama] Failed to generate cover letter for vacancy ${vacancy.id}: ${e.message}", e)
                 // Не прерываем процесс, просто не генерируем письмо
                 null
             }
         } else {
+            log.debug("ℹ️ [Ollama] Skipping cover letter generation (not relevant or score too low)")
             null
         }
 
@@ -98,7 +111,10 @@ class VacancyAnalysisService(
             suggestedCoverLetter = coverLetter,
         )
 
-        return repository.save(analysis)
+        val savedAnalysis = repository.save(analysis)
+        log.info("💾 [Ollama] ✅ Saved analysis to database for vacancy ${vacancy.id} (isRelevant=${savedAnalysis.isRelevant}, score=${String.format("%.2f", savedAnalysis.relevanceScore * 100)}%)")
+
+        return savedAnalysis
     }
 
     private fun buildSystemPrompt(): String {

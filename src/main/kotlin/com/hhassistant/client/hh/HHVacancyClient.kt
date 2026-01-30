@@ -28,6 +28,8 @@ class HHVacancyClient(
         // Проверяем rate limit перед запросом
         rateLimitService.tryConsume()
 
+        log.info("🔍 [HH.ru API] Searching vacancies with config: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}, experience=${config.experience}")
+
         return try {
             val response = webClient.get()
                 .uri { builder ->
@@ -46,6 +48,11 @@ class HHVacancyClient(
                 .bodyToMono<VacancySearchResponse>()
                 .awaitSingle()
 
+            log.info("✅ [HH.ru API] Received ${response.items.size} vacancies (found: ${response.found}, pages: ${response.pages})")
+            if (response.items.isNotEmpty()) {
+                log.debug("📋 [HH.ru API] First vacancy: ${response.items.first().name} (ID: ${response.items.first().id})")
+            }
+
             response.items
         } catch (e: WebClientResponseException) {
             log.error("Error searching vacancies in HH.ru API: ${e.message}", e)
@@ -60,12 +67,18 @@ class HHVacancyClient(
         // Проверяем rate limit перед запросом
         rateLimitService.tryConsume()
 
+        log.info("🔍 [HH.ru API] Fetching vacancy details for ID: $id")
+
         return try {
-            webClient.get()
+            val vacancy = webClient.get()
                 .uri("/vacancies/$id")
                 .retrieve()
                 .bodyToMono<VacancyDto>()
                 .awaitSingle()
+
+            log.info("✅ [HH.ru API] Fetched vacancy: ${vacancy.name} (ID: $id)")
+
+            vacancy
         } catch (e: WebClientResponseException) {
             log.error("Error getting vacancy details from HH.ru API: ${e.message}", e)
             throw mapToHHAPIException(e, "Failed to get vacancy details for id: $id")

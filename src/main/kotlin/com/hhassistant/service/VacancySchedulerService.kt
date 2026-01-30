@@ -36,23 +36,34 @@ class VacancySchedulerService(
     @Scheduled(cron = "\${app.schedule.vacancy-check:0 */15 * * * *}")
     fun checkNewVacancies() {
         if (dryRun) {
-            log.info("Dry-run mode enabled, skipping vacancy check")
+            log.info("ℹ️ [Scheduler] Dry-run mode enabled, skipping vacancy check")
             return
         }
 
-        log.info("Starting scheduled vacancy check")
+        val cycleStartTime = System.currentTimeMillis()
+        log.info("🚀 [Scheduler] ========================================")
+        log.info("🚀 [Scheduler] Starting scheduled vacancy check cycle")
+        log.info("🚀 [Scheduler] ========================================")
 
         runBlocking {
             try {
                 // 1. Загружаем новые вакансии из HH.ru
+                log.info("📥 [Scheduler] Step 1: Fetching new vacancies from HH.ru API...")
                 val newVacancies = vacancyService.fetchAndSaveNewVacancies()
-                log.info("Fetched ${newVacancies.size} new vacancies from HH.ru")
+                log.info("✅ [Scheduler] Step 1 completed: Fetched ${newVacancies.size} new vacancies from HH.ru")
 
                 // 2. Получаем все новые вакансии для анализа (включая ранее загруженные)
+                log.info("🔍 [Scheduler] Step 2: Getting vacancies for analysis...")
                 val vacanciesToAnalyze = vacancyService.getNewVacanciesForAnalysis()
-                log.info("Found ${vacanciesToAnalyze.size} vacancies to analyze")
+                log.info("✅ [Scheduler] Step 2 completed: Found ${vacanciesToAnalyze.size} vacancies to analyze")
+
+                if (vacanciesToAnalyze.isEmpty()) {
+                    log.info("ℹ️ [Scheduler] No vacancies to analyze, cycle completed")
+                    return@runBlocking
+                }
 
                 // 3. Анализируем вакансии параллельно с ограничением количества одновременных запросов
+                log.info("🤖 [Scheduler] Step 3: Analyzing ${vacanciesToAnalyze.size} vacancies via Ollama (max concurrent: $maxConcurrentRequests)...")
                 val analysisResults = coroutineScope {
                     vacanciesToAnalyze.map { vacancy ->
                         async {
@@ -63,11 +74,18 @@ class VacancySchedulerService(
 
                 val analyzedCount = analysisResults.count { it != null }
                 val relevantCount = analysisResults.count { it?.isRelevant == true }
+                val sentToTelegramCount = analysisResults.count { it?.isRelevant == true }
 
-                log.info(
-                    "Vacancy check completed: analyzed $analyzedCount, " +
-                        "relevant $relevantCount, sent to Telegram $relevantCount",
-                )
+                val cycleDuration = System.currentTimeMillis() - cycleStartTime
+                log.info("✅ [Scheduler] Step 3 completed: Analyzed $analyzedCount vacancies")
+                log.info("📊 [Scheduler] ========================================")
+                log.info("📊 [Scheduler] Cycle Summary:")
+                log.info("📊 [Scheduler]   - New vacancies fetched: ${newVacancies.size}")
+                log.info("📊 [Scheduler]   - Vacancies analyzed: $analyzedCount")
+                log.info("📊 [Scheduler]   - Relevant vacancies: $relevantCount")
+                log.info("📊 [Scheduler]   - Sent to Telegram: $sentToTelegramCount")
+                log.info("📊 [Scheduler]   - Total cycle time: ${cycleDuration}ms")
+                log.info("📊 [Scheduler] ========================================")
             } catch (e: Exception) {
                 log.error("Error during scheduled vacancy check: ${e.message}", e)
             }
@@ -82,29 +100,33 @@ class VacancySchedulerService(
      * @return Результат анализа или null, если обработка не удалась
      */
     private suspend fun processVacancy(vacancy: Vacancy): VacancyAnalysis? {
+        log.debug("🔄 [Scheduler] Processing vacancy: ${vacancy.id} - '${vacancy.name}'")
         return try {
             // Используем semaphore для ограничения параллельных запросов к LLM
             analysisSemaphore.withPermit {
                 val analysis = vacancyAnalysisService.analyzeVacancy(vacancy)
 
                 // Обновляем статус вакансии
-                vacancyService.updateVacancyStatus(
-                    vacancy,
-                    if (analysis.isRelevant) VacancyStatus.ANALYZED else VacancyStatus.SKIPPED,
-                )
+                val newStatus = if (analysis.isRelevant) VacancyStatus.ANALYZED else VacancyStatus.SKIPPED
+                vacancyService.updateVacancyStatus(vacancy, newStatus)
+                log.debug("📝 [Scheduler] Updated vacancy ${vacancy.id} status to: $newStatus")
 
                 // Отправляем релевантные вакансии в Telegram
                 if (analysis.isRelevant) {
+                    log.info("📱 [Scheduler] Vacancy ${vacancy.id} is relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%), sending to Telegram...")
                     try {
                         sendVacancyToTelegram(vacancy, analysis)
                         vacancyService.updateVacancyStatus(vacancy, VacancyStatus.SENT_TO_USER)
+                        log.info("✅ [Scheduler] Successfully sent vacancy ${vacancy.id} to Telegram and updated status to SENT_TO_USER")
                     } catch (e: TelegramException.RateLimitException) {
-                        log.warn("Rate limit exceeded for Telegram, skipping vacancy ${vacancy.id}")
+                        log.warn("⚠️ [Scheduler] Rate limit exceeded for Telegram, skipping vacancy ${vacancy.id} (will retry next cycle)")
                         // Не обновляем статус, попробуем отправить в следующий раз
                     } catch (e: TelegramException) {
-                        log.error("Telegram error for vacancy ${vacancy.id}: ${e.message}", e)
+                        log.error("❌ [Scheduler] Telegram error for vacancy ${vacancy.id}: ${e.message}", e)
                         // Вакансия уже проанализирована, но не отправлена
                     }
+                } else {
+                    log.debug("ℹ️ [Scheduler] Vacancy ${vacancy.id} is not relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%), skipping Telegram")
                 }
 
                 analysis
@@ -131,17 +153,19 @@ class VacancySchedulerService(
         vacancy: Vacancy,
         analysis: VacancyAnalysis,
     ) {
+        log.info("📱 [Scheduler] Preparing Telegram message for vacancy: ${vacancy.id} - '${vacancy.name}'")
         val message = buildTelegramMessage(vacancy, analysis)
+        log.debug("📱 [Scheduler] Telegram message prepared (length: ${message.length} chars)")
 
         try {
             val sent = telegramClient.sendMessage(message)
             if (sent) {
-                log.info("Sent vacancy ${vacancy.id} to Telegram")
+                log.info("✅ [Scheduler] Successfully sent vacancy ${vacancy.id} ('${vacancy.name}') to Telegram")
             } else {
-                log.warn("Failed to send vacancy ${vacancy.id} to Telegram (returned false)")
+                log.warn("⚠️ [Scheduler] Failed to send vacancy ${vacancy.id} to Telegram (returned false)")
             }
         } catch (e: TelegramException) {
-            log.error("Telegram exception sending vacancy ${vacancy.id}: ${e.message}", e)
+            log.error("❌ [Scheduler] Telegram exception sending vacancy ${vacancy.id}: ${e.message}", e)
             throw e // Пробрасываем для обработки в вызывающем коде
         }
     }
