@@ -24,9 +24,17 @@ class TokenRefreshService(
      * 
      * Примечание: Не обновляет токен при старте, так как токен может быть еще валидным.
      * Обновление происходит только при ошибках 401/403 или по расписанию.
+     * Application tokens не обновляются (они имеют неограниченный срок жизни).
      */
     @Scheduled(fixedRate = 12 * 60 * 60 * 1000, initialDelay = 12 * 60 * 60 * 1000) // 12 hours, delay first run
     fun checkAndRefreshToken() {
+        // Проверяем тип токена - application tokens не обновляются
+        val tokenType = envFileService.readEnvVariable("HH_TOKEN_TYPE") ?: "user"
+        if (tokenType == "application") {
+            log.debug("ℹ️ [TokenRefresh] Application token detected, skipping refresh (application tokens have unlimited lifetime)")
+            return
+        }
+        
         val refreshToken = envFileService.readEnvVariable("HH_REFRESH_TOKEN")
         if (refreshToken.isNullOrBlank()) {
             log.debug("ℹ️ [TokenRefresh] No refresh token found, skipping automatic refresh")
@@ -64,8 +72,17 @@ class TokenRefreshService(
 
     /**
      * Вручную обновляет токен (можно вызвать через API или при ошибке 401/403)
+     * Не работает для application tokens (они имеют неограниченный срок жизни)
      */
     fun refreshTokenManually(): Boolean {
+        // Проверяем тип токена - application tokens не обновляются
+        val tokenType = envFileService.readEnvVariable("HH_TOKEN_TYPE") ?: "user"
+        if (tokenType == "application") {
+            log.info("ℹ️ [TokenRefresh] Application token detected, cannot refresh (application tokens have unlimited lifetime)")
+            log.info("ℹ️ [TokenRefresh] If you get 403, the token may be invalid or the application may lack permissions")
+            return false
+        }
+        
         val refreshToken = envFileService.readEnvVariable("HH_REFRESH_TOKEN")
         if (refreshToken.isNullOrBlank()) {
             log.warn("⚠️ [TokenRefresh] No refresh token found for manual refresh")

@@ -49,12 +49,14 @@ class WebClientConfig(
             builder.defaultHeader(HttpHeaders.AUTHORIZATION, authHeader)
             log.info("✅ [WebClient] HH.ru WebClient configured with Authorization header")
             log.info("   Token length: ${accessToken.length} chars")
-            log.info("   Token prefix: ${accessToken.take(10)}...")
+            log.info("   Token prefix: ${accessToken.take(15)}...")
+            log.info("   Token type: ${if (accessToken.startsWith("APP")) "Application token" else if (accessToken.startsWith("USER")) "User token" else "Unknown"}")
             log.info("   Auth prefix: $authPrefix")
-            log.info("   Full header format: $authPrefix ${accessToken.take(10)}...")
+            log.info("   Full header will be: $authPrefix ${accessToken.take(15)}...")
         } else {
             log.error("❌ [WebClient] HH.ru WebClient configured WITHOUT Authorization header (accessToken is blank)")
             log.error("   This will cause 403 Forbidden errors!")
+            log.error("   Please set HH_ACCESS_TOKEN in .env file or get token via /oauth/application-token")
         }
 
         return builder.build()
