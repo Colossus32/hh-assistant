@@ -5,7 +5,6 @@ import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.exception.OllamaException
-import com.hhassistant.exception.TelegramException
 import com.hhassistant.exception.VacancyProcessingException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -39,8 +38,10 @@ class VacancySchedulerService(
      */
     @EventListener(ApplicationReadyEvent::class)
     fun onApplicationReady() {
+        // Проверяем наличие резюме
+        checkResumeAndNotify()
         log.info("🚀 [Scheduler] Application ready, preloading resume and sending startup notification...")
-        
+
         // Предзагружаем резюме в память при старте
         runBlocking {
             try {
@@ -50,10 +51,10 @@ class VacancySchedulerService(
                 // Не прерываем старт приложения, если резюме не загрузилось
             }
         }
-        
+
         // Отправляем уведомление о старте
         notificationService.sendStartupNotification()
-        
+
         // Запускаем первую проверку сразу
         if (!dryRun) {
             log.info("🚀 [Scheduler] Running initial vacancy check on startup...")
@@ -82,7 +83,7 @@ class VacancySchedulerService(
                 // Получаем вакансии через VacancyFetchService (публикует VacancyFetchedEvent)
                 val fetchResult = vacancyFetchService.fetchAndSaveNewVacancies()
                 sendStatusUpdate(VacancyService.FetchResult(fetchResult.vacancies, fetchResult.searchKeywords))
-                
+
                 val vacanciesToAnalyze = getVacanciesForAnalysis()
                 if (vacanciesToAnalyze.isEmpty()) {
                     log.info("ℹ️ [Scheduler] No vacancies to analyze, cycle completed")
@@ -99,7 +100,7 @@ class VacancySchedulerService(
             }
         }
     }
-    
+
     /**
      * Загружает новые вакансии из HH.ru API
      */
@@ -109,7 +110,7 @@ class VacancySchedulerService(
         log.info("✅ [Scheduler] Step 1 completed: Fetched ${fetchResult.vacancies.size} new vacancies from HH.ru")
         return fetchResult
     }
-    
+
     /**
      * Отправляет обновление статуса в Telegram
      */
@@ -117,7 +118,7 @@ class VacancySchedulerService(
         val hhApiStatus = buildStatusMessage(fetchResult)
         notificationService.sendStatusUpdate(hhApiStatus, fetchResult.searchKeywords, fetchResult.vacancies.size)
     }
-    
+
     /**
      * Формирует сообщение о статусе HH.ru API
      */
@@ -128,7 +129,7 @@ class VacancySchedulerService(
             else -> "⚠️ Проверка выполнена, но вакансии не найдены"
         }
     }
-    
+
     /**
      * Получает вакансии для анализа
      */
@@ -138,7 +139,7 @@ class VacancySchedulerService(
         log.info("✅ [Scheduler] Step 2 completed: Found ${vacanciesToAnalyze.size} vacancies to analyze")
         return vacanciesToAnalyze
     }
-    
+
     /**
      * Анализирует вакансии параллельно
      */
@@ -154,7 +155,7 @@ class VacancySchedulerService(
         log.info("✅ [Scheduler] Step 3 completed: Analyzed ${analysisResults.count { it != null }} vacancies")
         return analysisResults
     }
-    
+
     /**
      * Логирует начало цикла проверки
      */
@@ -163,7 +164,7 @@ class VacancySchedulerService(
         log.info("🚀 [Scheduler] Starting scheduled vacancy check cycle")
         log.info("🚀 [Scheduler] ========================================")
     }
-    
+
     /**
      * Логирует итоги цикла проверки
      */
@@ -176,7 +177,7 @@ class VacancySchedulerService(
         val relevantCount = analysisResults.count { it?.isRelevant == true }
         val sentToTelegramCount = analysisResults.count { it?.isRelevant == true }
         val cycleDuration = System.currentTimeMillis() - cycleStartTime
-        
+
         log.info("📊 [Scheduler] ========================================")
         log.info("📊 [Scheduler] Cycle Summary:")
         log.info("📊 [Scheduler]   - New vacancies fetched: $newVacanciesCount")
@@ -186,7 +187,7 @@ class VacancySchedulerService(
         log.info("📊 [Scheduler]   - Total cycle time: ${cycleDuration}ms")
         log.info("📊 [Scheduler] ========================================")
     }
-    
+
     /**
      * Обрабатывает ошибку UnauthorizedException
      */
@@ -194,15 +195,15 @@ class VacancySchedulerService(
         log.error("❌ [Scheduler] HH.ru API unauthorized/forbidden error: ${e.message}", e)
         notificationService.sendTokenExpiredAlert(
             e.message ?: "Unauthorized or Forbidden access to HH.ru API. " +
-                "Token may be invalid, expired, or lacks required permissions."
+                "Token may be invalid, expired, or lacks required permissions.",
         )
         notificationService.sendStatusUpdate(
             "❌ ERROR: Token invalid or insufficient permissions",
             emptyList(),
-            0
+            0,
         )
     }
-    
+
     /**
      * Обрабатывает общие ошибки
      */
@@ -211,7 +212,7 @@ class VacancySchedulerService(
         notificationService.sendStatusUpdate(
             "❌ ERROR: ${e.message?.take(AppConstants.TextLimits.ERROR_MESSAGE_MAX_LENGTH) ?: "Unknown error"}",
             emptyList(),
-            0
+            0,
         )
     }
 
@@ -265,4 +266,35 @@ class VacancySchedulerService(
         }
     }
 
+    /**
+     * Проверяет наличие резюме и отправляет уведомление, если его нет
+     */
+    private fun checkResumeAndNotify() {
+        runBlocking {
+            try {
+                val hasResume = resumeService.hasActiveResume()
+                if (!hasResume) {
+                    log.warn("⚠️ [Scheduler] No active resume found. Sending notification to user.")
+                    notificationService.sendMessage(
+                        """
+                        ⚠️ <b>Резюме не найдено!</b>
+                        
+                        Для начала работы с HH Assistant необходимо загрузить резюме.
+                        
+                        <b>Как загрузить резюме:</b>
+                        1. Отправьте PDF файл с резюме в этот чат
+                        2. Дождитесь подтверждения обработки
+                        3. После этого вы начнете получать подходящие вакансии
+                        
+                        <i>Примечание: Резюме должно быть в формате PDF</i>
+                        """.trimIndent(),
+                    )
+                } else {
+                    log.info("✅ [Scheduler] Active resume found, no notification needed")
+                }
+            } catch (e: Exception) {
+                log.error("❌ [Scheduler] Error checking resume: ${e.message}", e)
+            }
+        }
+    }
 }

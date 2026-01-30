@@ -1,8 +1,8 @@
 package com.hhassistant.service
 
 import com.hhassistant.client.hh.HHVacancyClient
-import com.hhassistant.config.VacancyServiceConfig
 import com.hhassistant.client.hh.dto.toEntity
+import com.hhassistant.config.VacancyServiceConfig
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.event.VacancyFetchedEvent
@@ -31,11 +31,12 @@ class VacancyFetchService(
     private val searchConfig: VacancyServiceConfig,
     private val formattingConfig: com.hhassistant.config.FormattingConfig,
     private val eventPublisher: ApplicationEventPublisher,
+    private val metricsService: com.hhassistant.metrics.MetricsService,
     @Value("\${app.max-vacancies-per-cycle:50}") private val maxVacanciesPerCycle: Int,
     @Qualifier("vacancyIdsCache") private val vacancyIdsCache: com.github.benmanes.caffeine.cache.Cache<String, Set<String>>,
 ) {
     private val log = KotlinLogging.logger {}
-    
+
     // Индекс для ротации ключевых слов
     private val rotationIndex = AtomicInteger(0)
 
@@ -46,7 +47,7 @@ class VacancyFetchService(
         val vacancies: List<Vacancy>,
         val searchKeywords: List<String>,
     )
-    
+
     /**
      * Результат загрузки вакансий для одной конфигурации
      */
@@ -64,11 +65,12 @@ class VacancyFetchService(
      * @return Результат загрузки с вакансиями и ключевыми словами
      */
     suspend fun fetchAndSaveNewVacancies(): FetchResult {
+        val startTime = System.currentTimeMillis()
         log.info("🚀 [VacancyFetch] Starting to fetch new vacancies from HH.ru API")
 
         // Получаем активные конфигурации поиска (приоритет: YAML rotation > YAML single > DB)
         val activeConfigs = getActiveSearchConfigs()
-        
+
         if (activeConfigs.isEmpty()) {
             log.warn("⚠️ [VacancyFetch] No active search configurations found")
             log.warn("⚠️ [VacancyFetch] Configure search via DB (INSERT INTO search_configs) OR via application.yml (app.search.keywords-rotation)")
@@ -97,7 +99,7 @@ class VacancyFetchService(
                 val configId = config.id?.toString() ?: "YAML"
                 log.error("🚨 [VacancyFetch] HH.ru API unauthorized/forbidden error for config $configId: ${e.message}", e)
                 log.error("🚨 [VacancyFetch] This usually means: token expired, invalid, or lacks required permissions")
-                
+
                 // Пытаемся автоматически обновить токен через refresh token
                 try {
                     log.info("🔄 [VacancyFetch] Attempting to refresh token automatically...")
@@ -128,15 +130,18 @@ class VacancyFetchService(
             log.info("💾 [VacancyFetch] Saving ${allNewVacancies.size} new vacancies to database...")
             val savedVacancies = allNewVacancies.map { vacancyRepository.save(it) }
             log.info("✅ [VacancyFetch] Saved ${savedVacancies.size} vacancies to database")
-            
+
+            // Обновляем метрики
+            metricsService.incrementVacanciesFetched(allNewVacancies.size)
+
             // Публикуем событие для каждой группы вакансий по ключевым словам
-            val vacanciesByKeywords = allNewVacancies.groupBy { 
-                activeConfigs.find { config -> 
-                    it.name.contains(config.keywords, ignoreCase = true) || 
-                    it.description?.contains(config.keywords, ignoreCase = true) == true
+            val vacanciesByKeywords = allNewVacancies.groupBy {
+                activeConfigs.find { config ->
+                    it.name.contains(config.keywords, ignoreCase = true) ||
+                        it.description?.contains(config.keywords, ignoreCase = true) == true
                 }?.keywords ?: searchKeywords.firstOrNull() ?: "unknown"
             }
-            
+
             vacanciesByKeywords.forEach { (keywords, vacancies) ->
                 eventPublisher.publishEvent(VacancyFetchedEvent(this, vacancies, keywords))
             }
@@ -144,6 +149,8 @@ class VacancyFetchService(
             log.info("ℹ️ [VacancyFetch] No new vacancies found")
         }
 
+        val duration = System.currentTimeMillis() - startTime
+        metricsService.recordVacancyFetchTime(duration)
         return FetchResult(allNewVacancies, searchKeywords)
     }
 
@@ -163,7 +170,7 @@ class VacancyFetchService(
         // Приоритет 2: YAML keywords (одна строка)
         if (!searchConfig.keywords.isNullOrBlank()) {
             log.debug("📋 [VacancyFetch] Using YAML keywords: ${searchConfig.keywords}")
-            return listOf(searchConfigFactory.createFromYamlConfig(searchConfig.keywords!!, searchConfig))
+            return listOf(searchConfigFactory.createFromYamlConfig(searchConfig.keywords ?: "", searchConfig))
         }
 
         // Приоритет 3: DB (active search configs)
@@ -180,8 +187,8 @@ class VacancyFetchService(
      * Загружает вакансии для одной конфигурации поиска
      */
     private suspend fun fetchVacanciesForConfig(config: SearchConfig): List<Vacancy> {
-        val existingVacancyIds = vacancyIdsCache.get("all", { 
-            vacancyRepository.findAllIds().toSet() 
+        val existingVacancyIds = vacancyIdsCache.get("all", {
+            vacancyRepository.findAllIds().toSet()
         }) ?: emptySet()
 
         log.debug("🔍 [VacancyFetch] Searching vacancies with config: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}")
@@ -198,4 +205,3 @@ class VacancyFetchService(
         return newVacancies
     }
 }
-

@@ -2,10 +2,10 @@ package com.hhassistant.service
 
 import com.github.benmanes.caffeine.cache.Cache
 import com.hhassistant.client.hh.HHVacancyClient
-import com.hhassistant.config.AppConstants
-import com.hhassistant.config.VacancyServiceConfig
 import com.hhassistant.client.hh.dto.toEntity
+import com.hhassistant.config.AppConstants
 import com.hhassistant.config.FormattingConfig
+import com.hhassistant.config.VacancyServiceConfig
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
@@ -35,7 +35,7 @@ class VacancyService(
     @Qualifier("vacancyIdsCache") private val vacancyIdsCache: Cache<String, Set<String>>,
 ) {
     private val log = KotlinLogging.logger {}
-    
+
     // Индекс для ротации ключевых слов
     private val rotationIndex = AtomicInteger(0)
 
@@ -46,7 +46,7 @@ class VacancyService(
         val vacancies: List<Vacancy>,
         val searchKeywords: List<String>,
     )
-    
+
     /**
      * Результат загрузки вакансий для одной конфигурации
      */
@@ -67,7 +67,7 @@ class VacancyService(
 
         // Получаем активные конфигурации поиска (приоритет: YAML rotation > YAML single > DB)
         val activeConfigs = getActiveSearchConfigs()
-        
+
         if (activeConfigs.isEmpty()) {
             log.warn("⚠️ [VacancyService] No active search configurations found")
             log.warn("⚠️ [VacancyService] Configure search via DB (INSERT INTO search_configs) OR via application.yml (app.search.keywords-rotation)")
@@ -96,11 +96,11 @@ class VacancyService(
                 val configId = config.id?.toString() ?: "YAML"
                 log.error("🚨 [VacancyService] HH.ru API unauthorized/forbidden error for config $configId: ${e.message}", e)
                 log.error("🚨 [VacancyService] This usually means: token expired, invalid, or lacks required permissions")
-                
+
                 // Пытаемся автоматически обновить токен через refresh token
                 log.info("🔄 [VacancyService] Attempting to refresh access token automatically...")
                 val refreshSuccess = tokenRefreshService.refreshTokenManually()
-                
+
                 if (refreshSuccess) {
                     log.info("✅ [VacancyService] Token refreshed successfully, retrying request...")
                     // Пробуем еще раз после обновления токена
@@ -155,7 +155,7 @@ class VacancyService(
         return vacancyRepository.findByStatus(VacancyStatus.NEW)
             .filter { it.status != VacancyStatus.NOT_INTERESTED }
     }
-    
+
     /**
      * Получает список вакансий, которые еще не были просмотрены пользователем.
      * Включает вакансии со статусами: NEW, ANALYZED, SENT_TO_USER
@@ -169,10 +169,10 @@ class VacancyService(
                 VacancyStatus.NEW,
                 VacancyStatus.ANALYZED,
                 VacancyStatus.SENT_TO_USER,
-            )
+            ),
         )
     }
-    
+
     /**
      * Получает вакансию по ID
      *
@@ -182,7 +182,7 @@ class VacancyService(
     fun getVacancyById(id: String): Vacancy? {
         return vacancyRepository.findById(id).orElse(null)
     }
-    
+
     /**
      * Получает все вакансии
      *
@@ -191,7 +191,7 @@ class VacancyService(
     fun findAllVacancies(): List<Vacancy> {
         return vacancyRepository.findAll()
     }
-    
+
     /**
      * Получает вакансии по статусу
      *
@@ -201,7 +201,7 @@ class VacancyService(
     fun findVacanciesByStatus(status: VacancyStatus): List<Vacancy> {
         return vacancyRepository.findByStatus(status)
     }
-    
+
     /**
      * Получает следующее ключевое слово из ротации (round-robin)
      *
@@ -212,15 +212,15 @@ class VacancyService(
         if (keywords.isEmpty()) {
             throw IllegalArgumentException("Keywords rotation list cannot be empty")
         }
-        
+
         val currentIndex = rotationIndex.getAndUpdate { current ->
             // Переходим к следующему индексу, если достигли конца - возвращаемся к началу
             (current + 1) % keywords.size
         }
-        
+
         val keyword = keywords[currentIndex]
         log.debug("🔄 [VacancyService] Rotation: using keyword '$keyword' (index: $currentIndex/${keywords.size - 1})")
-        
+
         return keyword
     }
 
@@ -233,7 +233,7 @@ class VacancyService(
     private fun getActiveSearchConfigs(): List<SearchConfig> {
         val keywordsRotation = searchConfig.keywordsRotation
         val keywords = searchConfig.keywords
-        
+
         return when {
             // Приоритет 1: Ротация ключевых слов из application.yml
             !keywordsRotation.isNullOrEmpty() -> {
@@ -255,7 +255,7 @@ class VacancyService(
             }
         }
     }
-    
+
     /**
      * Получает активные конфигурации поиска из БД с кэшированием
      */
@@ -264,7 +264,7 @@ class VacancyService(
         log.debug("💾 [VacancyService] Loading active search configs from DB (cache miss)")
         return searchConfigRepository.findByIsActiveTrue()
     }
-    
+
     /**
      * Инвалидирует кэш конфигураций поиска
      */
@@ -300,7 +300,7 @@ class VacancyService(
                 .orElse(null)
             vacancyRepository.save(updatedVacancy)
             log.info("✅ [VacancyService] Updated vacancy ${updatedVacancy.id} ('${updatedVacancy.name}') status: $oldStatus -> ${updatedVacancy.status}")
-            
+
             // Инвалидируем кэш списков вакансий при изменении статуса
             invalidateVacancyListCache()
         } catch (e: Exception) {
@@ -312,7 +312,7 @@ class VacancyService(
             )
         }
     }
-    
+
     /**
      * Обновляет статус вакансии по ID (Rich Domain Model)
      */
@@ -351,7 +351,7 @@ class VacancyService(
             newVacancies.forEach { vacancy ->
                 log.debug("   - Saved: ${vacancy.name} (ID: ${vacancy.id}, Employer: ${vacancy.employer}, Salary: ${vacancy.salary})")
             }
-            
+
             // Инвалидируем кэш ID вакансий при добавлении новых
             invalidateVacancyIdsCache()
             // Также инвалидируем кэш конфигураций поиска (на случай, если они изменились)
