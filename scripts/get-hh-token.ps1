@@ -1,12 +1,18 @@
 # Скрипт для получения токена доступа HH.ru API
-# Использование: .\get-hh-token.ps1 -ClientId "YOUR_CLIENT_ID" -ClientSecret "YOUR_CLIENT_SECRET"
+# Использование: .\get-hh-token.ps1
+# Или с параметрами: .\get-hh-token.ps1 -ClientId "YOUR_CLIENT_ID" -ClientSecret "YOUR_CLIENT_SECRET"
+#
+# Данные из заявки #18240:
+# Client ID: LVDVVPKVGIB6E81TJ0NGNUMNIUVNV1UGIVN74VSOR1D1D8OSGO1JSFKMVIO6IHCH
+# Client Secret: OEUP8CLQM8M9P52QQVCUN2GOVF87PF0CDPCVPGUK117G5HQGEI49UKSQ8O8TV119
+# Redirect URI: http://localhost:8080
 
 param(
-    [Parameter(Mandatory=$true)]
-    [string]$ClientId,
+    [Parameter(Mandatory=$false)]
+    [string]$ClientId = "LVDVVPKVGIB6E81TJ0NGNUMNIUVNV1UGIVN74VSOR1D1D8OSGO1JSFKMVIO6IHCH",
     
-    [Parameter(Mandatory=$true)]
-    [string]$ClientSecret
+    [Parameter(Mandatory=$false)]
+    [string]$ClientSecret = "OEUP8CLQM8M9P52QQVCUN2GOVF87PF0CDPCVPGUK117G5HQGEI49UKSQ8O8TV119"
 )
 
 Write-Host "=== Получение токена доступа для HH.ru API ===" -ForegroundColor Cyan
