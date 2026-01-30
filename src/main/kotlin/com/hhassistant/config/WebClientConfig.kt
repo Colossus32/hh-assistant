@@ -34,10 +34,25 @@ class WebClientConfig(
         @Value("\${hh.api.auth-prefix}") authPrefix: String,
         @Value("\${hh.api.accept-header}") acceptHeader: String,
     ): WebClient {
-        val builder = WebClient.builder()
+        // HH.ru API блокирует User-Agent с example.com или в черном списке
+        // Если userAgent не указан или содержит example.com, НЕ добавляем User-Agent заголовок
+        // WebClient/Netty автоматически добавит свой User-Agent по умолчанию
+        var builder = WebClient.builder()
             .baseUrl(baseUrl)
             .clientConnector(proxyManager.getConnector())
-            .defaultHeader(HttpHeaders.USER_AGENT, userAgent)
+        
+        if (userAgent.isNotBlank() && !userAgent.contains("example.com", ignoreCase = true)) {
+            // Добавляем User-Agent только если указан реальный (не example.com)
+            builder = builder.defaultHeader(HttpHeaders.USER_AGENT, userAgent)
+            log.info("✅ [WebClient] HH.ru WebClient configured with User-Agent: $userAgent")
+        } else {
+            // Не добавляем User-Agent - используем дефолтный от WebClient/Netty
+            log.warn("⚠️ [WebClient] User-Agent не указан или содержит example.com - не добавляем заголовок")
+            log.warn("⚠️ [WebClient] Будет использован User-Agent по умолчанию от WebClient/Netty")
+            log.warn("⚠️ [WebClient] Для явного указания установите HH_USER_AGENT в .env: 'HH-Assistant/1.0 (your@email.com)'")
+        }
+        
+        builder = builder
             .defaultHeader(HttpHeaders.ACCEPT, acceptHeader)
             .filter(WebClientRequestLoggingFilter.create())
             .filter(retryFilter())

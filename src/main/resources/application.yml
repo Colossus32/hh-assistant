@@ -132,7 +132,10 @@ hh:
     # Тип токена: "user" (OAuth токен пользователя) или "application" (токен приложения)
     # Токен приложения имеет неограниченный срок жизни и используется для публичного API
     token-type: ${HH_TOKEN_TYPE:user}  # user или application
-    user-agent: ${HH_USER_AGENT:HH-Assistant/1.0 (hh-assistant@example.com)}
+    # Формат User-Agent для HH.ru API: "AppName/Version (contact@email.com)"
+    # Важно: используйте реальный email, иначе User-Agent может быть заблокирован
+    # Если не указан, будет использован минимальный формат без email
+    user-agent: ${HH_USER_AGENT:}
     accept-header: application/json
     auth-prefix: Bearer
     search:
