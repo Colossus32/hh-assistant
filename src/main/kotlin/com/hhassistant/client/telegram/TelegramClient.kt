@@ -1,5 +1,9 @@
 package com.hhassistant.client.telegram
 
+import com.hhassistant.client.telegram.dto.AnswerCallbackQueryRequest
+import com.hhassistant.client.telegram.dto.AnswerCallbackQueryResponse
+import com.hhassistant.client.telegram.dto.FileInfo
+import com.hhassistant.client.telegram.dto.GetFileResponse
 import com.hhassistant.client.telegram.dto.SendMessageRequest
 import com.hhassistant.client.telegram.dto.SendMessageResponse
 import com.hhassistant.config.AppConstants
@@ -27,10 +31,14 @@ class TelegramClient(
      * Отправляет сообщение в Telegram.
      *
      * @param text Текст сообщения для отправки
+     * @param replyMarkup Опциональная inline keyboard для сообщения
      * @return true если сообщение успешно отправлено, false если отключено или не настроено
      * @throws TelegramException если произошла ошибка при отправке (rate limit, invalid chat, etc.)
      */
-    suspend fun sendMessage(text: String): Boolean {
+    suspend fun sendMessage(
+        text: String,
+        replyMarkup: com.hhassistant.client.telegram.dto.InlineKeyboardMarkup? = null,
+    ): Boolean {
         if (!enabled) {
             log.debug("📱 [Telegram] Notifications are disabled, skipping message")
             return false
@@ -49,6 +57,7 @@ class TelegramClient(
                 text = text,
                 parseMode = "HTML",
                 disableWebPagePreview = false,
+                replyMarkup = replyMarkup,
             )
 
             val sendStartTime = System.currentTimeMillis()
@@ -98,13 +107,107 @@ class TelegramClient(
         }
     }
 
+    /**
+     * Получает информацию о файле по file_id
+     */
+    suspend fun getFile(fileId: String): FileInfo {
+        if (!enabled || botToken.isBlank()) {
+            throw TelegramException.APIException("Telegram is not configured")
+        }
+
+        return try {
+            val response = webClient.get()
+                .uri("/bot$botToken/getFile?file_id=$fileId")
+                .retrieve()
+                .bodyToMono<GetFileResponse>()
+                .awaitSingle()
+
+            if (response.ok && response.result != null) {
+                response.result
+            } else {
+                throw TelegramException.APIException(
+                    "Failed to get file info: ${response.description} (code: ${response.errorCode})",
+                )
+            }
+        } catch (e: TelegramException) {
+            throw e
+        } catch (e: Exception) {
+            log.error("Error getting file info from Telegram: ${e.message}", e)
+            throw TelegramException.ConnectionException("Failed to get file info: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Скачивает файл по file_path
+     */
+    suspend fun downloadFile(filePath: String): ByteArray {
+        if (!enabled || botToken.isBlank()) {
+            throw TelegramException.APIException("Telegram is not configured")
+        }
+
+        return try {
+            webClient.get()
+                .uri("https://api.telegram.org/file/bot$botToken/$filePath")
+                .retrieve()
+                .bodyToMono<ByteArray>()
+                .awaitSingle()
+        } catch (e: Exception) {
+            log.error("Error downloading file from Telegram: ${e.message}", e)
+            throw TelegramException.ConnectionException("Failed to download file: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Отвечает на callback_query (обязательно для работы inline кнопок)
+     *
+     * @param callbackQueryId ID callback query из Update
+     * @param text Опциональный текст для отображения пользователю
+     * @param showAlert Показывать ли alert вместо toast уведомления
+     */
+    suspend fun answerCallbackQuery(
+        callbackQueryId: String,
+        text: String? = null,
+        showAlert: Boolean = false,
+    ): Boolean {
+        if (!enabled || botToken.isBlank()) {
+            log.warn("⚠️ [Telegram] Not configured, skipping answerCallbackQuery")
+            return false
+        }
+
+        return try {
+            val request = com.hhassistant.client.telegram.dto.AnswerCallbackQueryRequest(
+                callbackQueryId = callbackQueryId,
+                text = text,
+                showAlert = showAlert,
+            )
+
+            val response = webClient.post()
+                .uri("/bot$botToken/answerCallbackQuery")
+                .bodyValue(request)
+                .retrieve()
+                .bodyToMono<com.hhassistant.client.telegram.dto.AnswerCallbackQueryResponse>()
+                .awaitSingle()
+
+            if (response.ok) {
+                log.debug("✅ [Telegram] Answered callback query $callbackQueryId")
+                true
+            } else {
+                log.warn("⚠️ [Telegram] Failed to answer callback query: ${response.description} (code: ${response.errorCode})")
+                false
+            }
+        } catch (e: Exception) {
+            log.error("❌ [Telegram] Error answering callback query: ${e.message}", e)
+            false
+        }
+    }
+
     private fun mapToTelegramException(e: WebClientResponseException, responseBody: String? = null): TelegramException {
         val errorDetails = responseBody ?: try {
             e.responseBodyAsString
         } catch (ex: Exception) {
             null
         }
-        
+
         return when (e.statusCode) {
             HttpStatus.BAD_REQUEST -> {
                 val errorMsg = buildString {
