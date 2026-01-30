@@ -844,3 +844,5 @@ fun transfer(fromAccountId: Long, toAccountId: Long, amount: BigDecimal) {
 *Версия: 1.0 | Январь 2026*
 
 
+
+
