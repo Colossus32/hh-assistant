@@ -56,6 +56,11 @@ app:
         enabled: true  # Enable retry queue for failed cover letter generations
         batch-size: 10  # Number of analyses to process per batch
         cron: "0 */5 * * * *"  # Cron expression for queue processing (every 5 minutes)
+  log-analysis:
+    enabled: true  # Enable daily log analysis with Ollama
+    cron: "0 0 9 * * *"  # Cron expression for daily analysis (every day at 9:00 AM)
+    log-file: logs/hh-assistant.log  # Path to log file
+    lookback-hours: 24  # Number of hours to look back when analyzing logs
   prompts:
     # Системный промпт для анализа вакансий (можно переопределить)
     analysis-system: |
