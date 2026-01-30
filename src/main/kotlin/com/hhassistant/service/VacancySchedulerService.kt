@@ -71,13 +71,28 @@ class VacancySchedulerService(
             try {
                 // 1. Загружаем новые вакансии из HH.ru
                 log.info("📥 [Scheduler] Step 1: Fetching new vacancies from HH.ru API...")
-                val newVacancies = vacancyService.fetchAndSaveNewVacancies()
+                val fetchResult = vacancyService.fetchAndSaveNewVacancies()
+                val newVacancies = fetchResult.vacancies
+                val searchKeywords = fetchResult.searchKeywords
                 log.info("✅ [Scheduler] Step 1 completed: Fetched ${newVacancies.size} new vacancies from HH.ru")
+                
+                // Отправляем обновление статуса в Telegram
+                val hhApiStatus = if (newVacancies.isNotEmpty() || searchKeywords.isNotEmpty()) {
+                    "✅ UP (найдено ${newVacancies.size} вакансий)"
+                } else {
+                    "⚠️ Проверка выполнена, но вакансии не найдены"
+                }
+                notificationService.sendStatusUpdate(hhApiStatus, searchKeywords, newVacancies.size)
 
                 // 2. Получаем все новые вакансии для анализа (включая ранее загруженные)
                 log.info("🔍 [Scheduler] Step 2: Getting vacancies for analysis...")
                 val vacanciesToAnalyze = vacancyService.getNewVacanciesForAnalysis()
                 log.info("✅ [Scheduler] Step 2 completed: Found ${vacanciesToAnalyze.size} vacancies to analyze")
+                
+                // Если не было новых вакансий, но есть ключевые слова - значит запрос прошел успешно
+                if (newVacancies.isEmpty() && searchKeywords.isNotEmpty()) {
+                    log.info("ℹ️ [Scheduler] No new vacancies found, but search was successful (keywords: ${searchKeywords.joinToString(", ") { "'$it'" }})")
+                }
 
                 if (vacanciesToAnalyze.isEmpty()) {
                     log.info("ℹ️ [Scheduler] No vacancies to analyze, cycle completed")

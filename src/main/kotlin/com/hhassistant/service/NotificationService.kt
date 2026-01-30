@@ -52,6 +52,56 @@ class NotificationService(
     }
 
     /**
+     * Отправляет обновленное уведомление о статусе после проверки HH.ru API
+     */
+    fun sendStatusUpdate(
+        hhApiStatus: String,
+        searchKeywords: List<String>,
+        vacanciesFound: Int,
+    ) {
+        if (!telegramEnabled) {
+            log.debug("📱 [Notification] Telegram disabled, skipping status update")
+            return
+        }
+
+        val keywordsText = if (searchKeywords.isNotEmpty()) {
+            searchKeywords.joinToString(", ") { "'$it'" }
+        } else {
+            "не настроены"
+        }
+
+        val message = buildString {
+            appendLine("📊 <b>Статус проверки HH.ru API</b>")
+            appendLine()
+            appendLine("🔍 <b>Ключевые слова поиска:</b>")
+            appendLine("   $keywordsText")
+            appendLine()
+            appendLine("📊 <b>Результат:</b>")
+            appendLine("   • HH.ru API: $hhApiStatus")
+            appendLine("   • Найдено новых вакансий: $vacanciesFound")
+            appendLine()
+            if (hhApiStatus.contains("✅", ignoreCase = true) || hhApiStatus.contains("UP", ignoreCase = true)) {
+                appendLine("✅ Всё работает корректно!")
+            } else {
+                appendLine("⚠️ Проверьте настройки и токен HH.ru")
+            }
+        }
+
+        runBlocking {
+            try {
+                val sent = telegramClient.sendMessage(message)
+                if (sent) {
+                    log.info("✅ [Notification] Status update sent to Telegram")
+                } else {
+                    log.warn("⚠️ [Notification] Failed to send status update (Telegram returned false)")
+                }
+            } catch (e: Exception) {
+                log.error("❌ [Notification] Failed to send status update: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
      * Отправляет алерт об истечении токена HH.ru
      */
     fun sendTokenExpiredAlert(errorMessage: String) {

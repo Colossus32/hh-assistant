@@ -33,8 +33,15 @@ app:
   dry-run: false  # По умолчанию выключен, включается через профиль dry-run
   # Для работы с реальными вакансиями:
   # 1. Убедитесь, что HH_ACCESS_TOKEN указан в .env
-  # 2. Создайте активную конфигурацию поиска в БД (см. docs/WINDOWS_SETUP.md)
+  # 2. Настройте поиск через БД (см. docs/WINDOWS_SETUP.md) ИЛИ через application.yml (см. ниже)
   # 3. Установите dry-run: false (или не используйте dry-run профиль)
+  search:
+    # Альтернативный способ настройки поиска через application.yml
+    # Если указаны keywords, они будут использованы вместо конфигураций из БД
+    # keywords: ${APP_SEARCH_KEYWORDS:}  # Например: "Kotlin Developer"
+    # area: ${APP_SEARCH_AREA:}  # Например: "Москва"
+    # min-salary: ${APP_SEARCH_MIN_SALARY:}  # Например: 150000
+    # experience: ${APP_SEARCH_EXPERIENCE:}  # Например: "От 3 лет"
   analysis:
     min-relevance-score: 0.6  # Minimum score to consider vacancy relevant
     max-concurrent-requests: 3  # Maximum concurrent requests to LLM for analysis

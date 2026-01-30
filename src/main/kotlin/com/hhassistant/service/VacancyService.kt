@@ -22,53 +22,91 @@ class VacancyService(
     private val formattingConfig: FormattingConfig,
     private val notificationService: NotificationService,
     @Value("\${app.max-vacancies-per-cycle:50}") private val maxVacanciesPerCycle: Int,
+    @Value("\${app.search.keywords:}") private val yamlKeywords: String?,
+    @Value("\${app.search.area:}") private val yamlArea: String?,
+    @Value("\${app.search.min-salary:}") private val yamlMinSalary: Int?,
+    @Value("\${app.search.experience:}") private val yamlExperience: String?,
 ) {
     private val log = KotlinLogging.logger {}
 
     /**
+     * Результат загрузки вакансий
+     */
+    data class FetchResult(
+        val vacancies: List<Vacancy>,
+        val searchKeywords: List<String>,
+    )
+
+    /**
      * Загружает новые вакансии из HH.ru API и сохраняет их в БД.
      *
-     * @return Список новых вакансий для анализа
+     * @return Результат загрузки с вакансиями и ключевыми словами
      */
-    suspend fun fetchAndSaveNewVacancies(): List<Vacancy> {
+    suspend fun fetchAndSaveNewVacancies(): FetchResult {
         log.info("🚀 [VacancyService] Starting to fetch new vacancies from HH.ru API")
 
-        val activeConfigs = searchConfigRepository.findByIsActiveTrue()
-        if (activeConfigs.isEmpty()) {
-            log.warn("⚠️ [VacancyService] No active search configurations found in database")
-            return emptyList()
+        // Проверяем, есть ли настройки в application.yml
+        val activeConfigs = if (yamlKeywords.isNullOrBlank()) {
+            // Используем конфигурации из БД
+            val dbConfigs = searchConfigRepository.findByIsActiveTrue()
+            if (dbConfigs.isEmpty()) {
+                log.warn("⚠️ [VacancyService] No active search configurations found (neither in DB nor in application.yml)")
+                log.warn("⚠️ [VacancyService] Configure search via DB (INSERT INTO search_configs) OR via application.yml (app.search.keywords)")
+                return FetchResult(emptyList(), emptyList())
+            }
+            log.info("📊 [VacancyService] Using search configurations from database (${dbConfigs.size} config(s))")
+            dbConfigs
+        } else {
+            // Используем конфигурацию из application.yml
+            log.info("📊 [VacancyService] Using search configuration from application.yml")
+            val yamlConfig = SearchConfig(
+                keywords = yamlKeywords,
+                area = yamlArea?.takeIf { it.isNotBlank() },
+                minSalary = yamlMinSalary,
+                maxSalary = null,
+                experience = yamlExperience?.takeIf { it.isNotBlank() },
+                isActive = true,
+            )
+            listOf(yamlConfig)
         }
 
+        val searchKeywords = activeConfigs.map { it.keywords }
         log.info("📊 [VacancyService] Found ${activeConfigs.size} active search configuration(s)")
+        log.info("🔍 [VacancyService] Search keywords: ${searchKeywords.joinToString(", ") { "'$it'" }}")
 
         val allNewVacancies = mutableListOf<Vacancy>()
 
         for (config in activeConfigs) {
             try {
-                log.info("🔎 [VacancyService] Processing search config ID=${config.id}: '${config.keywords}'")
+                val configId = config.id?.toString() ?: "YAML"
+                log.info("🔎 [VacancyService] Processing search config ID=$configId: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}")
                 val vacancies = fetchVacanciesForConfig(config)
                 allNewVacancies.addAll(vacancies)
-                log.info("✅ [VacancyService] Config ID=${config.id}: found ${vacancies.size} new vacancies")
+                log.info("✅ [VacancyService] Config ID=$configId ('${config.keywords}'): found ${vacancies.size} new vacancies")
 
                 if (allNewVacancies.size >= maxVacanciesPerCycle) {
                     log.info("⏸️ [VacancyService] Reached max vacancies limit ($maxVacanciesPerCycle), stopping fetch")
                     break
                 }
             } catch (e: HHAPIException.UnauthorizedException) {
-                log.error("🚨 [VacancyService] HH.ru API unauthorized error for config ${config.id}: ${e.message}", e)
+                val configId = config.id?.toString() ?: "YAML"
+                log.error("🚨 [VacancyService] HH.ru API unauthorized error for config $configId: ${e.message}", e)
                 // Отправляем алерт в Telegram об истечении токена
                 notificationService.sendTokenExpiredAlert(e.message ?: "Unauthorized access to HH.ru API")
                 // Прерываем загрузку, так как токен недействителен
                 break
             } catch (e: HHAPIException.RateLimitException) {
-                log.warn("⚠️ [VacancyService] Rate limit exceeded for config ${config.id}, skipping: ${e.message}")
+                val configId = config.id?.toString() ?: "YAML"
+                log.warn("⚠️ [VacancyService] Rate limit exceeded for config $configId, skipping: ${e.message}")
                 // Прерываем загрузку при rate limit, чтобы не усугубить ситуацию
                 break
             } catch (e: HHAPIException) {
-                log.error("❌ [VacancyService] HH.ru API error fetching vacancies for config ${config.id}: ${e.message}", e)
+                val configId = config.id?.toString() ?: "YAML"
+                log.error("❌ [VacancyService] HH.ru API error fetching vacancies for config $configId: ${e.message}", e)
                 // Продолжаем с другими конфигурациями
             } catch (e: Exception) {
-                log.error("❌ [VacancyService] Unexpected error fetching vacancies for config ${config.id}: ${e.message}", e)
+                val configId = config.id?.toString() ?: "YAML"
+                log.error("❌ [VacancyService] Unexpected error fetching vacancies for config $configId: ${e.message}", e)
                 // Продолжаем с другими конфигурациями
             }
         }
@@ -79,7 +117,7 @@ class VacancyService(
             log.info("📝 [VacancyService] Sample vacancies: ${newVacancies.take(3).joinToString(", ") { "${it.name} (${it.id})" }}")
         }
 
-        return newVacancies
+        return FetchResult(newVacancies, searchKeywords)
     }
 
     /**
@@ -113,10 +151,11 @@ class VacancyService(
     }
 
     private suspend fun fetchVacanciesForConfig(config: SearchConfig): List<Vacancy> {
-        log.info("🔍 [VacancyService] Fetching vacancies for config ID=${config.id}: '${config.keywords}'")
+        val configId = config.id?.toString() ?: "YAML"
+        log.info("🔍 [VacancyService] Fetching vacancies for config ID=$configId: '${config.keywords}'")
 
         val vacancyDtos = hhVacancyClient.searchVacancies(config)
-        log.info("📥 [VacancyService] Received ${vacancyDtos.size} vacancies from HH.ru API for config ID=${config.id}")
+        log.info("📥 [VacancyService] Received ${vacancyDtos.size} vacancies from HH.ru API for config ID=$configId")
 
         val existingIds = vacancyRepository.findAllIds().toSet()
         log.debug("💾 [VacancyService] Checking against ${existingIds.size} existing vacancies in database")
@@ -130,12 +169,12 @@ class VacancyService(
 
         if (newVacancies.isNotEmpty()) {
             vacancyRepository.saveAll(newVacancies)
-            log.info("💾 [VacancyService] ✅ Saved ${newVacancies.size} new vacancies to database for config ID=${config.id}")
+            log.info("💾 [VacancyService] ✅ Saved ${newVacancies.size} new vacancies to database for config ID=$configId")
             newVacancies.forEach { vacancy ->
                 log.debug("   - Saved: ${vacancy.name} (ID: ${vacancy.id}, Employer: ${vacancy.employer}, Salary: ${vacancy.salary})")
             }
         } else {
-            log.info("ℹ️ [VacancyService] No new vacancies to save for config ID=${config.id}")
+            log.info("ℹ️ [VacancyService] No new vacancies to save for config ID=$configId")
         }
 
         return newVacancies
