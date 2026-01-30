@@ -35,6 +35,7 @@ class TokenRefreshService(
             return
         }
         
+        // Проверяем наличие refresh token перед попыткой обновления
         val refreshToken = envFileService.readEnvVariable("HH_REFRESH_TOKEN")
         if (refreshToken.isNullOrBlank()) {
             log.debug("ℹ️ [TokenRefresh] No refresh token found, skipping automatic refresh")
