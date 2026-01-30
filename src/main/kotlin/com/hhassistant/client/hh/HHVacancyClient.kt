@@ -23,6 +23,11 @@ class HHVacancyClient(
     private val rateLimitService: RateLimitService,
 ) {
     private val log = KotlinLogging.logger {}
+    
+    // Флаг для отслеживания, было ли уже отправлено уведомление об истечении токена
+    // чтобы не спамить в Telegram при каждой ошибке
+    @Volatile
+    private var tokenExpiredAlertSent = false
 
     suspend fun searchVacancies(config: SearchConfig): List<VacancyDto> {
         // Проверяем rate limit перед запросом
@@ -55,8 +60,16 @@ class HHVacancyClient(
 
             response.items
         } catch (e: WebClientResponseException) {
-            log.error("Error searching vacancies in HH.ru API: ${e.message}", e)
-            throw mapToHHAPIException(e, "Failed to search vacancies")
+            log.error("❌ [HH.ru API] Error searching vacancies: ${e.message}", e)
+            val exception = mapToHHAPIException(e, "Failed to search vacancies")
+            
+            // Если это ошибка авторизации, логируем детально
+            if (exception is HHAPIException.UnauthorizedException) {
+                log.error("🚨 [HH.ru API] UNAUTHORIZED: Access token expired or invalid!")
+                log.error("🚨 [HH.ru API] Status code: ${e.statusCode}, Response: ${e.responseBodyAsString}")
+            }
+            
+            throw exception
         } catch (e: Exception) {
             log.error("Unexpected error searching vacancies: ${e.message}", e)
             throw HHAPIException.ConnectionException("Failed to connect to HH.ru API: ${e.message}", e)

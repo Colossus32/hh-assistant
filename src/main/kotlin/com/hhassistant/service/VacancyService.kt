@@ -20,6 +20,7 @@ class VacancyService(
     private val vacancyRepository: VacancyRepository,
     private val searchConfigRepository: SearchConfigRepository,
     private val formattingConfig: FormattingConfig,
+    private val notificationService: NotificationService,
     @Value("\${app.max-vacancies-per-cycle:50}") private val maxVacanciesPerCycle: Int,
 ) {
     private val log = KotlinLogging.logger {}
@@ -53,15 +54,21 @@ class VacancyService(
                     log.info("⏸️ [VacancyService] Reached max vacancies limit ($maxVacanciesPerCycle), stopping fetch")
                     break
                 }
+            } catch (e: HHAPIException.UnauthorizedException) {
+                log.error("🚨 [VacancyService] HH.ru API unauthorized error for config ${config.id}: ${e.message}", e)
+                // Отправляем алерт в Telegram об истечении токена
+                notificationService.sendTokenExpiredAlert(e.message ?: "Unauthorized access to HH.ru API")
+                // Прерываем загрузку, так как токен недействителен
+                break
             } catch (e: HHAPIException.RateLimitException) {
-                log.warn("Rate limit exceeded for config ${config.id}, skipping: ${e.message}")
+                log.warn("⚠️ [VacancyService] Rate limit exceeded for config ${config.id}, skipping: ${e.message}")
                 // Прерываем загрузку при rate limit, чтобы не усугубить ситуацию
                 break
             } catch (e: HHAPIException) {
-                log.error("HH.ru API error fetching vacancies for config ${config.id}: ${e.message}", e)
+                log.error("❌ [VacancyService] HH.ru API error fetching vacancies for config ${config.id}: ${e.message}", e)
                 // Продолжаем с другими конфигурациями
             } catch (e: Exception) {
-                log.error("Unexpected error fetching vacancies for config ${config.id}: ${e.message}", e)
+                log.error("❌ [VacancyService] Unexpected error fetching vacancies for config ${config.id}: ${e.message}", e)
                 // Продолжаем с другими конфигурациями
             }
         }

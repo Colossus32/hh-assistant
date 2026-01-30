@@ -15,6 +15,8 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.boot.context.event.ApplicationReadyEvent
+import org.springframework.context.event.EventListener
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 
@@ -23,11 +25,31 @@ class VacancySchedulerService(
     private val vacancyService: VacancyService,
     private val vacancyAnalysisService: VacancyAnalysisService,
     private val telegramClient: TelegramClient,
+    private val notificationService: NotificationService,
     @Value("\${app.dry-run:false}") private val dryRun: Boolean,
     @Value("\${app.analysis.max-concurrent-requests:3}") private val maxConcurrentRequests: Int,
 ) {
     private val log = KotlinLogging.logger {}
     private val analysisSemaphore = Semaphore(maxConcurrentRequests)
+
+    /**
+     * Запускает проверку вакансий сразу после старта приложения
+     */
+    @EventListener(ApplicationReadyEvent::class)
+    fun onApplicationReady() {
+        log.info("🚀 [Scheduler] Application ready, sending startup notification and running initial check...")
+        
+        // Отправляем уведомление о старте
+        notificationService.sendStartupNotification()
+        
+        // Запускаем первую проверку сразу
+        if (!dryRun) {
+            log.info("🚀 [Scheduler] Running initial vacancy check on startup...")
+            checkNewVacancies()
+        } else {
+            log.info("ℹ️ [Scheduler] Dry-run mode enabled, skipping initial check")
+        }
+    }
 
     /**
      * Периодически проверяет новые вакансии, анализирует их и отправляет релевантные в Telegram.
@@ -86,8 +108,12 @@ class VacancySchedulerService(
                 log.info("📊 [Scheduler]   - Sent to Telegram: $sentToTelegramCount")
                 log.info("📊 [Scheduler]   - Total cycle time: ${cycleDuration}ms")
                 log.info("📊 [Scheduler] ========================================")
+            } catch (e: com.hhassistant.exception.HHAPIException.UnauthorizedException) {
+                log.error("❌ [Scheduler] HH.ru API unauthorized error: ${e.message}", e)
+                // Отправляем алерт в Telegram об истечении токена
+                notificationService.sendTokenExpiredAlert(e.message ?: "Unauthorized access to HH.ru API")
             } catch (e: Exception) {
-                log.error("Error during scheduled vacancy check: ${e.message}", e)
+                log.error("❌ [Scheduler] Error during scheduled vacancy check: ${e.message}", e)
             }
         }
     }
