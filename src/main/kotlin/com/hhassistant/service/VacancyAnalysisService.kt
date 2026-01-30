@@ -90,13 +90,13 @@ class VacancyAnalysisService(
 
         log.info("📊 [Ollama] Analysis result for '${vacancy.name}': isRelevant=${validatedResult.isRelevant}, relevanceScore=${String.format("%.2f", validatedResult.relevanceScore * 100)}%, matchedSkills=${validatedResult.matchedSkills.size}")
 
-        // Генерируем сопроводительное письмо для релевантных вакансий с ретраями
-        // Генерируем письмо, если вакансия релевантна ИЛИ score >= minRelevanceScore
-        // Это гарантирует, что письмо будет сгенерировано для всех вакансий, которые отправляются в Telegram
-        val coverLetter = if (validatedResult.isRelevant || validatedResult.relevanceScore >= minRelevanceScore) {
+        // Генерируем сопроводительное письмо ТОЛЬКО для релевантных вакансий
+        // Письмо генерируется только если isRelevant = true, независимо от процентов
+        val coverLetter = if (validatedResult.isRelevant) {
+            log.info("✍️ [Ollama] Generating cover letter for relevant vacancy ${vacancy.id} (score: ${String.format("%.2f", validatedResult.relevanceScore * 100)}%)")
             generateCoverLetterWithRetry(vacancy, resume, resumeStructure, validatedResult)
         } else {
-            log.debug("ℹ️ [Ollama] Skipping cover letter generation (not relevant and score too low: ${String.format("%.2f", validatedResult.relevanceScore * 100)}% < ${minRelevanceScore * 100}%)")
+            log.debug("ℹ️ [Ollama] Skipping cover letter generation (vacancy is not relevant, score: ${String.format("%.2f", validatedResult.relevanceScore * 100)}%)")
             null
         }
 
@@ -110,9 +110,12 @@ class VacancyAnalysisService(
             suggestedCoverLetter = coverLetter,
             coverLetterGenerationStatus = if (coverLetter != null) {
                 CoverLetterGenerationStatus.SUCCESS
-            } else {
-                // Если письмо не сгенерировано, добавляем в очередь ретраев
+            } else if (validatedResult.isRelevant) {
+                // Если письмо не сгенерировано для релевантной вакансии, добавляем в очередь ретраев
                 CoverLetterGenerationStatus.RETRY_QUEUED
+            } else {
+                // Если вакансия не релевантна, письмо не нужно - помечаем как NOT_ATTEMPTED
+                CoverLetterGenerationStatus.NOT_ATTEMPTED
             },
             // При первой неудаче: устанавливаем attempts = maxRetries (все попытки использованы)
             // Но в очереди ретраев можно будет попробовать еще раз (до maxRetries * 2 общих попыток)
