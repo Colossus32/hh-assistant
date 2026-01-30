@@ -1,0 +1,26 @@
+databaseChangeLog:
+  - changeSet:
+      id: 003-add-cover-letter-status
+      author: system
+      changes:
+        - addColumn:
+            tableName: vacancy_analyses
+            columns:
+              - column:
+                  name: cover_letter_generation_status
+                  type: VARCHAR(20)
+                  defaultValue: NOT_ATTEMPTED
+                  constraints:
+                    nullable: false
+              - column:
+                  name: cover_letter_attempts
+                  type: INTEGER
+                  defaultValue: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: cover_letter_last_attempt_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: true
+

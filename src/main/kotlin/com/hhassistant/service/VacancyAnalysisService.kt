@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.hhassistant.client.ollama.OllamaClient
 import com.hhassistant.client.ollama.dto.ChatMessage
 import com.hhassistant.config.PromptConfig
+import com.hhassistant.domain.entity.CoverLetterGenerationStatus
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.exception.OllamaException
@@ -12,6 +13,7 @@ import com.hhassistant.repository.VacancyAnalysisRepository
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
+import java.time.LocalDateTime
 import kotlinx.coroutines.delay
 
 @Service
@@ -103,6 +105,14 @@ class VacancyAnalysisService(
             reasoning = validatedResult.reasoning,
             matchedSkills = objectMapper.writeValueAsString(validatedResult.matchedSkills),
             suggestedCoverLetter = coverLetter,
+            coverLetterGenerationStatus = if (coverLetter != null) {
+                CoverLetterGenerationStatus.SUCCESS
+            } else {
+                // Если письмо не сгенерировано, добавляем в очередь ретраев
+                CoverLetterGenerationStatus.RETRY_QUEUED
+            },
+            coverLetterAttempts = if (coverLetter == null) 1 else 0, // Считаем попытки только при неудаче
+            coverLetterLastAttemptAt = if (coverLetter == null) LocalDateTime.now() else null,
         )
 
         val savedAnalysis = repository.save(analysis)

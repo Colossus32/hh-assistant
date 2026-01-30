@@ -49,6 +49,13 @@ app:
   analysis:
     min-relevance-score: 0.6  # Minimum score to consider vacancy relevant
     max-concurrent-requests: 3  # Maximum concurrent requests to LLM for analysis
+    cover-letter:
+      max-retries: 3  # Maximum number of retry attempts for cover letter generation
+      retry-delay-seconds: 5  # Delay between retry attempts (in seconds)
+      retry-queue:
+        enabled: true  # Enable retry queue for failed cover letter generations
+        batch-size: 10  # Number of analyses to process per batch
+        cron: "0 */5 * * * *"  # Cron expression for queue processing (every 5 minutes)
   prompts:
     # Системный промпт для анализа вакансий (можно переопределить)
     analysis-system: |

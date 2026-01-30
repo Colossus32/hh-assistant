@@ -2,6 +2,8 @@ package com.hhassistant.domain.entity
 
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
 import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
@@ -35,4 +37,22 @@ data class VacancyAnalysis(
 
     @Column(name = "suggested_cover_letter", columnDefinition = "TEXT")
     val suggestedCoverLetter: String?,
+    
+    @Enumerated(EnumType.STRING)
+    @Column(name = "cover_letter_generation_status", length = 20, nullable = false)
+    val coverLetterGenerationStatus: CoverLetterGenerationStatus = CoverLetterGenerationStatus.NOT_ATTEMPTED,
+    
+    @Column(name = "cover_letter_attempts", nullable = false)
+    val coverLetterAttempts: Int = 0,
+    
+    @Column(name = "cover_letter_last_attempt_at")
+    val coverLetterLastAttemptAt: LocalDateTime? = null,
 )
+
+enum class CoverLetterGenerationStatus {
+    NOT_ATTEMPTED,      // Письмо еще не пытались генерировать
+    IN_PROGRESS,        // Генерация в процессе
+    SUCCESS,            // Успешно сгенерировано
+    FAILED,             // Все попытки неудачны
+    RETRY_QUEUED,       // В очереди на повторную попытку
+}
