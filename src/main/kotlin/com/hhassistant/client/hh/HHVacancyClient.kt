@@ -31,7 +31,7 @@ class HHVacancyClient(
         log.info("🔍 [HH.ru API] Searching vacancies with config: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}, experience=${config.experience}")
 
         return try {
-            val uri = webClient.get()
+            val requestSpec = webClient.get()
                 .uri { builder ->
                     builder.path("/vacancies")
                         .queryParam("text", config.keywords)
@@ -45,9 +45,9 @@ class HHVacancyClient(
                         .build()
                 }
             
-            log.debug("🌐 [HH.ru API] Request URL: ${uri.uri()}")
+            log.debug("🌐 [HH.ru API] Request URL will be logged by WebClientRequestLoggingFilter")
             
-            val response = uri
+            val response = requestSpec
                 .retrieve()
                 .bodyToMono<VacancySearchResponse>()
                 .awaitSingle()

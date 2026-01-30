@@ -21,9 +21,13 @@ object WebClientRequestLoggingFilter {
                 } else {
                     "***"
                 }
-                log.debug("🔑 [WebClient] Request to ${request.url()}: Authorization header present (${authHeader.length} chars, prefix: $tokenPrefix)")
+                log.info("🔑 [WebClient] Request to ${request.url()}: Authorization header present (${authHeader.length} chars, prefix: $tokenPrefix)")
+                // Проверяем формат токена
+                if (!authHeader.startsWith("Bearer ")) {
+                    log.error("❌ [WebClient] Authorization header does not start with 'Bearer '! Format: ${authHeader.take(15)}...")
+                }
             } else {
-                log.warn("⚠️ [WebClient] Request to ${request.url()}: NO Authorization header!")
+                log.error("❌ [WebClient] Request to ${request.url()}: NO Authorization header! This will cause 403 Forbidden!")
             }
             reactor.core.publisher.Mono.just(request)
         }

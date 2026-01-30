@@ -47,9 +47,14 @@ class WebClientConfig(
         if (accessToken.isNotBlank()) {
             val authHeader = "$authPrefix $accessToken"
             builder.defaultHeader(HttpHeaders.AUTHORIZATION, authHeader)
-            log.debug("✅ [WebClient] HH.ru WebClient configured with Authorization header (token length: ${accessToken.length}, prefix: $authPrefix)")
+            log.info("✅ [WebClient] HH.ru WebClient configured with Authorization header")
+            log.info("   Token length: ${accessToken.length} chars")
+            log.info("   Token prefix: ${accessToken.take(10)}...")
+            log.info("   Auth prefix: $authPrefix")
+            log.info("   Full header format: $authPrefix ${accessToken.take(10)}...")
         } else {
-            log.warn("⚠️ [WebClient] HH.ru WebClient configured WITHOUT Authorization header (accessToken is blank)")
+            log.error("❌ [WebClient] HH.ru WebClient configured WITHOUT Authorization header (accessToken is blank)")
+            log.error("   This will cause 403 Forbidden errors!")
         }
 
         return builder.build()
