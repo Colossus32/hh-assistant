@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RestController
  * Используется для проверки работы с реальным токеном
  */
 @RestController
-@RequestMapping("/api/vacancies")
+@RequestMapping("/api/vacancies/test")
 class VacancyTestController(
     private val hhVacancyClient: HHVacancyClient,
 ) {
@@ -25,7 +25,7 @@ class VacancyTestController(
 
     /**
      * Тестовый endpoint для поиска вакансий
-     * GET /api/vacancies/search?keywords=Kotlin&area=Москва&minSalary=150000
+     * GET /api/vacancies/test/search?keywords=Kotlin&area=Москва&minSalary=150000
      */
     @GetMapping("/search")
     fun searchVacancies(
@@ -104,8 +104,8 @@ class VacancyTestController(
     }
 
     /**
-     * Получение деталей вакансии по ID
-     * GET /api/vacancies/{id}
+     * Получение деталей вакансии по ID с HH.ru API (для тестирования)
+     * GET /api/vacancies/test/{id}
      */
     @GetMapping("/{id}")
     fun getVacancyDetails(@org.springframework.web.bind.annotation.PathVariable id: String): ResponseEntity<Any> {
