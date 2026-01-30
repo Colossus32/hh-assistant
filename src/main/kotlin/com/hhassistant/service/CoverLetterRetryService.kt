@@ -1,5 +1,6 @@
 package com.hhassistant.service
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.hhassistant.domain.entity.CoverLetterGenerationStatus
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.repository.VacancyAnalysisRepository
@@ -20,6 +21,7 @@ class CoverLetterRetryService(
     private val vacancyAnalysisService: VacancyAnalysisService,
     private val vacancyRepository: VacancyRepository,
     private val resumeService: ResumeService,
+    private val objectMapper: ObjectMapper,
     @Value("\${app.analysis.cover-letter.retry-queue.enabled:true}") private val retryQueueEnabled: Boolean,
     @Value("\${app.analysis.cover-letter.retry-queue.batch-size:10}") private val batchSize: Int,
     @Value("\${app.analysis.cover-letter.max-retries:3}") private val maxRetries: Int,
@@ -138,7 +140,7 @@ class CoverLetterRetryService(
     }
 
     /**
-     * Пытается сгенерировать сопроводительное письмо для анализа
+     * Пытается сгенерировать сопроводительное письмо для анализа (одна попытка)
      */
     private suspend fun retryCoverLetterGeneration(analysis: VacancyAnalysis): String? {
         try {
@@ -153,18 +155,34 @@ class CoverLetterRetryService(
             val resume = resumeService.loadResume()
             val resumeStructure = resumeService.getResumeStructure(resume)
 
-            // Используем метод из VacancyAnalysisService для генерации письма
-            // Вызываем analyzeVacancy, который пересоздаст анализ, но обновит письмо
-            // Это не идеально, но работает
-            val updatedAnalysis = vacancyAnalysisService.analyzeVacancy(vacancy)
-            return updatedAnalysis.suggestedCoverLetter
+            // Восстанавливаем AnalysisResult из сохраненного анализа
+            val matchedSkills = try {
+                val skillsJson = analysis.matchedSkills
+                if (skillsJson != null && skillsJson.isNotBlank()) {
+                    @Suppress("UNCHECKED_CAST")
+                    (objectMapper.readValue(skillsJson, List::class.java) as List<String>)
+                } else {
+                    emptyList()
+                }
+            } catch (e: Exception) {
+                log.warn("⚠️ [CoverLetterRetry] Failed to parse matchedSkills for analysis ${analysis.id}: ${e.message}")
+                emptyList()
+            }
+
+            val analysisResult = VacancyAnalysisService.AnalysisResult(
+                isRelevant = analysis.isRelevant,
+                relevanceScore = analysis.relevanceScore,
+                reasoning = analysis.reasoning,
+                matchedSkills = matchedSkills,
+            )
+
+            // Используем метод из VacancyAnalysisService для генерации письма (одна попытка)
+            return vacancyAnalysisService.generateCoverLetter(vacancy, resume, resumeStructure, analysisResult)
         } catch (e: Exception) {
             log.error("❌ [CoverLetterRetry] Error generating cover letter for analysis ${analysis.id}: ${e.message}", e)
             return null
         }
     }
-    
-    // Вспомогательный метод для создания AnalysisResult (нужно добавить в VacancyAnalysisService)
 
     /**
      * Добавляет анализ в очередь ретраев
