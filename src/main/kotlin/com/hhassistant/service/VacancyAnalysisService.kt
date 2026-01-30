@@ -12,6 +12,7 @@ import com.hhassistant.repository.VacancyAnalysisRepository
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
+import kotlinx.coroutines.delay
 
 @Service
 class VacancyAnalysisService(
@@ -212,7 +213,7 @@ class VacancyAnalysisService(
                 if (attempt < maxRetries) {
                     val delayMs = attempt * 1000L // Экспоненциальная задержка: 1s, 2s, 3s
                     log.info("🔄 [Ollama] Retrying cover letter generation in ${delayMs}ms...")
-                    kotlinx.coroutines.delay(delayMs)
+                    delay(delayMs)
                 } else {
                     log.error("❌ [Ollama] All $maxRetries attempts to generate cover letter failed for vacancy ${vacancy.id}", e)
                 }
