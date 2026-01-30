@@ -144,11 +144,59 @@ class VacancyService(
 
     /**
      * Получает список новых вакансий, которые еще не были проанализированы.
+     * Исключает вакансии со статусом NOT_INTERESTED (неинтересные).
      *
      * @return Список вакансий со статусом NEW
      */
     fun getNewVacanciesForAnalysis(): List<Vacancy> {
         return vacancyRepository.findByStatus(VacancyStatus.NEW)
+            .filter { it.status != VacancyStatus.NOT_INTERESTED }
+    }
+    
+    /**
+     * Получает список вакансий, которые еще не были просмотрены пользователем.
+     * Включает вакансии со статусами: NEW, ANALYZED, SENT_TO_USER
+     * Исключает: SKIPPED, APPLIED, NOT_INTERESTED
+     *
+     * @return Список непросмотренных вакансий
+     */
+    fun getUnviewedVacancies(): List<Vacancy> {
+        return vacancyRepository.findByStatusIn(
+            listOf(
+                VacancyStatus.NEW,
+                VacancyStatus.ANALYZED,
+                VacancyStatus.SENT_TO_USER,
+            )
+        )
+    }
+    
+    /**
+     * Получает вакансию по ID
+     *
+     * @param id ID вакансии
+     * @return Вакансия или null, если не найдена
+     */
+    fun getVacancyById(id: String): Vacancy? {
+        return vacancyRepository.findById(id).orElse(null)
+    }
+    
+    /**
+     * Получает все вакансии
+     *
+     * @return Список всех вакансий
+     */
+    fun findAllVacancies(): List<Vacancy> {
+        return vacancyRepository.findAll()
+    }
+    
+    /**
+     * Получает вакансии по статусу
+     *
+     * @param status Статус вакансий
+     * @return Список вакансий с указанным статусом
+     */
+    fun findVacanciesByStatus(status: VacancyStatus): List<Vacancy> {
+        return vacancyRepository.findByStatus(status)
     }
 
     /**
@@ -161,7 +209,7 @@ class VacancyService(
         try {
             val updatedVacancy = vacancy.copy(status = newStatus)
             vacancyRepository.save(updatedVacancy)
-            log.debug("Updated vacancy ${vacancy.id} status to $newStatus")
+            log.info("✅ [VacancyService] Updated vacancy ${vacancy.id} ('${vacancy.name}') status: ${vacancy.status} -> $newStatus")
         } catch (e: Exception) {
             log.error("Error updating vacancy ${vacancy.id} status: ${e.message}", e)
             throw VacancyProcessingException(
@@ -169,6 +217,24 @@ class VacancyService(
                 vacancy.id,
                 e,
             )
+        }
+    }
+    
+    /**
+     * Обновляет статус вакансии по ID
+     *
+     * @param vacancyId ID вакансии
+     * @param newStatus Новый статус
+     * @return Обновленная вакансия или null, если не найдена
+     */
+    fun updateVacancyStatusById(vacancyId: String, newStatus: VacancyStatus): Vacancy? {
+        val vacancy = getVacancyById(vacancyId)
+        return if (vacancy != null) {
+            updateVacancyStatus(vacancy, newStatus)
+            getVacancyById(vacancyId) // Возвращаем обновленную версию
+        } else {
+            log.warn("⚠️ [VacancyService] Vacancy with ID $vacancyId not found, cannot update status")
+            null
         }
     }
 

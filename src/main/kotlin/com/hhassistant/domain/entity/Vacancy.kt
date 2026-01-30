@@ -52,4 +52,6 @@ enum class VacancyStatus {
     ANALYZED, // Проанализирована LLM
     SENT_TO_USER, // Отправлена в Telegram
     SKIPPED, // Не релевантна
+    APPLIED, // Откликнулся на вакансию
+    NOT_INTERESTED, // Неинтересная вакансия (не удалять, но не показывать повторно)
 }

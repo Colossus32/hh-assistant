@@ -267,6 +267,10 @@ class VacancySchedulerService(
         sb.appendLine()
         sb.appendLine("🔗 <a href=\"${vacancy.url}\">Открыть вакансию на HH.ru</a>")
         sb.appendLine()
+        sb.appendLine("⚡ <b>Быстрые действия:</b>")
+        sb.appendLine("   ✅ <a href=\"http://localhost:8080/api/vacancies/${vacancy.id}/mark-applied\">Откликнулся</a>")
+        sb.appendLine("   ❌ <a href=\"http://localhost:8080/api/vacancies/${vacancy.id}/mark-not-interested\">Неинтересная</a>")
+        sb.appendLine()
         
         // Добавляем описание вакансии
         if (!vacancy.description.isNullOrBlank()) {
