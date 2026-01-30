@@ -192,3 +192,4 @@ curl "http://localhost:8080/api/vacancies/search?keywords=Kotlin"
 - **Ваша заявка:** #18240 (одобрена)
 
 
+

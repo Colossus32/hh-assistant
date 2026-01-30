@@ -235,3 +235,4 @@ ORDER BY va.relevance_score DESC;
 4. **Мониторьте логи** для отслеживания работы
 
 
+
