@@ -30,7 +30,7 @@ app:
   schedule:
     vacancy-check: "0 */15 * * * *"  # Every 15 minutes
   max-vacancies-per-cycle: 50
-  dry-run: true
+  dry-run: false  # По умолчанию выключен, включается через профиль dry-run
   analysis:
     min-relevance-score: 0.6  # Minimum score to consider vacancy relevant
     max-concurrent-requests: 3  # Maximum concurrent requests to LLM for analysis
@@ -123,6 +123,12 @@ hh:
     search:
       per-page: 50
       default-page: 0
+  oauth:
+    client-id: ${HH_CLIENT_ID:}
+    client-secret: ${HH_CLIENT_SECRET:}
+    redirect-uri: ${HH_REDIRECT_URI:http://localhost:8080/oauth/callback}
+    authorization-url: https://hh.ru/oauth/authorize
+    token-url: https://hh.ru/oauth/token
   proxy:
     enabled: ${PROXY_ENABLED:false}
     host: ${PROXY_HOST:}

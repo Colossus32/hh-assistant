@@ -1,0 +1,22 @@
+# Конфигурация для dry-run профиля
+# Используется для тестирования без реальных запросов к HH.ru API
+
+spring:
+  profiles:
+    active: dry-run
+
+app:
+  dry-run: true
+  schedule:
+    vacancy-check: "0 */15 * * * *"  # Every 15 minutes (но не выполняется из-за dry-run)
+  max-vacancies-per-cycle: 50
+  analysis:
+    min-relevance-score: 0.6
+    max-concurrent-requests: 3
+
+# В dry-run режиме HH.ru API не используется, но health check все равно работает
+hh:
+  api:
+    access-token: ${HH_ACCESS_TOKEN:}  # Может быть пустым в dry-run
+
+

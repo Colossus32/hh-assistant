@@ -52,12 +52,13 @@ try {
     }
     $bodyString = $formData -join "&"
 
-    $response = Invoke-RestMethod -Uri "https://hh.ru/oauth/token" `
-        -Method Post `
-        -Body $bodyString `
-        -ContentType "application/x-www-form-urlencoded"
+    try {
+        $response = Invoke-RestMethod -Uri "https://hh.ru/oauth/token" `
+            -Method Post `
+            -Body $bodyString `
+            -ContentType "application/x-www-form-urlencoded"
 
-    if ($response.access_token) {
+        if ($response.access_token) {
         Write-Host ""
         Write-Host "=== Токен успешно получен! ===" -ForegroundColor Green
         Write-Host ""
@@ -101,12 +102,12 @@ try {
         Write-Host "Добавьте следующую строку в ваш .env файл:" -ForegroundColor Yellow
         Write-Host "HH_ACCESS_TOKEN=$($response.access_token)" -ForegroundColor White
         
-    } else {
+        } else {
         Write-Host "Ошибка: токен не найден в ответе" -ForegroundColor Red
         Write-Host "Ответ сервера:" -ForegroundColor Yellow
         Write-Host ($response | ConvertTo-Json -Depth 10)
         exit 1
-    }
+        }
     
 } catch {
     Write-Host ""

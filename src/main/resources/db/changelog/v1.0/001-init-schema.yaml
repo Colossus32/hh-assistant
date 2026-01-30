@@ -8,3 +8,5 @@ databaseChangeLog:
               -- Schema initialization
               -- This changelog ensures the database exists
             endDelimiter: ;
+
+

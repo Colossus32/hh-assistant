@@ -2,7 +2,9 @@ package com.hhassistant.health
 
 import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.runBlocking
+import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.actuate.health.Health
 import org.springframework.boot.actuate.health.HealthIndicator
 import org.springframework.stereotype.Component
@@ -15,9 +17,28 @@ import org.springframework.web.reactive.function.client.bodyToMono
 @Component
 class HHAPIHealthIndicator(
     @Qualifier("hhWebClient") private val webClient: WebClient,
+    @Value("\${app.dry-run:false}") private val dryRun: Boolean,
+    @Value("\${hh.api.access-token:}") private val accessToken: String,
 ) : HealthIndicator {
+    private val log = KotlinLogging.logger {}
 
     override fun health(): Health {
+        if (dryRun) {
+            log.info { "HHAPI health skipped: dry-run mode enabled" }
+            return Health.unknown()
+                .withDetail("status", "skipped")
+                .withDetail("reason", "Dry-run mode enabled")
+                .build()
+        }
+
+        if (accessToken.isBlank()) {
+            log.info { "HHAPI health skipped: hh.api.access-token is not configured" }
+            return Health.unknown()
+                .withDetail("status", "skipped")
+                .withDetail("reason", "HH access token not configured")
+                .build()
+        }
+
         return try {
             runBlocking {
                 // Проверяем доступность API через запрос информации о пользователе

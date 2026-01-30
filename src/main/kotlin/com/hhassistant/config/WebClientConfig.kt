@@ -7,9 +7,11 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpHeaders
+import org.springframework.http.client.reactive.ReactorClientHttpConnector
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction
 import org.springframework.web.reactive.function.client.WebClient
 import reactor.core.publisher.Mono
+import reactor.netty.http.client.HttpClient
 import reactor.util.retry.Retry
 import java.time.Duration
 
@@ -27,20 +29,25 @@ class WebClientConfig(
     @Qualifier("hhWebClient")
     fun hhWebClient(
         @Value("\${hh.api.base-url}") baseUrl: String,
-        @Value("\${hh.api.access-token}") accessToken: String,
+        @Value("\${hh.api.access-token:}") accessToken: String,
         @Value("\${hh.api.user-agent}") userAgent: String,
         @Value("\${hh.api.auth-prefix}") authPrefix: String,
         @Value("\${hh.api.accept-header}") acceptHeader: String,
     ): WebClient {
-        return WebClient.builder()
+        val builder = WebClient.builder()
             .baseUrl(baseUrl)
             .clientConnector(proxyManager.getConnector())
             .defaultHeader(HttpHeaders.USER_AGENT, userAgent)
-            .defaultHeader(HttpHeaders.AUTHORIZATION, "$authPrefix $accessToken")
             .defaultHeader(HttpHeaders.ACCEPT, acceptHeader)
             .filter(retryFilter())
             .filter(errorLoggingFilter())
-            .build()
+
+        // Добавляем Authorization header только если токен указан
+        if (accessToken.isNotBlank()) {
+            builder.defaultHeader(HttpHeaders.AUTHORIZATION, "$authPrefix $accessToken")
+        }
+
+        return builder.build()
     }
 
     @Bean
@@ -50,10 +57,19 @@ class WebClientConfig(
         @Value("\${ollama.timeout-seconds}") timeoutSeconds: Long,
         @Value("\${ollama.max-in-memory-size-mb}") maxInMemorySizeMb: Int,
     ): WebClient {
+        val timeout = Duration.ofSeconds(timeoutSeconds)
+        val httpClient = HttpClient.create()
+            .responseTimeout(timeout)
+            .doOnConnected { conn ->
+                conn.addHandlerLast(
+                    io.netty.handler.timeout.ReadTimeoutHandler(timeoutSeconds.toInt()),
+                )
+            }
+
         return WebClient.builder()
             .baseUrl(baseUrl)
+            .clientConnector(ReactorClientHttpConnector(httpClient))
             .codecs { it.defaultCodecs().maxInMemorySize(maxInMemorySizeMb * 1024 * 1024) }
-            .filter(timeoutFilter(Duration.ofSeconds(timeoutSeconds)))
             .build()
     }
 
@@ -92,11 +108,6 @@ class WebClientConfig(
         }
     }
 
-    private fun timeoutFilter(@Suppress("UNUSED_PARAMETER") timeout: Duration): ExchangeFilterFunction {
-        // Timeout is handled by ReactorClientHttpConnector
-        // This is a placeholder for future timeout logic
-        return ExchangeFilterFunction.ofRequestProcessor { Mono.just(it) }
-    }
 
     private fun errorLoggingFilter(): ExchangeFilterFunction {
         return ExchangeFilterFunction.ofResponseProcessor { response ->

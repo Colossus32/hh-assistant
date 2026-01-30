@@ -7,3 +7,4 @@ data class VacancySearchResponse(
     val perPage: Int,
     val page: Int,
 )
+

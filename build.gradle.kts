@@ -95,3 +95,14 @@ ktlint {
 tasks.named("check") {
     dependsOn("ktlintCheck")
 }
+
+tasks.named("build") {
+    dependsOn("ktlintFormat")
+}
+
+// Быстрый билд без форматирования и тестов (для локальной разработки)
+tasks.register("fastBuild") {
+    dependsOn("bootJar")
+    description = "Быстрый билд без форматирования и тестов"
+    group = "build"
+}
