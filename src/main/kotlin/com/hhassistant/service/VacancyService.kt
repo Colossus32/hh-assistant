@@ -112,7 +112,8 @@ class VacancyService(
                         throw e
                     }
                 } else {
-                    log.warn("⚠️ [VacancyService] Token refresh failed or not available, throwing original exception")
+                    log.warn("⚠️ [VacancyService] Token refresh failed or not available")
+                    log.warn("⚠️ [VacancyService] Please obtain a new token via OAuth: http://localhost:8080/oauth/authorize")
                     // Пробрасываем исключение дальше, чтобы оно обработалось в Scheduler
                     throw e
                 }

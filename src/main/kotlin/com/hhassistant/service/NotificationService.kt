@@ -132,12 +132,14 @@ class NotificationService(
             appendLine("$errorMessage")
             appendLine()
             appendLine("🔧 <b>Что делать:</b>")
-            appendLine("1. Получите новый токен через OAuth flow")
-            appendLine("2. Обновите HH_ACCESS_TOKEN в .env файле")
-            appendLine("3. Убедитесь, что токен имеет права на поиск вакансий")
+            appendLine("1. Откройте в браузере: <a href=\"http://localhost:8080/oauth/authorize\">http://localhost:8080/oauth/authorize</a>")
+            appendLine("2. Авторизуйтесь на HH.ru")
+            appendLine("3. Токен автоматически сохранится в .env файл")
             appendLine("4. Перезапустите приложение")
             appendLine()
-            appendLine("📖 Инструкция: см. docs/GET_TOKEN_STEP_BY_STEP.md")
+            appendLine("💡 <b>Совет:</b> После получения токена он будет автоматически сохранен, вам не нужно копировать его вручную!")
+            appendLine()
+            appendLine("📖 Подробная инструкция: docs/GET_TOKEN_STEP_BY_STEP.md")
         }
 
         runBlocking {

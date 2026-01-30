@@ -30,13 +30,20 @@ class OAuthController(
      * GET /oauth/authorize
      */
     @GetMapping("/authorize")
-    fun authorize(): ResponseEntity<Map<String, String>> {
+    fun authorize(): ResponseEntity<Map<String, Any>> {
         val authUrl = oauthService.getAuthorizationUrl(authorizationUrl)
         log.info { "Generated authorization URL: $authUrl" }
         return ResponseEntity.ok(
             mapOf(
                 "authorization_url" to authUrl,
                 "message" to "Open this URL in your browser to authorize the application",
+                "instructions" to listOf(
+                    "1. Click on the authorization_url above or copy it to your browser",
+                    "2. Authorize the application on HH.ru",
+                    "3. You will be redirected back and the token will be automatically saved",
+                    "4. Restart the application to use the new token",
+                ),
+                "auto_save" to "Token will be automatically saved to .env file after authorization",
             ),
         )
     }
