@@ -1,5 +1,6 @@
 package com.hhassistant.client.hh
 
+import com.github.benmanes.caffeine.cache.Cache
 import com.hhassistant.client.hh.dto.VacancyDto
 import com.hhassistant.client.hh.dto.VacancySearchResponse
 import com.hhassistant.domain.entity.SearchConfig
@@ -21,6 +22,7 @@ class HHVacancyClient(
     @Value("\${hh.api.search.per-page}") private val perPage: Int,
     @Value("\${hh.api.search.default-page}") private val defaultPage: Int,
     private val rateLimitService: RateLimitService,
+    @Qualifier("vacancyDetailsCache") private val vacancyDetailsCache: Cache<String, VacancyDto>,
 ) {
     private val log = KotlinLogging.logger {}
 
@@ -76,10 +78,17 @@ class HHVacancyClient(
     }
 
     suspend fun getVacancyDetails(id: String): VacancyDto {
+        // Проверяем кэш перед запросом к API
+        @Suppress("UNCHECKED_CAST")
+        (vacancyDetailsCache.getIfPresent(id) as? VacancyDto)?.let { cached ->
+            log.debug("💾 [HH.ru API] Using cached vacancy details for ID: $id")
+            return cached
+        }
+
         // Проверяем rate limit перед запросом
         rateLimitService.tryConsume()
 
-        log.info("🔍 [HH.ru API] Fetching vacancy details for ID: $id")
+        log.info("🔍 [HH.ru API] Fetching vacancy details for ID: $id (cache miss)")
 
         return try {
             val vacancy = webClient.get()
@@ -88,7 +97,9 @@ class HHVacancyClient(
                 .bodyToMono<VacancyDto>()
                 .awaitSingle()
 
-            log.info("✅ [HH.ru API] Fetched vacancy: ${vacancy.name} (ID: $id)")
+            // Кэшируем результат
+            vacancyDetailsCache.put(id, vacancy)
+            log.info("✅ [HH.ru API] Fetched and cached vacancy: ${vacancy.name} (ID: $id)")
 
             vacancy
         } catch (e: WebClientResponseException) {

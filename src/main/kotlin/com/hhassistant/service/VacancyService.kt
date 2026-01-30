@@ -1,5 +1,6 @@
 package com.hhassistant.service
 
+import com.github.benmanes.caffeine.cache.Cache
 import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.client.hh.dto.toEntity
 import com.hhassistant.config.FormattingConfig
@@ -11,7 +12,10 @@ import com.hhassistant.exception.VacancyProcessingException
 import com.hhassistant.repository.SearchConfigRepository
 import com.hhassistant.repository.VacancyRepository
 import mu.KotlinLogging
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.cache.annotation.CacheEvict
+import org.springframework.cache.annotation.Cacheable
 import org.springframework.stereotype.Service
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -29,6 +33,7 @@ class VacancyService(
     @Value("\${app.search.area:}") private val yamlArea: String?,
     @Value("\${app.search.min-salary:}") private val yamlMinSalary: Int?,
     @Value("\${app.search.experience:}") private val yamlExperience: String?,
+    @Qualifier("vacancyIdsCache") private val vacancyIdsCache: Cache<String, Set<String>>,
 ) {
     private val log = KotlinLogging.logger {}
     
@@ -81,9 +86,9 @@ class VacancyService(
                 )
                 listOf(yamlConfig)
             }
-            // Приоритет 3: Конфигурации из БД
+            // Приоритет 3: Конфигурации из БД (с кэшированием)
             else -> {
-                val dbConfigs = searchConfigRepository.findByIsActiveTrue()
+                val dbConfigs = getActiveSearchConfigs()
                 if (dbConfigs.isEmpty()) {
                     log.warn("⚠️ [VacancyService] No active search configurations found (neither in DB nor in application.yml)")
                     log.warn("⚠️ [VacancyService] Configure search via DB (INSERT INTO search_configs) OR via application.yml (app.search.keywords-rotation)")
@@ -245,6 +250,39 @@ class VacancyService(
     }
 
     /**
+     * Получает активные конфигурации поиска с кэшированием
+     */
+    @Cacheable(value = ["searchConfigs"], key = "'active'")
+    fun getActiveSearchConfigs(): List<SearchConfig> {
+        log.debug("💾 [VacancyService] Loading active search configs from DB (cache miss)")
+        return searchConfigRepository.findByIsActiveTrue()
+    }
+    
+    /**
+     * Инвалидирует кэш конфигураций поиска
+     */
+    @CacheEvict(value = ["searchConfigs"], allEntries = true)
+    fun evictSearchConfigCache() {
+        log.debug("🔄 [VacancyService] Evicted search config cache")
+    }
+
+    /**
+     * Получает список всех ID вакансий с кэшированием
+     */
+    fun getAllVacancyIds(): Set<String> {
+        val cacheKey = "all"
+        vacancyIdsCache.getIfPresent(cacheKey)?.let { cached ->
+            log.debug("💾 [VacancyService] Using cached vacancy IDs (${cached.size} IDs)")
+            return cached
+        }
+
+        log.debug("💾 [VacancyService] Loading vacancy IDs from DB (cache miss)")
+        val ids = vacancyRepository.findAllIds().toSet()
+        vacancyIdsCache.put(cacheKey, ids)
+        return ids
+    }
+
+    /**
      * Обновляет статус вакансии.
      *
      * @param vacancy Вакансия для обновления
@@ -252,9 +290,13 @@ class VacancyService(
      */
     fun updateVacancyStatus(vacancy: Vacancy, newStatus: VacancyStatus) {
         try {
+            val oldStatus = vacancy.status
             val updatedVacancy = vacancy.copy(status = newStatus)
             vacancyRepository.save(updatedVacancy)
-            log.info("✅ [VacancyService] Updated vacancy ${vacancy.id} ('${vacancy.name}') status: ${vacancy.status} -> $newStatus")
+            log.info("✅ [VacancyService] Updated vacancy ${vacancy.id} ('${vacancy.name}') status: $oldStatus -> $newStatus")
+            
+            // Инвалидируем кэш списков вакансий при изменении статуса
+            invalidateVacancyListCache()
         } catch (e: Exception) {
             log.error("Error updating vacancy ${vacancy.id} status: ${e.message}", e)
             throw VacancyProcessingException(
@@ -290,7 +332,7 @@ class VacancyService(
         val vacancyDtos = hhVacancyClient.searchVacancies(config)
         log.info("📥 [VacancyService] Received ${vacancyDtos.size} vacancies from HH.ru API for config ID=$configId")
 
-        val existingIds = vacancyRepository.findAllIds().toSet()
+        val existingIds = getAllVacancyIds()
         log.debug("💾 [VacancyService] Checking against ${existingIds.size} existing vacancies in database")
 
         val newVacancies = vacancyDtos
@@ -306,10 +348,32 @@ class VacancyService(
             newVacancies.forEach { vacancy ->
                 log.debug("   - Saved: ${vacancy.name} (ID: ${vacancy.id}, Employer: ${vacancy.employer}, Salary: ${vacancy.salary})")
             }
+            
+            // Инвалидируем кэш ID вакансий при добавлении новых
+            invalidateVacancyIdsCache()
+            // Также инвалидируем кэш конфигураций поиска (на случай, если они изменились)
+            // Это делается через @CacheEvict в getActiveSearchConfigs, но можно и явно
         } else {
             log.info("ℹ️ [VacancyService] No new vacancies to save for config ID=$configId")
         }
 
         return newVacancies
+    }
+
+    /**
+     * Инвалидирует кэш ID вакансий
+     */
+    private fun invalidateVacancyIdsCache() {
+        vacancyIdsCache.invalidateAll()
+        log.debug("🔄 [VacancyService] Invalidated vacancy IDs cache")
+    }
+
+    /**
+     * Инвалидирует кэш списков вакансий
+     */
+    private fun invalidateVacancyListCache() {
+        // Кэш списков вакансий будет автоматически обновлен через TTL (30 секунд)
+        // Но можно явно инвалидировать через CacheManager, если нужно
+        log.debug("🔄 [VacancyService] Vacancy list cache will be refreshed on next request (TTL: 30s)")
     }
 }

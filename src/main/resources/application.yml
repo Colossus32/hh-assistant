@@ -1,6 +1,9 @@
 spring:
   application:
     name: hh-assistant
+  output:
+    ansi:
+      enabled: always
   
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/hh_assistant}

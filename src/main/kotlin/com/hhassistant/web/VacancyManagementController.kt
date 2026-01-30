@@ -4,6 +4,8 @@ import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.service.VacancyService
 import mu.KotlinLogging
+import org.springframework.cache.annotation.CacheEvict
+import org.springframework.cache.annotation.Cacheable
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
@@ -28,6 +30,7 @@ class VacancyManagementController(
      * GET /api/vacancies/unviewed
      */
     @GetMapping("/unviewed")
+    @Cacheable(value = ["vacancyLists"], key = "'unviewed'", unless = "#result.body.count == 0")
     fun getUnviewedVacancies(): ResponseEntity<Map<String, Any>> {
         log.info("📋 [VacancyManagement] Getting unviewed vacancies...")
         val vacancies = vacancyService.getUnviewedVacancies()
@@ -62,6 +65,7 @@ class VacancyManagementController(
      * GET /api/vacancies/{id}/mark-applied
      */
     @PostMapping("/{id}/mark-applied")
+    @CacheEvict(value = ["vacancyLists"], allEntries = true)
     fun markAsApplied(@PathVariable id: String): ResponseEntity<Map<String, Any>> {
         log.info("✅ [VacancyManagement] Marking vacancy $id as APPLIED...")
         return updateVacancyStatus(id, VacancyStatus.APPLIED, "откликнулся")
@@ -83,6 +87,7 @@ class VacancyManagementController(
      * GET /api/vacancies/{id}/mark-not-interested
      */
     @PostMapping("/{id}/mark-not-interested")
+    @CacheEvict(value = ["vacancyLists"], allEntries = true)
     fun markAsNotInterested(@PathVariable id: String): ResponseEntity<Map<String, Any>> {
         log.info("❌ [VacancyManagement] Marking vacancy $id as NOT_INTERESTED...")
         return updateVacancyStatus(id, VacancyStatus.NOT_INTERESTED, "неинтересная")
@@ -101,6 +106,7 @@ class VacancyManagementController(
      * GET /api/vacancies/{id}
      */
     @GetMapping("/{id}")
+    @Cacheable(value = ["vacancyLists"], key = "#id")
     fun getVacancy(@PathVariable id: String): ResponseEntity<Map<String, Any>> {
         log.info("📋 [VacancyManagement] Getting vacancy $id...")
         val vacancy = vacancyService.getVacancyById(id)
@@ -137,6 +143,7 @@ class VacancyManagementController(
      * GET /api/vacancies?status=APPLIED
      */
     @GetMapping
+    @Cacheable(value = ["vacancyLists"], key = "#status ?: 'all'")
     fun getVacanciesByStatus(@RequestParam(required = false) status: String?): ResponseEntity<Map<String, Any>> {
         val vacancies = if (status != null) {
             try {

@@ -54,6 +54,10 @@ dependencies {
     // Rate Limiting
     implementation("com.bucket4j:bucket4j-core:8.10.1")
 
+    // Caching
+    implementation("org.springframework.boot:spring-boot-starter-cache")
+    implementation("com.github.ben-manes.caffeine:caffeine:3.1.8")
+
     // Environment variables (.env file support)
     implementation("io.github.cdimascio:dotenv-java:3.0.0")
 
