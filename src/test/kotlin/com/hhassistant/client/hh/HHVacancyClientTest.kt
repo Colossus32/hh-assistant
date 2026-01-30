@@ -35,7 +35,10 @@ class HHVacancyClientTest {
         rateLimitService = mockk<RateLimitService>(relaxed = true)
         coEvery { rateLimitService.tryConsume() } returns true
 
-        client = HHVacancyClient(webClient, perPage = 50, defaultPage = 0, rateLimitService)
+        val vacancyDetailsCache = com.github.benmanes.caffeine.cache.Caffeine.newBuilder<String, com.hhassistant.client.hh.dto.VacancyDto>()
+            .build<String, com.hhassistant.client.hh.dto.VacancyDto>()
+
+        client = HHVacancyClient(webClient, perPage = 50, defaultPage = 0, rateLimitService, vacancyDetailsCache)
     }
 
     @AfterEach

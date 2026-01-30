@@ -29,16 +29,36 @@ class VacancyAnalysisServiceTest {
     private lateinit var resumeService: ResumeService
     private lateinit var repository: VacancyAnalysisRepository
     private lateinit var objectMapper: ObjectMapper
+    private lateinit var promptConfig: PromptConfig
+    private lateinit var coverLetterQueueService: CoverLetterQueueService
+    private lateinit var eventPublisher: org.springframework.context.ApplicationEventPublisher
+    private lateinit var vacancyContentValidator: VacancyContentValidator
+    private lateinit var metricsService: com.hhassistant.metrics.MetricsService
     private lateinit var service: VacancyAnalysisService
 
     @BeforeEach
     fun setup() {
-        ollamaClient = mockk()
-        resumeService = mockk()
-        repository = mockk()
+        ollamaClient = mockk(relaxed = true)
+        resumeService = mockk(relaxed = true)
+        repository = mockk(relaxed = true)
         objectMapper = jacksonObjectMapper()
-        val promptConfig = PromptConfig() // Используем значения по умолчанию
-        service = VacancyAnalysisService(ollamaClient, resumeService, repository, objectMapper, promptConfig, 0.6)
+        promptConfig = PromptConfig()
+        coverLetterQueueService = mockk(relaxed = true)
+        eventPublisher = mockk(relaxed = true)
+        vacancyContentValidator = mockk(relaxed = true)
+        metricsService = mockk(relaxed = true)
+        service = VacancyAnalysisService(
+            ollamaClient = ollamaClient,
+            resumeService = resumeService,
+            repository = repository,
+            objectMapper = objectMapper,
+            promptConfig = promptConfig,
+            coverLetterQueueService = coverLetterQueueService,
+            eventPublisher = eventPublisher,
+            vacancyContentValidator = vacancyContentValidator,
+            metricsService = metricsService,
+            minRelevanceScore = 0.6,
+        )
     }
 
     @Test
@@ -49,6 +69,7 @@ class VacancyAnalysisServiceTest {
             val resumeStructure = createTestResumeStructure()
 
             every { repository.findByVacancyId(vacancy.id) } returns null
+            every { vacancyContentValidator.validate(vacancy) } returns com.hhassistant.service.VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
             coEvery { resumeService.loadResume() } returns resume
             every { resumeService.getResumeStructure(resume) } returns resumeStructure
 
@@ -97,6 +118,7 @@ class VacancyAnalysisServiceTest {
             val resumeStructure = createTestResumeStructure()
 
             every { repository.findByVacancyId(vacancy.id) } returns null
+            every { vacancyContentValidator.validate(vacancy) } returns com.hhassistant.service.VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
             coEvery { resumeService.loadResume() } returns resume
             every { resumeService.getResumeStructure(resume) } returns resumeStructure
 
@@ -166,6 +188,7 @@ class VacancyAnalysisServiceTest {
         val resumeStructure = createTestResumeStructure()
 
         every { repository.findByVacancyId(vacancy.id) } returns null
+        every { vacancyContentValidator.validate(vacancy) } returns com.hhassistant.service.VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
         coEvery { resumeService.loadResume() } returns resume
         every { resumeService.getResumeStructure(resume) } returns resumeStructure
 
@@ -189,6 +212,7 @@ class VacancyAnalysisServiceTest {
         val resumeStructure = createTestResumeStructure()
 
         every { repository.findByVacancyId(vacancy.id) } returns null
+        every { vacancyContentValidator.validate(vacancy) } returns com.hhassistant.service.VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
         coEvery { resumeService.loadResume() } returns resume
         every { resumeService.getResumeStructure(resume) } returns resumeStructure
 
@@ -213,6 +237,7 @@ class VacancyAnalysisServiceTest {
         val resumeStructure = createTestResumeStructure()
 
         every { repository.findByVacancyId(vacancy.id) } returns null
+        every { vacancyContentValidator.validate(vacancy) } returns com.hhassistant.service.VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
         coEvery { resumeService.loadResume() } returns resume
         every { resumeService.getResumeStructure(resume) } returns resumeStructure
 
@@ -246,6 +271,7 @@ class VacancyAnalysisServiceTest {
             val resumeStructure = createTestResumeStructure()
 
             every { repository.findByVacancyId(vacancy.id) } returns null
+            every { vacancyContentValidator.validate(vacancy) } returns com.hhassistant.service.VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
             coEvery { resumeService.loadResume() } returns resume
             every { resumeService.getResumeStructure(resume) } returns resumeStructure
 
