@@ -34,22 +34,25 @@ class WebClientConfig(
         @Value("\${hh.api.auth-prefix}") authPrefix: String,
         @Value("\${hh.api.accept-header}") acceptHeader: String,
     ): WebClient {
-        // HH.ru API блокирует User-Agent с example.com или в черном списке
-        // Если userAgent не указан или содержит example.com, НЕ добавляем User-Agent заголовок
-        // WebClient/Netty автоматически добавит свой User-Agent по умолчанию
+        // HH.ru API требует обязательный заголовок HH-User-Agent (не User-Agent!)
+        // Формат: "AppName/Version (contact@email.com)"
+        // Согласно документации: https://api.hh.ru/openapi/redoc#tag/Vakansii/operation/get-vacancies
+        // HH-User-Agent является required header parameter
         var builder = WebClient.builder()
             .baseUrl(baseUrl)
             .clientConnector(proxyManager.getConnector())
         
         if (userAgent.isNotBlank() && !userAgent.contains("example.com", ignoreCase = true)) {
-            // Добавляем User-Agent только если указан реальный (не example.com)
-            builder = builder.defaultHeader(HttpHeaders.USER_AGENT, userAgent)
-            log.info("✅ [WebClient] HH.ru WebClient configured with User-Agent: $userAgent")
+            // Добавляем HH-User-Agent только если указан реальный (не example.com)
+            builder = builder.defaultHeader("HH-User-Agent", userAgent)
+            log.info("✅ [WebClient] HH.ru WebClient configured with HH-User-Agent: $userAgent")
         } else {
-            // Не добавляем User-Agent - используем дефолтный от WebClient/Netty
-            log.warn("⚠️ [WebClient] User-Agent не указан или содержит example.com - не добавляем заголовок")
-            log.warn("⚠️ [WebClient] Будет использован User-Agent по умолчанию от WebClient/Netty")
-            log.warn("⚠️ [WebClient] Для явного указания установите HH_USER_AGENT в .env: 'HH-Assistant/1.0 (your@email.com)'")
+            // Если не указан или содержит example.com, используем минимальный формат
+            // ВАЖНО: HH-User-Agent обязателен, поэтому используем минимальный формат
+            val defaultUserAgent = "HH-Assistant/1.0"
+            builder = builder.defaultHeader("HH-User-Agent", defaultUserAgent)
+            log.warn("⚠️ [WebClient] HH-User-Agent не указан или содержит example.com - используем минимальный формат: $defaultUserAgent")
+            log.warn("⚠️ [WebClient] Для production установите HH_USER_AGENT в .env: 'HH-Assistant/1.0 (your@email.com)'")
         }
         
         builder = builder

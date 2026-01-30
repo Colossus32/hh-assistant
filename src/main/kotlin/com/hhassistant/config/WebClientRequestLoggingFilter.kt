@@ -14,8 +14,9 @@ object WebClientRequestLoggingFilter {
     fun create(): ExchangeFilterFunction {
         return ExchangeFilterFunction.ofRequestProcessor { request ->
             // Логируем информацию о запросе (без токена)
+            val hhUserAgentHeader = request.headers().getFirst("HH-User-Agent")
             val userAgentHeader = request.headers().getFirst(HttpHeaders.USER_AGENT)
-            log.debug("🌐 [WebClient] Request to ${request.url()}: User-Agent='$userAgentHeader'")
+            log.debug("🌐 [WebClient] Request to ${request.url()}: HH-User-Agent='$hhUserAgentHeader', User-Agent='$userAgentHeader'")
             
             val authHeader = request.headers().getFirst(HttpHeaders.AUTHORIZATION)
             if (authHeader != null) {
