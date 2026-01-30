@@ -45,7 +45,38 @@ data class Vacancy(
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20, nullable = false)
     val status: VacancyStatus = VacancyStatus.NEW,
-)
+) {
+    /**
+     * Rich Domain Model: бизнес-логика внутри entity
+     * Проверяет, является ли вакансия новой (еще не обработанной)
+     */
+    fun isNew(): Boolean = status == VacancyStatus.NEW
+    
+    /**
+     * Проверяет, была ли вакансия отправлена пользователю
+     */
+    fun isSentToUser(): Boolean = status == VacancyStatus.SENT_TO_USER
+    
+    /**
+     * Проверяет, была ли вакансия пропущена (не релевантна)
+     */
+    fun isSkipped(): Boolean = status == VacancyStatus.SKIPPED
+    
+    /**
+     * Проверяет, была ли вакансия отмечена как неинтересная
+     */
+    fun isNotInterested(): Boolean = status == VacancyStatus.NOT_INTERESTED
+    
+    /**
+     * Проверяет, можно ли обрабатывать вакансию (не помечена как неинтересная)
+     */
+    fun canBeProcessed(): Boolean = status != VacancyStatus.NOT_INTERESTED
+    
+    /**
+     * Создает копию вакансии с новым статусом (immutability)
+     */
+    fun withStatus(newStatus: VacancyStatus): Vacancy = copy(status = newStatus)
+}
 
 enum class VacancyStatus {
     NEW, // Новая вакансия

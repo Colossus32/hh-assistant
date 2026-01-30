@@ -191,3 +191,4 @@ curl "http://localhost:8080/api/vacancies/search?keywords=Kotlin"
 - **HH.ru API документация:** https://api.hh.ru/openapi/redoc
 - **Ваша заявка:** #18240 (одобрена)
 
+

@@ -47,7 +47,51 @@ data class VacancyAnalysis(
     
     @Column(name = "cover_letter_last_attempt_at")
     val coverLetterLastAttemptAt: LocalDateTime? = null,
-)
+) {
+    /**
+     * Rich Domain Model: бизнес-логика внутри entity
+     * Проверяет, успешно ли сгенерировано сопроводительное письмо
+     */
+    fun hasCoverLetter(): Boolean = suggestedCoverLetter != null && 
+        coverLetterGenerationStatus == CoverLetterGenerationStatus.SUCCESS
+    
+    /**
+     * Проверяет, можно ли повторить генерацию письма
+     */
+    fun canRetryCoverLetter(): Boolean = 
+        coverLetterGenerationStatus == CoverLetterGenerationStatus.RETRY_QUEUED ||
+        coverLetterGenerationStatus == CoverLetterGenerationStatus.FAILED
+    
+    /**
+     * Проверяет, была ли генерация письма завершена (успешно или неудачно)
+     */
+    fun isCoverLetterGenerationComplete(): Boolean = 
+        coverLetterGenerationStatus == CoverLetterGenerationStatus.SUCCESS ||
+        coverLetterGenerationStatus == CoverLetterGenerationStatus.FAILED
+    
+    /**
+     * Создает копию анализа с обновленным письмом
+     */
+    fun withCoverLetter(coverLetter: String): VacancyAnalysis = copy(
+        suggestedCoverLetter = coverLetter,
+        coverLetterGenerationStatus = CoverLetterGenerationStatus.SUCCESS,
+        coverLetterAttempts = 0,
+        coverLetterLastAttemptAt = null,
+    )
+    
+    /**
+     * Создает копию анализа с обновленным статусом генерации письма
+     */
+    fun withCoverLetterStatus(
+        status: CoverLetterGenerationStatus,
+        attempts: Int = coverLetterAttempts,
+        lastAttemptAt: LocalDateTime? = LocalDateTime.now(),
+    ): VacancyAnalysis = copy(
+        coverLetterGenerationStatus = status,
+        coverLetterAttempts = attempts,
+        coverLetterLastAttemptAt = lastAttemptAt,
+    )
+}
 
 enum class CoverLetterGenerationStatus {
     NOT_ATTEMPTED,      // Письмо еще не пытались генерировать

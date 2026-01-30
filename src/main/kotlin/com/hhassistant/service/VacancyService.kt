@@ -3,6 +3,7 @@ package com.hhassistant.service
 import com.github.benmanes.caffeine.cache.Cache
 import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.config.AppConstants
+import com.hhassistant.config.VacancyServiceConfig
 import com.hhassistant.client.hh.dto.toEntity
 import com.hhassistant.config.FormattingConfig
 import com.hhassistant.domain.entity.SearchConfig
@@ -28,12 +29,9 @@ class VacancyService(
     private val formattingConfig: FormattingConfig,
     private val notificationService: NotificationService,
     private val tokenRefreshService: TokenRefreshService,
+    private val searchConfigFactory: SearchConfigFactory,
+    private val searchConfig: VacancyServiceConfig,
     @Value("\${app.max-vacancies-per-cycle:50}") private val maxVacanciesPerCycle: Int,
-    @Value("\${app.search.keywords-rotation:#{null}}") private val yamlKeywordsRotation: List<String>?,
-    @Value("\${app.search.keywords:}") private val yamlKeywords: String?, // Оставляем для обратной совместимости
-    @Value("\${app.search.area:}") private val yamlArea: String?,
-    @Value("\${app.search.min-salary:}") private val yamlMinSalary: Int?,
-    @Value("\${app.search.experience:}") private val yamlExperience: String?,
     @Qualifier("vacancyIdsCache") private val vacancyIdsCache: Cache<String, Set<String>>,
 ) {
     private val log = KotlinLogging.logger {}
@@ -48,6 +46,16 @@ class VacancyService(
         val vacancies: List<Vacancy>,
         val searchKeywords: List<String>,
     )
+    
+    /**
+     * Результат загрузки вакансий для одной конфигурации
+     */
+    private sealed class ConfigFetchResult {
+        data class Success(val vacancies: List<Vacancy>) : ConfigFetchResult()
+        data class Unauthorized(val exception: HHAPIException.UnauthorizedException) : ConfigFetchResult()
+        data class RateLimited(val exception: HHAPIException.RateLimitException) : ConfigFetchResult()
+        data class Error(val exception: Exception) : ConfigFetchResult()
+    }
 
     /**
      * Загружает новые вакансии из HH.ru API и сохраняет их в БД.
@@ -57,47 +65,13 @@ class VacancyService(
     suspend fun fetchAndSaveNewVacancies(): FetchResult {
         log.info("🚀 [VacancyService] Starting to fetch new vacancies from HH.ru API")
 
-        // Проверяем, есть ли настройки в application.yml
-        val activeConfigs = when {
-            // Приоритет 1: Ротация ключевых слов из application.yml
-            !yamlKeywordsRotation.isNullOrEmpty() -> {
-                val currentKeyword = getNextRotationKeyword(yamlKeywordsRotation)
-                log.info("📊 [VacancyService] Using keyword rotation from application.yml")
-                log.info("🔄 [VacancyService] Current rotation keyword: '$currentKeyword' (${yamlKeywordsRotation.size} keywords in rotation)")
-                val yamlConfig = SearchConfig(
-                    keywords = currentKeyword,
-                    area = yamlArea?.takeIf { it.isNotBlank() },
-                    minSalary = yamlMinSalary,
-                    maxSalary = null,
-                    experience = yamlExperience?.takeIf { it.isNotBlank() },
-                    isActive = true,
-                )
-                listOf(yamlConfig)
-            }
-            // Приоритет 2: Одно ключевое слово из application.yml (обратная совместимость)
-            !yamlKeywords.isNullOrBlank() -> {
-                log.info("📊 [VacancyService] Using single keyword from application.yml")
-                val yamlConfig = SearchConfig(
-                    keywords = yamlKeywords,
-                    area = yamlArea?.takeIf { it.isNotBlank() },
-                    minSalary = yamlMinSalary,
-                    maxSalary = null,
-                    experience = yamlExperience?.takeIf { it.isNotBlank() },
-                    isActive = true,
-                )
-                listOf(yamlConfig)
-            }
-            // Приоритет 3: Конфигурации из БД (с кэшированием)
-            else -> {
-                val dbConfigs = getActiveSearchConfigs()
-                if (dbConfigs.isEmpty()) {
-                    log.warn("⚠️ [VacancyService] No active search configurations found (neither in DB nor in application.yml)")
-                    log.warn("⚠️ [VacancyService] Configure search via DB (INSERT INTO search_configs) OR via application.yml (app.search.keywords-rotation)")
-                    return FetchResult(emptyList(), emptyList())
-                }
-                log.info("📊 [VacancyService] Using search configurations from database (${dbConfigs.size} config(s))")
-                dbConfigs
-            }
+        // Получаем активные конфигурации поиска (приоритет: YAML rotation > YAML single > DB)
+        val activeConfigs = getActiveSearchConfigs()
+        
+        if (activeConfigs.isEmpty()) {
+            log.warn("⚠️ [VacancyService] No active search configurations found")
+            log.warn("⚠️ [VacancyService] Configure search via DB (INSERT INTO search_configs) OR via application.yml (app.search.keywords-rotation)")
+            return FetchResult(emptyList(), emptyList())
         }
 
         val searchKeywords = activeConfigs.map { it.keywords }
@@ -251,10 +225,42 @@ class VacancyService(
     }
 
     /**
-     * Получает активные конфигурации поиска с кэшированием
+     * Получает активные конфигурации поиска с приоритетом:
+     * 1. Ротация ключевых слов из application.yml
+     * 2. Одно ключевое слово из application.yml (обратная совместимость)
+     * 3. Конфигурации из БД
+     */
+    private fun getActiveSearchConfigs(): List<SearchConfig> {
+        val keywordsRotation = searchConfig.keywordsRotation
+        val keywords = searchConfig.keywords
+        
+        return when {
+            // Приоритет 1: Ротация ключевых слов из application.yml
+            !keywordsRotation.isNullOrEmpty() -> {
+                val currentKeyword = getNextRotationKeyword(keywordsRotation)
+                log.info("📊 [VacancyService] Using keyword rotation from application.yml")
+                log.info("🔄 [VacancyService] Current rotation keyword: '$currentKeyword' (${keywordsRotation.size} keywords in rotation)")
+                listOf(searchConfigFactory.createFromYamlConfig(currentKeyword, searchConfig))
+            }
+            // Приоритет 2: Одно ключевое слово из application.yml (обратная совместимость)
+            !keywords.isNullOrBlank() -> {
+                log.info("📊 [VacancyService] Using single keyword from application.yml")
+                listOf(searchConfigFactory.createFromYamlConfig(keywords, searchConfig))
+            }
+            // Приоритет 3: Конфигурации из БД (с кэшированием)
+            else -> {
+                val dbConfigs = getActiveSearchConfigsFromDb()
+                log.info("📊 [VacancyService] Using search configurations from database (${dbConfigs.size} config(s))")
+                dbConfigs
+            }
+        }
+    }
+    
+    /**
+     * Получает активные конфигурации поиска из БД с кэшированием
      */
     @Cacheable(value = ["searchConfigs"], key = "'active'")
-    fun getActiveSearchConfigs(): List<SearchConfig> {
+    private fun getActiveSearchConfigsFromDb(): List<SearchConfig> {
         log.debug("💾 [VacancyService] Loading active search configs from DB (cache miss)")
         return searchConfigRepository.findByIsActiveTrue()
     }
@@ -284,41 +290,37 @@ class VacancyService(
     }
 
     /**
-     * Обновляет статус вакансии.
-     *
-     * @param vacancy Вакансия для обновления
-     * @param newStatus Новый статус
+     * Обновляет статус вакансии (Rich Domain Model - использует withStatus)
      */
-    fun updateVacancyStatus(vacancy: Vacancy, newStatus: VacancyStatus) {
+    @CacheEvict(value = ["vacancyListCache", "vacancyIdsCache"], allEntries = true)
+    fun updateVacancyStatus(updatedVacancy: Vacancy) {
         try {
-            val oldStatus = vacancy.status
-            val updatedVacancy = vacancy.copy(status = newStatus)
+            val oldStatus = vacancyRepository.findById(updatedVacancy.id)
+                .map { it.status }
+                .orElse(null)
             vacancyRepository.save(updatedVacancy)
-            log.info("✅ [VacancyService] Updated vacancy ${vacancy.id} ('${vacancy.name}') status: $oldStatus -> $newStatus")
+            log.info("✅ [VacancyService] Updated vacancy ${updatedVacancy.id} ('${updatedVacancy.name}') status: $oldStatus -> ${updatedVacancy.status}")
             
             // Инвалидируем кэш списков вакансий при изменении статуса
             invalidateVacancyListCache()
         } catch (e: Exception) {
-            log.error("Error updating vacancy ${vacancy.id} status: ${e.message}", e)
+            log.error("Error updating vacancy ${updatedVacancy.id} status: ${e.message}", e)
             throw VacancyProcessingException(
                 "Failed to update vacancy status",
-                vacancy.id,
+                updatedVacancy.id,
                 e,
             )
         }
     }
     
     /**
-     * Обновляет статус вакансии по ID
-     *
-     * @param vacancyId ID вакансии
-     * @param newStatus Новый статус
-     * @return Обновленная вакансия или null, если не найдена
+     * Обновляет статус вакансии по ID (Rich Domain Model)
      */
+    @CacheEvict(value = ["vacancyListCache", "vacancyIdsCache"], allEntries = true)
     fun updateVacancyStatusById(vacancyId: String, newStatus: VacancyStatus): Vacancy? {
         val vacancy = getVacancyById(vacancyId)
         return if (vacancy != null) {
-            updateVacancyStatus(vacancy, newStatus)
+            updateVacancyStatus(vacancy.withStatus(newStatus))
             getVacancyById(vacancyId) // Возвращаем обновленную версию
         } else {
             log.warn("⚠️ [VacancyService] Vacancy with ID $vacancyId not found, cannot update status")

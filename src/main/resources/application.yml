@@ -55,6 +55,9 @@ app:
     cover-letter:
       max-retries: 3  # Maximum number of retry attempts for cover letter generation
       retry-delay-seconds: 5  # Delay between retry attempts (in seconds)
+      queue:
+        enabled: true  # Enable in-memory queue for cover letter generation
+        max-concurrent: 2  # Maximum concurrent cover letter generations
       retry-queue:
         enabled: true  # Enable retry queue for failed cover letter generations
         batch-size: 10  # Number of analyses to process per batch

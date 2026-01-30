@@ -1162,3 +1162,4 @@ System.out.println("All workers finished!");
 
 *Версия: 1.0 | Январь 2026*
 
+

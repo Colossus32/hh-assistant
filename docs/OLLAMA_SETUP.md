@@ -91,3 +91,4 @@ ollama pull llama3.2:3b
 - Увеличьте timeout в application.yml
 
 
+

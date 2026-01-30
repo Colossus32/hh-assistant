@@ -1,6 +1,5 @@
 package com.hhassistant.service
 
-import com.hhassistant.client.telegram.TelegramClient
 import com.hhassistant.config.AppConstants
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
@@ -23,11 +22,12 @@ import org.springframework.stereotype.Service
 
 @Service
 class VacancySchedulerService(
+    private val vacancyFetchService: VacancyFetchService,
     private val vacancyService: VacancyService,
     private val vacancyAnalysisService: VacancyAnalysisService,
-    private val telegramClient: TelegramClient,
+    private val vacancyStatusService: VacancyStatusService,
     private val notificationService: NotificationService,
-    private val resumeService: ResumeService, // Добавляем для предзагрузки резюме
+    private val resumeService: ResumeService,
     @Value("\${app.dry-run:false}") private val dryRun: Boolean,
     @Value("\${app.analysis.max-concurrent-requests:3}") private val maxConcurrentRequests: Int,
 ) {
@@ -75,91 +75,144 @@ class VacancySchedulerService(
         }
 
         val cycleStartTime = System.currentTimeMillis()
-        log.info("🚀 [Scheduler] ========================================")
-        log.info("🚀 [Scheduler] Starting scheduled vacancy check cycle")
-        log.info("🚀 [Scheduler] ========================================")
+        logCycleStart()
 
         runBlocking {
             try {
-                // 1. Загружаем новые вакансии из HH.ru
-                log.info("📥 [Scheduler] Step 1: Fetching new vacancies from HH.ru API...")
-                val fetchResult = vacancyService.fetchAndSaveNewVacancies()
-                val newVacancies = fetchResult.vacancies
-                val searchKeywords = fetchResult.searchKeywords
-                log.info("✅ [Scheduler] Step 1 completed: Fetched ${newVacancies.size} new vacancies from HH.ru")
+                // Получаем вакансии через VacancyFetchService (публикует VacancyFetchedEvent)
+                val fetchResult = vacancyFetchService.fetchAndSaveNewVacancies()
+                sendStatusUpdate(VacancyService.FetchResult(fetchResult.vacancies, fetchResult.searchKeywords))
                 
-                // Отправляем обновление статуса в Telegram
-                val hhApiStatus = if (newVacancies.isNotEmpty()) {
-                    "✅ UP (найдено ${newVacancies.size} вакансий)"
-                } else if (searchKeywords.isNotEmpty()) {
-                    "✅ UP (запрос выполнен, новых вакансий не найдено)"
-                } else {
-                    "⚠️ Проверка выполнена, но вакансии не найдены"
-                }
-                notificationService.sendStatusUpdate(hhApiStatus, searchKeywords, newVacancies.size)
-
-                // 2. Получаем все новые вакансии для анализа (включая ранее загруженные)
-                log.info("🔍 [Scheduler] Step 2: Getting vacancies for analysis...")
-                val vacanciesToAnalyze = vacancyService.getNewVacanciesForAnalysis()
-                log.info("✅ [Scheduler] Step 2 completed: Found ${vacanciesToAnalyze.size} vacancies to analyze")
-                
-                // Если не было новых вакансий, но есть ключевые слова - значит запрос прошел успешно
-                if (newVacancies.isEmpty() && searchKeywords.isNotEmpty()) {
-                    log.info("ℹ️ [Scheduler] No new vacancies found, but search was successful (keywords: ${searchKeywords.joinToString(", ") { "'$it'" }})")
-                }
-
+                val vacanciesToAnalyze = getVacanciesForAnalysis()
                 if (vacanciesToAnalyze.isEmpty()) {
                     log.info("ℹ️ [Scheduler] No vacancies to analyze, cycle completed")
                     return@runBlocking
                 }
 
-                // 3. Анализируем вакансии параллельно с ограничением количества одновременных запросов
-                log.info("🤖 [Scheduler] Step 3: Analyzing ${vacanciesToAnalyze.size} vacancies via Ollama (max concurrent: $maxConcurrentRequests)...")
-                val analysisResults = coroutineScope {
-                    vacanciesToAnalyze.map { vacancy ->
-                        async {
-                            processVacancy(vacancy)
-                        }
-                    }.awaitAll()
-                }
-
-                val analyzedCount = analysisResults.count { it != null }
-                val relevantCount = analysisResults.count { it?.isRelevant == true }
-                val sentToTelegramCount = analysisResults.count { it?.isRelevant == true }
-
-                val cycleDuration = System.currentTimeMillis() - cycleStartTime
-                log.info("✅ [Scheduler] Step 3 completed: Analyzed $analyzedCount vacancies")
-                log.info("📊 [Scheduler] ========================================")
-                log.info("📊 [Scheduler] Cycle Summary:")
-                log.info("📊 [Scheduler]   - New vacancies fetched: ${newVacancies.size}")
-                log.info("📊 [Scheduler]   - Vacancies analyzed: $analyzedCount")
-                log.info("📊 [Scheduler]   - Relevant vacancies: $relevantCount")
-                log.info("📊 [Scheduler]   - Sent to Telegram: $sentToTelegramCount")
-                log.info("📊 [Scheduler]   - Total cycle time: ${cycleDuration}ms")
-                log.info("📊 [Scheduler] ========================================")
+                // Анализируем вакансии (VacancyAnalysisService публикует VacancyAnalyzedEvent)
+                val analysisResults = analyzeVacancies(vacanciesToAnalyze)
+                logCycleSummary(cycleStartTime, fetchResult.vacancies.size, analysisResults)
             } catch (e: com.hhassistant.exception.HHAPIException.UnauthorizedException) {
-                log.error("❌ [Scheduler] HH.ru API unauthorized/forbidden error: ${e.message}", e)
-                // Отправляем алерт в Telegram об истечении токена или проблеме с правами
-                notificationService.sendTokenExpiredAlert(
-                    e.message ?: "Unauthorized or Forbidden access to HH.ru API. " +
-                        "Token may be invalid, expired, or lacks required permissions."
-                )
-                // Отправляем обновление статуса с ошибкой
-                notificationService.sendStatusUpdate(
-                    "❌ ERROR: Token invalid or insufficient permissions",
-                    emptyList(),
-                    0
-                )
+                handleUnauthorizedError(e)
             } catch (e: Exception) {
-                log.error("❌ [Scheduler] Error during scheduled vacancy check: ${e.message}", e)
-                // Отправляем обновление статуса с ошибкой
-                notificationService.sendStatusUpdate(
-                    "❌ ERROR: ${e.message?.take(AppConstants.TextLimits.ERROR_MESSAGE_MAX_LENGTH) ?: "Unknown error"}",
-                    emptyList(),
-                    0
-                )
+                handleGeneralError(e)
             }
         }
+    }
+    
+    /**
+     * Загружает новые вакансии из HH.ru API
+     */
+    private suspend fun fetchNewVacancies(): VacancyService.FetchResult {
+        log.info("📥 [Scheduler] Step 1: Fetching new vacancies from HH.ru API...")
+        val fetchResult = vacancyService.fetchAndSaveNewVacancies()
+        log.info("✅ [Scheduler] Step 1 completed: Fetched ${fetchResult.vacancies.size} new vacancies from HH.ru")
+        return fetchResult
+    }
+    
+    /**
+     * Отправляет обновление статуса в Telegram
+     */
+    private fun sendStatusUpdate(fetchResult: VacancyService.FetchResult) {
+        val hhApiStatus = buildStatusMessage(fetchResult)
+        notificationService.sendStatusUpdate(hhApiStatus, fetchResult.searchKeywords, fetchResult.vacancies.size)
+    }
+    
+    /**
+     * Формирует сообщение о статусе HH.ru API
+     */
+    private fun buildStatusMessage(fetchResult: VacancyService.FetchResult): String {
+        return when {
+            fetchResult.vacancies.isNotEmpty() -> "✅ UP (найдено ${fetchResult.vacancies.size} вакансий)"
+            fetchResult.searchKeywords.isNotEmpty() -> "✅ UP (запрос выполнен, новых вакансий не найдено)"
+            else -> "⚠️ Проверка выполнена, но вакансии не найдены"
+        }
+    }
+    
+    /**
+     * Получает вакансии для анализа
+     */
+    private fun getVacanciesForAnalysis(): List<Vacancy> {
+        log.info("🔍 [Scheduler] Step 2: Getting vacancies for analysis...")
+        val vacanciesToAnalyze = vacancyService.getNewVacanciesForAnalysis()
+        log.info("✅ [Scheduler] Step 2 completed: Found ${vacanciesToAnalyze.size} vacancies to analyze")
+        return vacanciesToAnalyze
+    }
+    
+    /**
+     * Анализирует вакансии параллельно
+     */
+    private suspend fun analyzeVacancies(vacanciesToAnalyze: List<Vacancy>): List<VacancyAnalysis?> {
+        log.info("🤖 [Scheduler] Step 3: Analyzing ${vacanciesToAnalyze.size} vacancies via Ollama (max concurrent: $maxConcurrentRequests)...")
+        val analysisResults = coroutineScope {
+            vacanciesToAnalyze.map { vacancy ->
+                async {
+                    processVacancy(vacancy)
+                }
+            }.awaitAll()
+        }
+        log.info("✅ [Scheduler] Step 3 completed: Analyzed ${analysisResults.count { it != null }} vacancies")
+        return analysisResults
+    }
+    
+    /**
+     * Логирует начало цикла проверки
+     */
+    private fun logCycleStart() {
+        log.info("🚀 [Scheduler] ========================================")
+        log.info("🚀 [Scheduler] Starting scheduled vacancy check cycle")
+        log.info("🚀 [Scheduler] ========================================")
+    }
+    
+    /**
+     * Логирует итоги цикла проверки
+     */
+    private fun logCycleSummary(
+        cycleStartTime: Long,
+        newVacanciesCount: Int,
+        analysisResults: List<VacancyAnalysis?>,
+    ) {
+        val analyzedCount = analysisResults.count { it != null }
+        val relevantCount = analysisResults.count { it?.isRelevant == true }
+        val sentToTelegramCount = analysisResults.count { it?.isRelevant == true }
+        val cycleDuration = System.currentTimeMillis() - cycleStartTime
+        
+        log.info("📊 [Scheduler] ========================================")
+        log.info("📊 [Scheduler] Cycle Summary:")
+        log.info("📊 [Scheduler]   - New vacancies fetched: $newVacanciesCount")
+        log.info("📊 [Scheduler]   - Vacancies analyzed: $analyzedCount")
+        log.info("📊 [Scheduler]   - Relevant vacancies: $relevantCount")
+        log.info("📊 [Scheduler]   - Sent to Telegram: $sentToTelegramCount")
+        log.info("📊 [Scheduler]   - Total cycle time: ${cycleDuration}ms")
+        log.info("📊 [Scheduler] ========================================")
+    }
+    
+    /**
+     * Обрабатывает ошибку UnauthorizedException
+     */
+    private fun handleUnauthorizedError(e: com.hhassistant.exception.HHAPIException.UnauthorizedException) {
+        log.error("❌ [Scheduler] HH.ru API unauthorized/forbidden error: ${e.message}", e)
+        notificationService.sendTokenExpiredAlert(
+            e.message ?: "Unauthorized or Forbidden access to HH.ru API. " +
+                "Token may be invalid, expired, or lacks required permissions."
+        )
+        notificationService.sendStatusUpdate(
+            "❌ ERROR: Token invalid or insufficient permissions",
+            emptyList(),
+            0
+        )
+    }
+    
+    /**
+     * Обрабатывает общие ошибки
+     */
+    private fun handleGeneralError(e: Exception) {
+        log.error("❌ [Scheduler] Error during scheduled vacancy check: ${e.message}", e)
+        notificationService.sendStatusUpdate(
+            "❌ ERROR: ${e.message?.take(AppConstants.TextLimits.ERROR_MESSAGE_MAX_LENGTH) ?: "Unknown error"}",
+            emptyList(),
+            0
+        )
     }
 
     /**
@@ -176,45 +229,29 @@ class VacancySchedulerService(
             analysisSemaphore.withPermit {
                 val analysis = vacancyAnalysisService.analyzeVacancy(vacancy)
 
-                // Обновляем статус вакансии
+                // Обновляем статус вакансии через VacancyStatusService (публикует VacancyStatusChangedEvent)
                 val newStatus = if (analysis.isRelevant) VacancyStatus.ANALYZED else VacancyStatus.SKIPPED
-                vacancyService.updateVacancyStatus(vacancy, newStatus)
+                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(newStatus))
                 log.debug("📝 [Scheduler] Updated vacancy ${vacancy.id} status to: $newStatus")
 
-                // Отправляем релевантные вакансии в Telegram
+                // Обработка релевантных вакансий теперь происходит через события:
+                // - VacancyAnalyzedEvent публикуется в VacancyAnalysisService
+                // - CoverLetterQueueService обрабатывает очередь и публикует VacancyReadyForTelegramEvent
+                // - VacancyNotificationService слушает VacancyReadyForTelegramEvent и отправляет в Telegram
                 if (analysis.isRelevant) {
-                    log.info("📱 [Scheduler] Vacancy ${vacancy.id} is relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%), preparing to send to Telegram...")
-                    
-                    // Проверяем наличие сопроводительного письма
-                    if (analysis.suggestedCoverLetter == null) {
-                        log.warn("⚠️ [Scheduler] Vacancy ${vacancy.id} is relevant but cover letter is missing after all retry attempts.")
-                        log.warn("⚠️ [Scheduler] Sending vacancy to Telegram WITHOUT cover letter (retries exhausted)")
-                    } else {
-                        log.info("✅ [Scheduler] Cover letter available for vacancy ${vacancy.id} (length: ${analysis.suggestedCoverLetter.length} chars)")
-                    }
-                    
-                    try {
-                        sendVacancyToTelegram(vacancy, analysis)
-                        vacancyService.updateVacancyStatus(vacancy, VacancyStatus.SENT_TO_USER)
-                        log.info("✅ [Scheduler] Successfully sent vacancy ${vacancy.id} to Telegram and updated status to SENT_TO_USER")
-                    } catch (e: TelegramException.RateLimitException) {
-                        log.warn("⚠️ [Scheduler] Rate limit exceeded for Telegram, skipping vacancy ${vacancy.id} (will retry next cycle)")
-                        // Не обновляем статус, попробуем отправить в следующий раз
-                    } catch (e: TelegramException) {
-                        log.error("❌ [Scheduler] Telegram error for vacancy ${vacancy.id}: ${e.message}", e)
-                        // Вакансия уже проанализирована, но не отправлена
-                    }
+                    log.info("📱 [Scheduler] Vacancy ${vacancy.id} is relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%)")
+                    log.info("ℹ️ [Scheduler] Vacancy will be processed by event-driven pipeline (cover letter queue -> notification service)")
                 } else {
-                    log.debug("ℹ️ [Scheduler] Vacancy ${vacancy.id} is not relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%), skipping Telegram")
+                    log.debug("ℹ️ [Scheduler] Vacancy ${vacancy.id} is not relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%), skipping")
                 }
 
                 analysis
             }
         } catch (e: OllamaException) {
             log.error("Ollama error analyzing vacancy ${vacancy.id}: ${e.message}", e)
-            // Помечаем как пропущенную, чтобы не анализировать снова
+            // Помечаем как пропущенную, чтобы не анализировать снова (Rich Domain Model)
             try {
-                vacancyService.updateVacancyStatus(vacancy, VacancyStatus.SKIPPED)
+                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
             } catch (updateError: Exception) {
                 log.error("Failed to update status for vacancy ${vacancy.id} after Ollama error", updateError)
             }
@@ -228,96 +265,4 @@ class VacancySchedulerService(
         }
     }
 
-    private suspend fun sendVacancyToTelegram(
-        vacancy: Vacancy,
-        analysis: VacancyAnalysis,
-    ) {
-        log.info("📱 [Scheduler] Preparing Telegram message for vacancy: ${vacancy.id} - '${vacancy.name}'")
-        val message = buildTelegramMessage(vacancy, analysis)
-        log.debug("📱 [Scheduler] Telegram message prepared (length: ${message.length} chars)")
-
-        try {
-            val sent = telegramClient.sendMessage(message)
-            if (sent) {
-                log.info("✅ [Scheduler] Successfully sent vacancy ${vacancy.id} ('${vacancy.name}') to Telegram")
-            } else {
-                log.warn("⚠️ [Scheduler] Failed to send vacancy ${vacancy.id} to Telegram (returned false)")
-            }
-        } catch (e: TelegramException) {
-            log.error("❌ [Scheduler] Telegram exception sending vacancy ${vacancy.id}: ${e.message}", e)
-            throw e // Пробрасываем для обработки в вызывающем коде
-        }
-    }
-
-    /**
-     * Экранирует HTML-специальные символы для Telegram
-     */
-    private fun escapeHtml(text: String): String {
-        return text
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\"", "&quot;")
-            .replace("'", "&#39;")
-    }
-
-    private fun buildTelegramMessage(
-        vacancy: Vacancy,
-        analysis: com.hhassistant.domain.entity.VacancyAnalysis,
-    ): String {
-        val sb = StringBuilder()
-
-        sb.appendLine("🎯 <b>Новая релевантная вакансия!</b>")
-        sb.appendLine()
-        sb.appendLine("<b>${escapeHtml(vacancy.name)}</b>")
-        sb.appendLine("🏢 ${escapeHtml(vacancy.employer)}")
-        if (vacancy.salary != null) {
-            sb.appendLine("💰 ${escapeHtml(vacancy.salary)}")
-        }
-        sb.appendLine("📍 ${escapeHtml(vacancy.area)}")
-        if (vacancy.experience != null) {
-            sb.appendLine("💼 ${escapeHtml(vacancy.experience)}")
-        }
-        sb.appendLine()
-        sb.appendLine("🔗 <a href=\"${vacancy.url}\">Открыть вакансию на HH.ru</a>")
-        sb.appendLine()
-        sb.appendLine("⚡ <b>Быстрые действия:</b>")
-        sb.appendLine("   ✅ <a href=\"${AppConstants.Urls.vacancyMarkApplied(vacancy.id)}\">Откликнулся</a>")
-        sb.appendLine("   ❌ <a href=\"${AppConstants.Urls.vacancyMarkNotInterested(vacancy.id)}\">Неинтересная</a>")
-        sb.appendLine()
-        
-        // Добавляем описание вакансии (экранируем HTML)
-        if (!vacancy.description.isNullOrBlank()) {
-            sb.appendLine("<b>📋 Описание вакансии:</b>")
-            // Ограничиваем длину описания для Telegram
-            val description = if (vacancy.description.length > AppConstants.TextLimits.TELEGRAM_DESCRIPTION_MAX_LENGTH) {
-                vacancy.description.take(AppConstants.TextLimits.TELEGRAM_DESCRIPTION_MAX_LENGTH) + "..."
-            } else {
-                vacancy.description
-            }
-            // Экранируем HTML в описании
-            sb.appendLine(escapeHtml(description))
-            sb.appendLine()
-        }
-        
-        sb.appendLine("<b>📊 Оценка релевантности:</b> ${(analysis.relevanceScore * AppConstants.Formatting.PERCENTAGE_MULTIPLIER).toInt()}%")
-        sb.appendLine()
-        sb.appendLine("<b>💡 Обоснование:</b>")
-        // Экранируем HTML в обосновании
-        sb.appendLine(escapeHtml(analysis.reasoning))
-        sb.appendLine()
-
-        // Сопроводительное письмо - всегда показываем, если оно есть (экранируем HTML)
-        if (analysis.suggestedCoverLetter != null) {
-            sb.appendLine("<b>💌 Сгенерированное сопроводительное письмо:</b>")
-            sb.appendLine()
-            // Экранируем HTML в сопроводительном письме
-            sb.appendLine(escapeHtml(analysis.suggestedCoverLetter))
-            sb.appendLine()
-        } else {
-            sb.appendLine("ℹ️ <i>Сопроводительное письмо не было сгенерировано</i>")
-        }
-
-        return sb.toString()
-    }
 }

@@ -27,6 +27,10 @@ Thumbs.db
 resumes/*.pdf
 !resumes/.gitkeep
 
+# Interview preparation
+interview-prep/
+
+
 
 
 

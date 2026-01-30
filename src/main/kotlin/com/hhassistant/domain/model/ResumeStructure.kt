@@ -27,3 +27,4 @@ data class Education(
     val year: Int? = null,
 )
 
+

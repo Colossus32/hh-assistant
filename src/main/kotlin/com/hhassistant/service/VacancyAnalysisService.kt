@@ -9,13 +9,14 @@ import com.hhassistant.config.PromptConfig
 import com.hhassistant.domain.entity.CoverLetterGenerationStatus
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
+import com.hhassistant.event.VacancyAnalyzedEvent
 import com.hhassistant.exception.OllamaException
 import com.hhassistant.repository.VacancyAnalysisRepository
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import java.time.LocalDateTime
-import kotlinx.coroutines.delay
 
 @Service
 class VacancyAnalysisService(
@@ -24,9 +25,9 @@ class VacancyAnalysisService(
     private val repository: VacancyAnalysisRepository,
     private val objectMapper: ObjectMapper,
     private val promptConfig: PromptConfig,
+    private val coverLetterQueueService: CoverLetterQueueService,
+    private val eventPublisher: ApplicationEventPublisher,
     @Value("\${app.analysis.min-relevance-score:0.6}") private val minRelevanceScore: Double,
-    @Value("\${app.analysis.cover-letter.max-retries:3}") private val maxCoverLetterRetries: Int,
-    @Value("\${app.analysis.cover-letter.retry-delay-seconds:5}") private val coverLetterRetryDelaySeconds: Long,
 ) {
     private val log = KotlinLogging.logger {}
 
@@ -90,11 +91,13 @@ class VacancyAnalysisService(
 
         log.info("📊 [Ollama] Analysis result for '${vacancy.name}': isRelevant=${validatedResult.isRelevant}, relevanceScore=${String.format("%.2f", validatedResult.relevanceScore * 100)}%, matchedSkills=${validatedResult.matchedSkills.size}")
 
-        // Генерируем сопроводительное письмо ТОЛЬКО для релевантных вакансий
-        // Письмо генерируется только если isRelevant = true, независимо от процентов
+        // Для релевантных вакансий НЕ генерируем письмо сразу при анализе
+        // Вместо этого добавляем в очередь генерации писем
+        // Это позволяет обрабатывать генерацию асинхронно и контролировать количество попыток
         val coverLetter = if (validatedResult.isRelevant) {
-            log.info("✍️ [Ollama] Generating cover letter for relevant vacancy ${vacancy.id} (score: ${String.format("%.2f", validatedResult.relevanceScore * 100)}%)")
-            generateCoverLetterWithRetry(vacancy, resume, resumeStructure, validatedResult)
+            log.info("✍️ [Ollama] Relevant vacancy ${vacancy.id} will be processed by cover letter queue (score: ${String.format("%.2f", validatedResult.relevanceScore * 100)}%)")
+            // НЕ генерируем письмо здесь - очередь сама это сделает
+            null
         } else {
             log.debug("ℹ️ [Ollama] Skipping cover letter generation (vacancy is not relevant, score: ${String.format("%.2f", validatedResult.relevanceScore * 100)}%)")
             null
@@ -107,25 +110,34 @@ class VacancyAnalysisService(
             relevanceScore = validatedResult.relevanceScore,
             reasoning = validatedResult.reasoning,
             matchedSkills = objectMapper.writeValueAsString(validatedResult.matchedSkills),
-            suggestedCoverLetter = coverLetter,
-            coverLetterGenerationStatus = if (coverLetter != null) {
-                CoverLetterGenerationStatus.SUCCESS
-            } else if (validatedResult.isRelevant) {
-                // Если письмо не сгенерировано для релевантной вакансии, добавляем в очередь ретраев
+            suggestedCoverLetter = coverLetter, // Всегда null, так как письмо генерируется в очереди
+            coverLetterGenerationStatus = if (validatedResult.isRelevant) {
+                // Если вакансия релевантна, добавляем в очередь генерации писем
                 CoverLetterGenerationStatus.RETRY_QUEUED
             } else {
                 // Если вакансия не релевантна, письмо не нужно - помечаем как NOT_ATTEMPTED
                 CoverLetterGenerationStatus.NOT_ATTEMPTED
             },
-            // При первой неудаче: устанавливаем attempts = maxRetries (все попытки использованы)
-            // Но в очереди ретраев можно будет попробовать еще раз (до maxRetries * 2 общих попыток)
-            coverLetterAttempts = if (coverLetter == null) maxCoverLetterRetries else 0,
-            coverLetterLastAttemptAt = if (coverLetter == null) LocalDateTime.now() else null,
+            // Для релевантных вакансий без письма - добавляем в очередь (attempts = 0, так как еще не пытались)
+            // Для нерелевантных - attempts = 0 (письмо не нужно)
+            coverLetterAttempts = 0,
+            coverLetterLastAttemptAt = null,
         )
 
         val savedAnalysis = repository.save(analysis)
         log.info("💾 [Ollama] ✅ Saved analysis to database for vacancy ${vacancy.id} (isRelevant=${savedAnalysis.isRelevant}, score=${String.format("%.2f", savedAnalysis.relevanceScore * 100)}%)")
-
+        
+        // Публикуем событие анализа вакансии
+        eventPublisher.publishEvent(VacancyAnalyzedEvent(this, vacancy, savedAnalysis))
+        
+        // Если вакансия релевантна, но письмо не сгенерировано - добавляем в очередь
+        if (savedAnalysis.isRelevant && !savedAnalysis.hasCoverLetter() && savedAnalysis.coverLetterGenerationStatus == CoverLetterGenerationStatus.RETRY_QUEUED) {
+            // Добавляем в очередь генерации писем (будет обработано асинхронно)
+            if (savedAnalysis.id != null) {
+                coverLetterQueueService.enqueue(savedAnalysis.id, savedAnalysis.vacancyId, savedAnalysis.coverLetterAttempts + 1)
+            }
+        }
+        
         return savedAnalysis
     }
 
@@ -200,104 +212,6 @@ class VacancyAnalysisService(
         }
     }
 
-    /**
-     * Генерирует сопроводительное письмо с ретраями (до maxCoverLetterRetries попыток)
-     *
-     * @param vacancy Вакансия
-     * @param resume Резюме
-     * @param resumeStructure Структурированные данные резюме
-     * @param analysisResult Результат анализа
-     * @return Сгенерированное письмо или null, если все попытки неудачны
-     */
-    private suspend fun generateCoverLetterWithRetry(
-        vacancy: Vacancy,
-        resume: com.hhassistant.domain.entity.Resume,
-        resumeStructure: com.hhassistant.domain.model.ResumeStructure?,
-        analysisResult: AnalysisResult,
-    ): String? {
-        var lastException: Exception? = null
-
-        for (attempt in 1..maxCoverLetterRetries) {
-            try {
-                log.info("✍️ [Ollama] Generating cover letter for vacancy ${vacancy.id} (attempt $attempt/$maxCoverLetterRetries)...")
-                val coverLetter = generateCoverLetter(vacancy, resume, resumeStructure, analysisResult)
-                log.info("✅ [Ollama] Cover letter generated successfully on attempt $attempt (length: ${coverLetter.length} chars)")
-                return coverLetter
-            } catch (e: Exception) {
-                lastException = e
-                log.warn("⚠️ [Ollama] Cover letter generation attempt $attempt/$maxCoverLetterRetries failed for vacancy ${vacancy.id}: ${e.message}")
-                
-                if (attempt < maxCoverLetterRetries) {
-                    val delayMs = attempt * coverLetterRetryDelaySeconds * 1000L // Экспоненциальная задержка
-                    log.info("🔄 [Ollama] Retrying cover letter generation in ${delayMs}ms...")
-                    delay(delayMs)
-                } else {
-                    log.error("❌ [Ollama] All $maxCoverLetterRetries attempts to generate cover letter failed for vacancy ${vacancy.id}", e)
-                }
-            }
-        }
-
-        // Все попытки неудачны
-        log.error("❌ [Ollama] Failed to generate cover letter after $maxCoverLetterRetries attempts for vacancy ${vacancy.id}. Last error: ${lastException?.message}")
-        return null
-    }
-
-    /**
-     * Генерирует сопроводительное письмо (одна попытка)
-     * Публичный метод для использования в CoverLetterRetryService
-     */
-    suspend fun generateCoverLetter(
-        vacancy: Vacancy,
-        resume: com.hhassistant.domain.entity.Resume,
-        resumeStructure: com.hhassistant.domain.model.ResumeStructure?,
-        analysisResult: AnalysisResult,
-    ): String {
-        log.debug("🔄 [Ollama] Generating cover letter for vacancy: ${vacancy.id}")
-
-        val coverLetterPrompt = buildCoverLetterPrompt(vacancy, resume, resumeStructure, analysisResult)
-
-        return try {
-            ollamaClient.chat(
-                listOf(
-                    ChatMessage(
-                        role = "system",
-                        content = promptConfig.coverLetterSystem,
-                    ),
-                    ChatMessage(
-                        role = "user",
-                        content = coverLetterPrompt,
-                    ),
-                ),
-            )
-        } catch (e: Exception) {
-            log.error("Failed to generate cover letter for vacancy ${vacancy.id}: ${e.message}", e)
-            throw OllamaException.CoverLetterGenerationException(
-                "Failed to generate cover letter for vacancy ${vacancy.id}: ${e.message}",
-                e,
-            )
-        }
-    }
-
-    private fun buildCoverLetterPrompt(
-        vacancy: Vacancy,
-        @Suppress("UNUSED_PARAMETER") resume: com.hhassistant.domain.entity.Resume,
-        resumeStructure: com.hhassistant.domain.model.ResumeStructure?,
-        analysisResult: AnalysisResult,
-    ): String {
-        val summary = if (resumeStructure?.summary != null) {
-            "О кандидате: ${resumeStructure.summary}"
-        } else {
-            ""
-        }
-
-        // Заменяем переменные в шаблоне
-        return promptConfig.coverLetterTemplate
-            .replace("{vacancyName}", vacancy.name)
-            .replace("{employer}", vacancy.employer)
-            .replace("{description}", vacancy.description?.take(AppConstants.TextLimits.COVER_LETTER_DESCRIPTION_PREVIEW_LENGTH) ?: "Не указано")
-            .replace("{matchedSkills}", analysisResult.matchedSkills.joinToString(", "))
-            .replace("{summary}", summary)
-    }
 
     /**
      * Валидирует результат анализа от LLM.
@@ -314,7 +228,7 @@ class VacancyAnalysisService(
     }
 
     /**
-     * Результат анализа вакансии (используется внутри сервиса и в CoverLetterRetryService)
+     * Результат анализа вакансии (используется внутри сервиса и в CoverLetterQueueService)
      */
     data class AnalysisResult(
         @com.fasterxml.jackson.annotation.JsonProperty("is_relevant")

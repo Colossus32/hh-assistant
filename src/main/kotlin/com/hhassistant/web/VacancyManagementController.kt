@@ -4,6 +4,7 @@ import com.hhassistant.config.AppConstants
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.service.VacancyService
+import com.hhassistant.service.VacancyStatusService
 import mu.KotlinLogging
 import org.springframework.cache.annotation.CacheEvict
 import org.springframework.cache.annotation.Cacheable
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/vacancies")
 class VacancyManagementController(
     private val vacancyService: VacancyService,
+    private val vacancyStatusService: VacancyStatusService,
 ) {
     private val log = KotlinLogging.logger {}
 
@@ -195,7 +197,7 @@ class VacancyManagementController(
                 )
         } else {
             val oldStatus = vacancy.status
-            val updatedVacancy = vacancyService.updateVacancyStatusById(vacancyId, newStatus)
+            val updatedVacancy = vacancyStatusService.updateVacancyStatusById(vacancyId, newStatus)
             
             if (updatedVacancy != null) {
                 log.info("✅ [VacancyManagement] Successfully marked vacancy $vacancyId as $statusDescription (status: $oldStatus -> $newStatus)")
