@@ -21,6 +21,7 @@ class VacancyService(
     private val searchConfigRepository: SearchConfigRepository,
     private val formattingConfig: FormattingConfig,
     private val notificationService: NotificationService,
+    private val tokenRefreshService: TokenRefreshService,
     @Value("\${app.max-vacancies-per-cycle:50}") private val maxVacanciesPerCycle: Int,
     @Value("\${app.search.keywords:}") private val yamlKeywords: String?,
     @Value("\${app.search.area:}") private val yamlArea: String?,
@@ -92,9 +93,29 @@ class VacancyService(
                 val configId = config.id?.toString() ?: "YAML"
                 log.error("🚨 [VacancyService] HH.ru API unauthorized/forbidden error for config $configId: ${e.message}", e)
                 log.error("🚨 [VacancyService] This usually means: token expired, invalid, or lacks required permissions")
-                // Пробрасываем исключение дальше, чтобы оно обработалось в Scheduler
-                // и там отправился правильный статус с ошибкой
-                throw e
+                
+                // Пытаемся автоматически обновить токен через refresh token
+                log.info("🔄 [VacancyService] Attempting to refresh access token automatically...")
+                val refreshSuccess = tokenRefreshService.refreshTokenManually()
+                
+                if (refreshSuccess) {
+                    log.info("✅ [VacancyService] Token refreshed successfully, retrying request...")
+                    // Пробуем еще раз после обновления токена
+                    try {
+                        val vacancies = fetchVacanciesForConfig(config)
+                        allNewVacancies.addAll(vacancies)
+                        log.info("✅ [VacancyService] Config ID=$configId ('${config.keywords}'): found ${vacancies.size} new vacancies after token refresh")
+                        continue // Успешно, продолжаем с другими конфигурациями
+                    } catch (retryException: Exception) {
+                        log.error("❌ [VacancyService] Request failed even after token refresh: ${retryException.message}", retryException)
+                        // Пробрасываем исходное исключение
+                        throw e
+                    }
+                } else {
+                    log.warn("⚠️ [VacancyService] Token refresh failed or not available, throwing original exception")
+                    // Пробрасываем исключение дальше, чтобы оно обработалось в Scheduler
+                    throw e
+                }
             } catch (e: HHAPIException.RateLimitException) {
                 val configId = config.id?.toString() ?: "YAML"
                 log.warn("⚠️ [VacancyService] Rate limit exceeded for config $configId, skipping: ${e.message}")

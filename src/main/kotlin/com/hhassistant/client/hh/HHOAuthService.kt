@@ -73,6 +73,51 @@ class HHOAuthService(
     }
 
     /**
+     * Обновляет access token используя refresh token
+     */
+    suspend fun refreshAccessToken(refreshToken: String): OAuthTokenResponse {
+        log.info { "Refreshing access token using refresh token" }
+
+        val formData: MultiValueMap<String, String> = LinkedMultiValueMap<String, String>().apply {
+            add("grant_type", "refresh_token")
+            add("client_id", clientId)
+            add("client_secret", clientSecret)
+            add("refresh_token", refreshToken)
+        }
+
+        return try {
+            val response = webClient.post()
+                .uri(tokenUrl)
+                .body(BodyInserters.fromFormData(formData))
+                .retrieve()
+                .bodyToMono(OAuthTokenResponse::class.java)
+                .awaitSingle()
+
+            log.info { "Successfully refreshed access token (expires in: ${response.expiresIn}s)" }
+            response
+        } catch (e: WebClientResponseException) {
+            log.error("Failed to refresh token: ${e.statusCode} - ${e.responseBodyAsString}", e)
+            throw when (e.statusCode.value()) {
+                400 -> HHAPIException.APIException(
+                    "Invalid refresh token or request parameters: ${e.responseBodyAsString}",
+                    e,
+                )
+                401 -> HHAPIException.UnauthorizedException(
+                    "Invalid client credentials or refresh token expired: ${e.responseBodyAsString}",
+                    e,
+                )
+                else -> HHAPIException.APIException(
+                    "Failed to refresh access token: ${e.statusCode} - ${e.responseBodyAsString}",
+                    e,
+                )
+            }
+        } catch (e: Exception) {
+            log.error("Unexpected error refreshing token: ${e.message}", e)
+            throw HHAPIException.ConnectionException("Failed to connect to HH.ru OAuth: ${e.message}", e)
+        }
+    }
+
+    /**
      * Генерирует URL для авторизации
      */
     fun getAuthorizationUrl(authorizationUrl: String): String {

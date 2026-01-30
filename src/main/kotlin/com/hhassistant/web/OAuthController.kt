@@ -2,6 +2,7 @@ package com.hhassistant.web
 
 import com.hhassistant.client.hh.HHOAuthService
 import com.hhassistant.client.hh.dto.OAuthTokenResponse
+import com.hhassistant.service.EnvFileService
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
@@ -19,6 +20,7 @@ import kotlinx.coroutines.runBlocking
 @RequestMapping("/oauth")
 class OAuthController(
     private val oauthService: HHOAuthService,
+    private val envFileService: EnvFileService,
     @Value("\${hh.oauth.authorization-url}") private val authorizationUrl: String,
 ) {
     private val log = KotlinLogging.logger {}
@@ -81,20 +83,46 @@ class OAuthController(
 
             log.info { "Successfully obtained access token" }
 
-            ResponseEntity.ok(
-                mapOf(
-                    "success" to true,
-                    "access_token" to tokenResponse.accessToken,
-                    "token_type" to tokenResponse.tokenType,
-                    "expires_in" to (tokenResponse.expiresIn ?: "N/A"),
-                    "message" to "Access token obtained successfully. Add it to your .env file as HH_ACCESS_TOKEN",
-                    "instructions" to mapOf(
-                        "1" to "Copy the access_token value above",
-                        "2" to "Add it to your .env file: HH_ACCESS_TOKEN=<access_token>",
-                        "3" to "Restart the application",
-                    ),
-                ),
+            // Автоматически сохраняем токен в .env файл
+            val envUpdateSuccess = envFileService.updateEnvVariable("HH_ACCESS_TOKEN", tokenResponse.accessToken)
+            
+            // Если есть refresh token, сохраняем его тоже
+            val refreshTokenSaved = tokenResponse.refreshToken?.let { refreshToken ->
+                envFileService.updateEnvVariable("HH_REFRESH_TOKEN", refreshToken)
+            } ?: false
+
+            val responseBody = mutableMapOf<String, Any>(
+                "success" to true,
+                "access_token" to tokenResponse.accessToken,
+                "token_type" to tokenResponse.tokenType,
+                "expires_in" to (tokenResponse.expiresIn ?: "N/A"),
             )
+
+            if (envUpdateSuccess) {
+                responseBody["message"] = "✅ Access token obtained and automatically saved to .env file!"
+                responseBody["auto_saved"] = true
+                responseBody["next_steps"] = listOf(
+                    "Token has been saved to .env file",
+                    "Restart the application to use the new token",
+                )
+                log.info("✅ [OAuth] Access token automatically saved to .env file")
+            } else {
+                responseBody["message"] = "⚠️ Access token obtained, but failed to save to .env file automatically"
+                responseBody["auto_saved"] = false
+                responseBody["manual_steps"] = listOf(
+                    "Copy the access_token value above",
+                    "Add it to your .env file: HH_ACCESS_TOKEN=${tokenResponse.accessToken}",
+                    "Restart the application",
+                )
+                log.warn("⚠️ [OAuth] Failed to automatically save token to .env file")
+            }
+
+            if (refreshTokenSaved) {
+                responseBody["refresh_token_saved"] = true
+                log.info("✅ [OAuth] Refresh token also saved to .env file")
+            }
+
+            ResponseEntity.ok(responseBody)
         } catch (e: Exception) {
             log.error("Failed to exchange code for token: ${e.message}", e)
             ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
