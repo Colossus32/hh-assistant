@@ -26,17 +26,18 @@ class OAuthController(
     private val log = KotlinLogging.logger {}
 
     /**
-     * Генерирует URL для начала OAuth flow
+     * Генерирует URL для начала OAuth flow (токен пользователя)
      * GET /oauth/authorize
      */
     @GetMapping("/authorize")
     fun authorize(): ResponseEntity<Map<String, Any>> {
         val authUrl = oauthService.getAuthorizationUrl(authorizationUrl)
-        log.info { "Generated authorization URL: $authUrl" }
+        log.info { "Generated authorization URL for user token: $authUrl" }
         return ResponseEntity.ok(
             mapOf(
                 "authorization_url" to authUrl,
-                "message" to "Open this URL in your browser to authorize the application",
+                "token_type" to "user",
+                "message" to "Open this URL in your browser to authorize the application (user token)",
                 "instructions" to listOf(
                     "1. Click on the authorization_url above or copy it to your browser",
                     "2. Authorize the application on HH.ru",
@@ -44,8 +45,88 @@ class OAuthController(
                     "4. Restart the application to use the new token",
                 ),
                 "auto_save" to "Token will be automatically saved to .env file after authorization",
+                "note" to "For public API access, consider using application token instead: GET /oauth/application-token",
             ),
         )
+    }
+
+    /**
+     * Получает токен приложения (application token)
+     * GET /oauth/application-token
+     * 
+     * Токен приложения имеет неограниченный срок жизни и используется для доступа к публичному API вакансий.
+     * Не требует авторизации пользователя.
+     */
+    @GetMapping("/application-token")
+    fun getApplicationToken(
+        @Value("\${hh.api.user-agent}") userAgent: String,
+    ): ResponseEntity<Map<String, Any>> {
+        log.info { "Requesting application token" }
+
+        return try {
+            val tokenResponse: OAuthTokenResponse = runBlocking {
+                oauthService.getApplicationToken(userAgent)
+            }
+
+            log.info { "Successfully obtained application token" }
+
+            // Автоматически сохраняем токен в .env файл
+            val envUpdateSuccess = envFileService.updateEnvVariable("HH_ACCESS_TOKEN", tokenResponse.accessToken)
+            
+            // Также сохраняем тип токена
+            envFileService.updateEnvVariable("HH_TOKEN_TYPE", "application")
+
+            val responseBody = mutableMapOf<String, Any>(
+                "success" to true,
+                "token_type" to "application",
+                "access_token" to tokenResponse.accessToken,
+                "token_type_response" to tokenResponse.tokenType,
+                "expires_in" to (tokenResponse.expiresIn ?: "unlimited"),
+            )
+
+            if (envUpdateSuccess) {
+                responseBody["message"] = "✅ Application token obtained and automatically saved to .env file!"
+                responseBody["auto_saved"] = true
+                responseBody["next_steps"] = listOf(
+                    "Application token has been saved to .env file",
+                    "Application token has UNLIMITED lifetime (no expiration)",
+                    "Restart the application to use the new token",
+                )
+                log.info("✅ [OAuth] Application token automatically saved to .env file")
+            } else {
+                responseBody["message"] = "⚠️ Application token obtained, but failed to save to .env file automatically"
+                responseBody["auto_saved"] = false
+                responseBody["manual_steps"] = listOf(
+                    "Copy the access_token value above",
+                    "Add it to your .env file: HH_ACCESS_TOKEN=<access_token>",
+                    "Add: HH_TOKEN_TYPE=application",
+                    "Restart the application",
+                )
+                log.warn("⚠️ [OAuth] Failed to automatically save application token to .env file")
+            }
+
+            responseBody["note"] = "Application token has unlimited lifetime and is suitable for public API access (vacancies search)"
+            
+            if (refreshTokenSaved) {
+                responseBody["refresh_token_saved"] = true
+                log.info("✅ [OAuth] Refresh token also saved to .env file")
+            } else {
+                responseBody["refresh_token_saved"] = false
+                responseBody["refresh_token_note"] = "Application tokens typically don't have refresh tokens"
+            }
+
+            ResponseEntity.ok(responseBody)
+        } catch (e: Exception) {
+            log.error("Failed to get application token: ${e.message}", e)
+            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(
+                    mapOf(
+                        "error" to "application_token_failed",
+                        "message" to "Failed to get application token: ${e.message}",
+                        "hint" to "Check your Client ID and Client Secret in .env file (HH_CLIENT_ID, HH_CLIENT_SECRET)",
+                    ),
+                )
+        }
     }
 
     /**

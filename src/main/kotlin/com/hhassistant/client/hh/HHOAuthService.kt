@@ -121,7 +121,76 @@ class HHOAuthService(
     }
 
     /**
-     * Генерирует URL для авторизации
+     * Получает токен приложения (application token)
+     * Токен приложения имеет неограниченный срок жизни и используется для доступа к публичному API
+     * 
+     * Согласно документации: https://api.hh.ru/openapi/redoc#tag/Avtorizaciya-prilozheniya/operation/authorize
+     * Токен приложения получается через POST https://api.hh.ru/token с grant_type=client_credentials
+     * 
+     * @param userAgent User-Agent header (HH-User-Agent) - название приложения и контактная почта
+     * @param host Доменное имя сайта (по умолчанию "hh.ru")
+     * @param locale Идентификатор локали (по умолчанию "RU")
+     * @return OAuthTokenResponse с access_token приложения
+     */
+    suspend fun getApplicationToken(
+        userAgent: String,
+        host: String = "hh.ru",
+        locale: String = "RU",
+    ): OAuthTokenResponse {
+        log.info { "Requesting application token (grant_type=client_credentials)" }
+        log.info { "Using API endpoint: https://api.hh.ru/token (not OAuth endpoint)" }
+
+        val formData: MultiValueMap<String, String> = LinkedMultiValueMap<String, String>().apply {
+            add("grant_type", "client_credentials")
+            add("client_id", clientId)
+            add("client_secret", clientSecret)
+        }
+
+        // Для токена приложения используется другой endpoint: https://api.hh.ru/token
+        // (не https://hh.ru/oauth/token)
+        val applicationTokenUrl = "https://api.hh.ru/token"
+
+        return try {
+            val response = apiWebClient.post()
+                .uri { builder ->
+                    builder.uri(java.net.URI.create(applicationTokenUrl))
+                        .queryParam("host", host)
+                        .queryParam("locale", locale)
+                        .build()
+                }
+                .header("HH-User-Agent", userAgent)
+                .body(BodyInserters.fromFormData(formData))
+                .retrieve()
+                .bodyToMono(OAuthTokenResponse::class.java)
+                .awaitSingle()
+
+            log.info { "Successfully obtained application token (expires in: ${response.expiresIn ?: "unlimited"}s)" }
+            log.info { "Application token has unlimited lifetime and can be used for public API access" }
+            response
+        } catch (e: WebClientResponseException) {
+            log.error("Failed to get application token: ${e.statusCode} - ${e.responseBodyAsString}", e)
+            throw when (e.statusCode.value()) {
+                400 -> HHAPIException.APIException(
+                    "Invalid request parameters for application token: ${e.responseBodyAsString}",
+                    e,
+                )
+                403 -> HHAPIException.UnauthorizedException(
+                    "Invalid client credentials or insufficient permissions: ${e.responseBodyAsString}",
+                    e,
+                )
+                else -> HHAPIException.APIException(
+                    "Failed to get application token: ${e.statusCode} - ${e.responseBodyAsString}",
+                    e,
+                )
+            }
+        } catch (e: Exception) {
+            log.error("Unexpected error getting application token: ${e.message}", e)
+            throw HHAPIException.ConnectionException("Failed to connect to HH.ru API: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Генерирует URL для авторизации пользователя (OAuth flow)
      */
     fun getAuthorizationUrl(authorizationUrl: String): String {
         val redirectUriEncoded = URLEncoder.encode(redirectUri, StandardCharsets.UTF_8)
