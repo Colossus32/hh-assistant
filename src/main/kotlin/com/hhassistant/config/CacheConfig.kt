@@ -27,7 +27,7 @@ class CacheConfig {
     @Bean("vacancyDetailsCache")
     fun vacancyDetailsCache(): com.github.benmanes.caffeine.cache.Cache<String, Any> {
         return Caffeine.newBuilder()
-            .maximumSize(1000) // Максимум 1000 записей
+            .maximumSize(AppConstants.Cache.VACANCY_DETAILS_MAX_SIZE.toLong())
             .expireAfterWrite(1, TimeUnit.HOURS) // TTL: 1 час
             .recordStats() // Включаем статистику для мониторинга
             .build()
@@ -40,7 +40,7 @@ class CacheConfig {
     @Bean("searchConfigCache")
     fun searchConfigCache(): com.github.benmanes.caffeine.cache.Cache<String, Any> {
         return Caffeine.newBuilder()
-            .maximumSize(100) // Максимум 100 записей
+            .maximumSize(AppConstants.Cache.SEARCH_CONFIG_MAX_SIZE.toLong())
             .expireAfterWrite(30, TimeUnit.MINUTES) // TTL: 30 минут
             .recordStats()
             .build()
@@ -53,7 +53,7 @@ class CacheConfig {
     @Bean("vacancyIdsCache")
     fun vacancyIdsCache(): com.github.benmanes.caffeine.cache.Cache<String, Set<String>> {
         return Caffeine.newBuilder()
-            .maximumSize(10) // Несколько ключей (по статусам)
+            .maximumSize(AppConstants.Cache.VACANCY_IDS_MAX_SIZE.toLong())
             .expireAfterWrite(5, TimeUnit.MINUTES) // TTL: 5 минут
             .recordStats()
             .build()
@@ -66,7 +66,7 @@ class CacheConfig {
     @Bean("vacancyListCache")
     fun vacancyListCache(): com.github.benmanes.caffeine.cache.Cache<String, Any> {
         return Caffeine.newBuilder()
-            .maximumSize(500) // Максимум 500 записей
+            .maximumSize(AppConstants.Cache.VACANCY_LIST_MAX_SIZE.toLong())
             .expireAfterWrite(30, TimeUnit.SECONDS) // TTL: 30 секунд
             .recordStats()
             .build()
@@ -82,7 +82,7 @@ class CacheConfig {
         // Настройка кэшей по умолчанию
         cacheManager.setCaffeine(
             Caffeine.newBuilder()
-                .maximumSize(500)
+                .maximumSize(AppConstants.Cache.DEFAULT_MAX_SIZE.toLong())
                 .expireAfterWrite(10, TimeUnit.MINUTES)
                 .recordStats()
         )

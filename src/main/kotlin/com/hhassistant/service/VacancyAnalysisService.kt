@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.hhassistant.client.ollama.OllamaClient
 import com.hhassistant.client.ollama.dto.ChatMessage
+import com.hhassistant.config.AppConstants
 import com.hhassistant.config.PromptConfig
 import com.hhassistant.domain.entity.CoverLetterGenerationStatus
 import com.hhassistant.domain.entity.Vacancy
@@ -166,8 +167,8 @@ class VacancyAnalysisService(
     private fun parseAnalysisResponse(response: String, vacancyId: String): AnalysisResult {
         return try {
             // Пытаемся извлечь JSON из ответа (на случай, если LLM добавит текст до/после JSON)
-            val jsonStart = response.indexOf('{')
-            val jsonEnd = response.lastIndexOf('}') + 1
+            val jsonStart = response.indexOf(AppConstants.Indices.JSON_START_CHAR)
+            val jsonEnd = response.lastIndexOf(AppConstants.Indices.JSON_END_CHAR) + 1
 
             if (jsonStart >= 0 && jsonEnd > jsonStart) {
                 val jsonString = response.substring(jsonStart, jsonEnd)
@@ -290,7 +291,7 @@ class VacancyAnalysisService(
         return promptConfig.coverLetterTemplate
             .replace("{vacancyName}", vacancy.name)
             .replace("{employer}", vacancy.employer)
-            .replace("{description}", vacancy.description?.take(500) ?: "Не указано")
+            .replace("{description}", vacancy.description?.take(AppConstants.TextLimits.COVER_LETTER_DESCRIPTION_PREVIEW_LENGTH) ?: "Не указано")
             .replace("{matchedSkills}", analysisResult.matchedSkills.joinToString(", "))
             .replace("{summary}", summary)
     }
@@ -303,8 +304,8 @@ class VacancyAnalysisService(
      * @throws IllegalArgumentException если relevanceScore вне допустимого диапазона
      */
     private fun validateAnalysisResult(result: AnalysisResult): AnalysisResult {
-        require(result.relevanceScore in 0.0..1.0) {
-            "Relevance score must be between 0.0 and 1.0, got: ${result.relevanceScore}"
+        require(result.relevanceScore in AppConstants.Validation.RELEVANCE_SCORE_MIN..AppConstants.Validation.RELEVANCE_SCORE_MAX) {
+            "Relevance score must be between ${AppConstants.Validation.RELEVANCE_SCORE_MIN} and ${AppConstants.Validation.RELEVANCE_SCORE_MAX}, got: ${result.relevanceScore}"
         }
         return result
     }

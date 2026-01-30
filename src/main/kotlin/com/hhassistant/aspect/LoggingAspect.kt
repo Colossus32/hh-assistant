@@ -1,5 +1,6 @@
 package com.hhassistant.aspect
 
+import com.hhassistant.config.AppConstants
 import mu.KotlinLogging
 import org.aspectj.lang.ProceedingJoinPoint
 import org.aspectj.lang.annotation.Around
@@ -67,10 +68,10 @@ class LoggingAspect {
         return args.joinToString(", ") { arg ->
             when (arg) {
                 null -> "null"
-                is String -> if (arg.length > 100) "\"${arg.take(100)}...\"" else "\"$arg\""
+                is String -> if (arg.length > AppConstants.TextLimits.LOG_ARGUMENT_PREVIEW_LENGTH) "\"${arg.take(AppConstants.TextLimits.LOG_ARGUMENT_PREVIEW_LENGTH)}...\"" else "\"$arg\""
                 is Collection<*> -> "${arg.javaClass.simpleName}(size=${arg.size})"
                 is Array<*> -> "${arg.javaClass.simpleName}(size=${arg.size})"
-                else -> arg.toString().take(100)
+                else -> arg.toString().take(AppConstants.TextLimits.LOG_ARGUMENT_PREVIEW_LENGTH)
             }
         }
     }

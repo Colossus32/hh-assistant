@@ -1,6 +1,7 @@
 package com.hhassistant.service
 
 import com.hhassistant.client.telegram.TelegramClient
+import com.hhassistant.config.AppConstants
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
@@ -132,7 +133,7 @@ class NotificationService(
             appendLine("$errorMessage")
             appendLine()
             appendLine("🔧 <b>Что делать:</b>")
-            appendLine("1. Откройте в браузере: <a href=\"http://localhost:8080/oauth/authorize\">http://localhost:8080/oauth/authorize</a>")
+            appendLine("1. Откройте в браузере: <a href=\"${AppConstants.Urls.OAUTH_AUTHORIZE}\">${AppConstants.Urls.OAUTH_AUTHORIZE}</a>")
             appendLine("2. Авторизуйтесь на HH.ru")
             appendLine("3. Токен автоматически сохранится в .env файл")
             appendLine("4. Перезапустите приложение")

@@ -1,5 +1,6 @@
 package com.hhassistant.web
 
+import com.hhassistant.config.AppConstants
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.service.VacancyService
@@ -47,7 +48,7 @@ class VacancyManagementController(
                         "salary" to (vacancy.salary ?: ""),
                         "area" to vacancy.area,
                         "url" to vacancy.url,
-                        "description" to (vacancy.description?.take(500) ?: "Нет описания"),
+                        "description" to (vacancy.description?.take(AppConstants.TextLimits.VACANCY_DESCRIPTION_PREVIEW_LENGTH) ?: "Нет описания"),
                         "experience" to (vacancy.experience ?: ""),
                         "status" to vacancy.status.name,
                         "fetchedAt" to vacancy.fetchedAt.toString(),

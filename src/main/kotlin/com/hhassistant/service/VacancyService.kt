@@ -2,6 +2,7 @@ package com.hhassistant.service
 
 import com.github.benmanes.caffeine.cache.Cache
 import com.hhassistant.client.hh.HHVacancyClient
+import com.hhassistant.config.AppConstants
 import com.hhassistant.client.hh.dto.toEntity
 import com.hhassistant.config.FormattingConfig
 import com.hhassistant.domain.entity.SearchConfig
@@ -141,7 +142,7 @@ class VacancyService(
                     }
                 } else {
                     log.warn("⚠️ [VacancyService] Token refresh failed or not available")
-                    log.warn("⚠️ [VacancyService] Please obtain a new token via OAuth: http://localhost:8080/oauth/authorize")
+                    log.warn("⚠️ [VacancyService] Please obtain a new token via OAuth: ${AppConstants.Urls.OAUTH_AUTHORIZE}")
                     // Пробрасываем исключение дальше, чтобы оно обработалось в Scheduler
                     throw e
                 }
@@ -164,7 +165,7 @@ class VacancyService(
         val newVacancies = allNewVacancies.take(maxVacanciesPerCycle)
         log.info("✅ [VacancyService] Total fetched and saved: ${newVacancies.size} new vacancies")
         if (newVacancies.isNotEmpty()) {
-            log.info("📝 [VacancyService] Sample vacancies: ${newVacancies.take(3).joinToString(", ") { "${it.name} (${it.id})" }}")
+            log.info("📝 [VacancyService] Sample vacancies: ${newVacancies.take(AppConstants.Indices.SAMPLE_VACANCIES_COUNT).joinToString(", ") { "${it.name} (${it.id})" }}")
         }
 
         return FetchResult(newVacancies, searchKeywords)

@@ -1,6 +1,7 @@
 package com.hhassistant.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.hhassistant.config.AppConstants
 import com.hhassistant.domain.entity.CoverLetterGenerationStatus
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.repository.VacancyAnalysisRepository
@@ -45,9 +46,10 @@ class CoverLetterRetryService(
             try {
                 // Получаем анализы, которые нужно повторить
                 // Проверяем что attempts < maxRetries * 2 (первые maxRetries попыток уже были при анализе)
+                val maxTotalAttempts = maxRetries * AppConstants.RetryQueue.TOTAL_ATTEMPTS_MULTIPLIER
                 val analysesToRetry = vacancyAnalysisRepository.findByCoverLetterGenerationStatusAndCoverLetterAttemptsLessThan(
                     CoverLetterGenerationStatus.RETRY_QUEUED,
-                    maxRetries * 2, // Общее количество попыток: maxRetries при анализе + maxRetries в очереди
+                    maxTotalAttempts, // Общее количество попыток: maxRetries при анализе + maxRetries в очереди
                 )
 
                 if (analysesToRetry.isEmpty()) {
@@ -92,8 +94,8 @@ class CoverLetterRetryService(
                             } else {
                                 // Не удалось сгенерировать
                                 val newAttempts = updatedAnalysis.coverLetterAttempts + 1
-                                val totalMaxAttempts = maxRetries * 2 // Общее количество попыток: maxRetries при анализе + maxRetries в очереди
-                                val newStatus = if (newAttempts >= totalMaxAttempts) {
+                                val maxTotalAttempts = maxRetries * AppConstants.RetryQueue.TOTAL_ATTEMPTS_MULTIPLIER
+                                val newStatus = if (newAttempts >= maxTotalAttempts) {
                                     CoverLetterGenerationStatus.FAILED
                                 } else {
                                     CoverLetterGenerationStatus.RETRY_QUEUED
@@ -107,9 +109,9 @@ class CoverLetterRetryService(
                                 failureCount++
 
                                 if (newStatus == CoverLetterGenerationStatus.FAILED) {
-                                    log.warn("❌ [CoverLetterRetry] Failed to generate cover letter for analysis ${analysis.id} after $totalMaxAttempts total attempts. Marking as FAILED.")
+                                    log.warn("❌ [CoverLetterRetry] Failed to generate cover letter for analysis ${analysis.id} after $maxTotalAttempts total attempts. Marking as FAILED.")
                                 } else {
-                                    log.warn("⚠️ [CoverLetterRetry] Failed to generate cover letter for analysis ${analysis.id} (attempt $newAttempts/$totalMaxAttempts). Queued for retry.")
+                                    log.warn("⚠️ [CoverLetterRetry] Failed to generate cover letter for analysis ${analysis.id} (attempt $newAttempts/$maxTotalAttempts). Queued for retry.")
                                 }
                             }
                         } catch (e: Exception) {
@@ -118,8 +120,8 @@ class CoverLetterRetryService(
 
                             // Возвращаем в очередь или помечаем как FAILED
                             val newAttempts = analysis.coverLetterAttempts + 1
-                            val totalMaxAttempts = maxRetries * 2 // Общее количество попыток
-                            val newStatus = if (newAttempts >= totalMaxAttempts) {
+                            val maxTotalAttempts = maxRetries * AppConstants.RetryQueue.TOTAL_ATTEMPTS_MULTIPLIER
+                            val newStatus = if (newAttempts >= maxTotalAttempts) {
                                 CoverLetterGenerationStatus.FAILED
                             } else {
                                 CoverLetterGenerationStatus.RETRY_QUEUED

@@ -2,6 +2,7 @@ package com.hhassistant.client.telegram
 
 import com.hhassistant.client.telegram.dto.SendMessageRequest
 import com.hhassistant.client.telegram.dto.SendMessageResponse
+import com.hhassistant.config.AppConstants
 import com.hhassistant.exception.TelegramException
 import kotlinx.coroutines.reactor.awaitSingle
 import mu.KotlinLogging
@@ -89,7 +90,7 @@ class TelegramClient(
             log.error("Error sending message to Telegram API: ${e.statusCode} - ${e.message}")
             log.error("Response body: $responseBody")
             log.error("Request message length: ${text.length} chars")
-            log.error("Request message preview: ${text.take(200)}...")
+            log.error("Request message preview: ${text.take(AppConstants.TextLimits.TELEGRAM_MESSAGE_PREVIEW_LENGTH)}...")
             throw mapToTelegramException(e, responseBody)
         } catch (e: Exception) {
             log.error("Unexpected error sending message to Telegram: ${e.message}", e)

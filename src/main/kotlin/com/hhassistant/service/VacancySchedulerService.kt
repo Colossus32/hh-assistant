@@ -1,6 +1,7 @@
 package com.hhassistant.service
 
 import com.hhassistant.client.telegram.TelegramClient
+import com.hhassistant.config.AppConstants
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.domain.entity.VacancyStatus
@@ -153,7 +154,7 @@ class VacancySchedulerService(
                 log.error("❌ [Scheduler] Error during scheduled vacancy check: ${e.message}", e)
                 // Отправляем обновление статуса с ошибкой
                 notificationService.sendStatusUpdate(
-                    "❌ ERROR: ${e.message?.take(100) ?: "Unknown error"}",
+                    "❌ ERROR: ${e.message?.take(AppConstants.TextLimits.ERROR_MESSAGE_MAX_LENGTH) ?: "Unknown error"}",
                     emptyList(),
                     0
                 )
@@ -281,16 +282,16 @@ class VacancySchedulerService(
         sb.appendLine("🔗 <a href=\"${vacancy.url}\">Открыть вакансию на HH.ru</a>")
         sb.appendLine()
         sb.appendLine("⚡ <b>Быстрые действия:</b>")
-        sb.appendLine("   ✅ <a href=\"http://localhost:8080/api/vacancies/${vacancy.id}/mark-applied\">Откликнулся</a>")
-        sb.appendLine("   ❌ <a href=\"http://localhost:8080/api/vacancies/${vacancy.id}/mark-not-interested\">Неинтересная</a>")
+        sb.appendLine("   ✅ <a href=\"${AppConstants.Urls.vacancyMarkApplied(vacancy.id)}\">Откликнулся</a>")
+        sb.appendLine("   ❌ <a href=\"${AppConstants.Urls.vacancyMarkNotInterested(vacancy.id)}\">Неинтересная</a>")
         sb.appendLine()
         
         // Добавляем описание вакансии (экранируем HTML)
         if (!vacancy.description.isNullOrBlank()) {
             sb.appendLine("<b>📋 Описание вакансии:</b>")
-            // Ограничиваем длину описания для Telegram (максимум 2000 символов)
-            val description = if (vacancy.description.length > 2000) {
-                vacancy.description.take(2000) + "..."
+            // Ограничиваем длину описания для Telegram
+            val description = if (vacancy.description.length > AppConstants.TextLimits.TELEGRAM_DESCRIPTION_MAX_LENGTH) {
+                vacancy.description.take(AppConstants.TextLimits.TELEGRAM_DESCRIPTION_MAX_LENGTH) + "..."
             } else {
                 vacancy.description
             }
@@ -299,7 +300,7 @@ class VacancySchedulerService(
             sb.appendLine()
         }
         
-        sb.appendLine("<b>📊 Оценка релевантности:</b> ${(analysis.relevanceScore * 100).toInt()}%")
+        sb.appendLine("<b>📊 Оценка релевантности:</b> ${(analysis.relevanceScore * AppConstants.Formatting.PERCENTAGE_MULTIPLIER).toInt()}%")
         sb.appendLine()
         sb.appendLine("<b>💡 Обоснование:</b>")
         // Экранируем HTML в обосновании

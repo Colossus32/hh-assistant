@@ -3,6 +3,7 @@ package com.hhassistant.service
 import com.hhassistant.client.ollama.OllamaClient
 import com.hhassistant.client.ollama.dto.ChatMessage
 import com.hhassistant.client.telegram.TelegramClient
+import com.hhassistant.config.AppConstants
 import kotlinx.coroutines.runBlocking
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
@@ -122,10 +123,10 @@ class LogAnalysisService(
      */
     private fun extractTimestamp(line: String): LocalDateTime? {
         return try {
-            if (line.length < 19) return null
+            if (line.length < AppConstants.Logging.LOG_TIMESTAMP_LENGTH) return null
             
-            val dateTimeStr = line.substring(0, 19)
-            LocalDateTime.parse(dateTimeStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+            val dateTimeStr = line.substring(0, AppConstants.Logging.LOG_TIMESTAMP_LENGTH)
+            LocalDateTime.parse(dateTimeStr, DateTimeFormatter.ofPattern(AppConstants.Logging.LOG_TIMESTAMP_FORMAT))
         } catch (e: Exception) {
             null
         }
@@ -213,7 +214,7 @@ class LogAnalysisService(
         val batchText = batch.joinToString("\n")
         
         val systemPrompt = """
-            Ты - эксперт по анализу логов. Создай краткое резюме (до 200 слов) следующего батча логов.
+            Ты - эксперт по анализу логов. Создай краткое резюме (до ${AppConstants.TextLimits.LOG_ANALYSIS_SUMMARY_WORDS} слов) следующего батча логов.
             
             В резюме укажи:
             - Основные события и операции
@@ -256,8 +257,8 @@ class LogAnalysisService(
         val summariesText = summaries.joinToString("\n\n")
         
         // Добавляем детали из проблемных батчей (ограничиваем размер)
-        val problematicDetails = problematicBatches.take(3).joinToString("\n\n") { (batchNum, batch) ->
-            "=== Детали проблемного батча $batchNum ===\n${batch.takeLast(100).joinToString("\n")}"
+        val problematicDetails = problematicBatches.take(AppConstants.Indices.PROBLEMATIC_BATCHES_LIMIT).joinToString("\n\n") { (batchNum, batch) ->
+            "=== Детали проблемного батча $batchNum ===\n${batch.takeLast(AppConstants.TextLimits.PROBLEMATIC_BATCH_DETAILS_LINES).joinToString("\n")}"
         }
 
         val systemPrompt = """
@@ -360,7 +361,7 @@ class LogAnalysisService(
             4. **Возможности улучшения** - места, где можно оптимизировать код или логику
             5. **Проблемы производительности** - медленные операции, таймауты, проблемы с памятью
             
-            Верни краткий анализ (до 300 слов) на русском языке.
+            Верни краткий анализ (до ${AppConstants.TextLimits.LOG_ANALYSIS_BRIEF_WORDS} слов) на русском языке.
             Будь конкретным - указывай конкретные ошибки и их частоту.
             Если проблем нет, укажи это явно.
         """.trimIndent()
