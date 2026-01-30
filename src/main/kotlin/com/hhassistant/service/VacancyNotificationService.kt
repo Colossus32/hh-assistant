@@ -7,8 +7,9 @@ import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.event.VacancyReadyForTelegramEvent
 import com.hhassistant.exception.TelegramException
-import mu.KotlinLogging
 import kotlinx.coroutines.runBlocking
+import mu.KotlinLogging
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.event.EventListener
 import org.springframework.scheduling.annotation.Async
 import org.springframework.stereotype.Service
@@ -21,6 +22,8 @@ import org.springframework.stereotype.Service
 class VacancyNotificationService(
     private val telegramClient: TelegramClient,
     private val vacancyStatusService: VacancyStatusService,
+    private val metricsService: com.hhassistant.metrics.MetricsService,
+    @Value("\${app.api.base-url:${AppConstants.Urls.LOCALHOST_BASE}}") private val apiBaseUrl: String,
 ) {
     private val log = KotlinLogging.logger {}
 
@@ -32,22 +35,26 @@ class VacancyNotificationService(
     fun handleVacancyReadyForTelegram(event: VacancyReadyForTelegramEvent) {
         val vacancy = event.vacancy
         val analysis = event.analysis
-        
+
         log.info("📱 [Notification] Processing VacancyReadyForTelegramEvent for vacancy ${vacancy.id}")
-        
+
         try {
             runBlocking {
                 sendVacancyToTelegram(vacancy, analysis)
             }
             vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SENT_TO_USER))
+            metricsService.incrementNotificationsSent()
             log.info("✅ [Notification] Successfully sent vacancy ${vacancy.id} to Telegram")
         } catch (e: TelegramException.RateLimitException) {
+            metricsService.incrementNotificationsFailed()
             log.warn("⚠️ [Notification] Rate limit exceeded for Telegram, skipping vacancy ${vacancy.id} (will retry later)")
             // Не обновляем статус, попробуем отправить в следующий раз
         } catch (e: TelegramException) {
+            metricsService.incrementNotificationsFailed()
             log.error("❌ [Notification] Telegram error for vacancy ${vacancy.id}: ${e.message}", e)
             // Вакансия уже проанализирована, но не отправлена
         } catch (e: Exception) {
+            metricsService.incrementNotificationsFailed()
             log.error("❌ [Notification] Unexpected error sending vacancy ${vacancy.id} to Telegram: ${e.message}", e)
         }
     }
@@ -59,9 +66,40 @@ class VacancyNotificationService(
         vacancy: Vacancy,
         analysis: VacancyAnalysis,
     ) {
-        val message = buildTelegramMessage(vacancy, analysis)
-        telegramClient.sendMessage(message)
+        // Исправляем URL вакансии, если он в неправильном формате (API URL вместо браузерного)
+        val correctedVacancy = vacancy.copy(url = normalizeVacancyUrl(vacancy.url, vacancy.id))
+        val message = buildTelegramMessage(correctedVacancy, analysis)
+        // Убираем кнопки - они не используются
+        telegramClient.sendMessage(message, null)
     }
+
+    /**
+     * Нормализует URL вакансии, преобразуя API URL в браузерный формат
+     */
+    private fun normalizeVacancyUrl(url: String, vacancyId: String): String {
+        return when {
+            // Если уже правильный формат (hh.ru/vacancy/...)
+            url.contains("hh.ru/vacancy/") && !url.contains("api.hh.ru") -> {
+                // Убираем query параметры если есть
+                url.substringBefore("?")
+            }
+            // Если это API URL, преобразуем в браузерный
+            url.contains("/vacancies/") || url.contains("api.hh.ru") -> {
+                // Извлекаем ID из URL или используем переданный ID
+                val id = if (url.contains("/vacancies/")) {
+                    url.substringAfter("/vacancies/").substringBefore("?")
+                } else {
+                    vacancyId
+                }
+                "https://hh.ru/vacancy/$id"
+            }
+            // Если формат неизвестен, используем ID
+            else -> {
+                "https://hh.ru/vacancy/$vacancyId"
+            }
+        }
+    }
+
 
     /**
      * Формирует сообщение для Telegram
@@ -71,7 +109,7 @@ class VacancyNotificationService(
         analysis: VacancyAnalysis,
     ): String {
         val sb = StringBuilder()
-        
+
         sb.appendLine("🎯 <b>Новая релевантная вакансия!</b>")
         sb.appendLine()
         sb.appendLine("<b>${escapeHtml(vacancy.name)}</b>")
@@ -84,13 +122,10 @@ class VacancyNotificationService(
             sb.appendLine("💼 ${escapeHtml(vacancy.experience)}")
         }
         sb.appendLine()
+        // URL в href не нужно экранировать, только текст ссылки
         sb.appendLine("🔗 <a href=\"${vacancy.url}\">Открыть вакансию на HH.ru</a>")
         sb.appendLine()
-        sb.appendLine("⚡ <b>Быстрые действия:</b>")
-        sb.appendLine("   ✅ <a href=\"${AppConstants.Urls.vacancyMarkApplied(vacancy.id)}\">Откликнулся</a>")
-        sb.appendLine("   ❌ <a href=\"${AppConstants.Urls.vacancyMarkNotInterested(vacancy.id)}\">Неинтересная</a>")
-        sb.appendLine()
-        
+
         if (!vacancy.description.isNullOrBlank()) {
             sb.appendLine("<b>📋 Описание вакансии:</b>")
             val description = if (vacancy.description.length > AppConstants.TextLimits.TELEGRAM_DESCRIPTION_MAX_LENGTH) {
@@ -101,22 +136,27 @@ class VacancyNotificationService(
             sb.appendLine(escapeHtml(description))
             sb.appendLine()
         }
-        
+
         sb.appendLine("<b>📊 Оценка релевантности:</b> ${(analysis.relevanceScore * AppConstants.Formatting.PERCENTAGE_MULTIPLIER).toInt()}%")
         sb.appendLine()
         sb.appendLine("<b>💡 Обоснование:</b>")
         sb.appendLine(escapeHtml(analysis.reasoning))
         sb.appendLine()
-        
+
         if (analysis.hasCoverLetter() && analysis.suggestedCoverLetter != null) {
-            sb.appendLine("<b>💌 Сгенерированное сопроводительное письмо:</b>")
+            sb.appendLine("<b>💌 Сопроводительное письмо:</b>")
             sb.appendLine()
-            sb.appendLine(escapeHtml(analysis.suggestedCoverLetter))
+            // Ограничиваем длину письма для Telegram (максимум 1000 символов)
+            val coverLetter = analysis.suggestedCoverLetter
+            val truncatedLetter = if (coverLetter.length > 1000) {
+                coverLetter.take(1000) + "..."
+            } else {
+                coverLetter
+            }
+            sb.appendLine(escapeHtml(truncatedLetter))
             sb.appendLine()
-        } else {
-            sb.appendLine("ℹ️ <i>Сопроводительное письмо не было сгенерировано</i>")
         }
-        
+
         return sb.toString()
     }
 
@@ -132,4 +172,3 @@ class VacancyNotificationService(
             .replace("'", "&#39;")
     }
 }
-
