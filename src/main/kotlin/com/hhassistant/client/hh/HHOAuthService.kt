@@ -25,7 +25,13 @@ class HHOAuthService(
     @Value("\${hh.oauth.scope:}") private val scope: String?,
 ) {
     private val log = KotlinLogging.logger {}
-    private val webClient = WebClient.builder()
+    // WebClient для OAuth операций (токен пользователя)
+    private val oauthWebClient = WebClient.builder()
+        .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_FORM_URLENCODED_VALUE)
+        .build()
+    // WebClient для получения токена приложения (использует другой endpoint: api.hh.ru)
+    private val apiWebClient = WebClient.builder()
+        .baseUrl("https://api.hh.ru")
         .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_FORM_URLENCODED_VALUE)
         .build()
 
@@ -44,7 +50,7 @@ class HHOAuthService(
         }
 
         return try {
-            val response = webClient.post()
+            val response = oauthWebClient.post()
                 .uri(tokenUrl)
                 .body(BodyInserters.fromFormData(formData))
                 .retrieve()
@@ -89,7 +95,7 @@ class HHOAuthService(
         }
 
         return try {
-            val response = webClient.post()
+            val response = oauthWebClient.post()
                 .uri(tokenUrl)
                 .body(BodyInserters.fromFormData(formData))
                 .retrieve()
@@ -148,12 +154,10 @@ class HHOAuthService(
 
         // Для токена приложения используется другой endpoint: https://api.hh.ru/token
         // (не https://hh.ru/oauth/token)
-        val applicationTokenUrl = "https://api.hh.ru/token"
-
         return try {
             val response = apiWebClient.post()
                 .uri { builder ->
-                    builder.uri(java.net.URI.create(applicationTokenUrl))
+                    builder.path("/token")
                         .queryParam("host", host)
                         .queryParam("locale", locale)
                         .build()

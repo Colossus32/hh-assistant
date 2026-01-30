@@ -75,6 +75,12 @@ class OAuthController(
             
             // Также сохраняем тип токена
             envFileService.updateEnvVariable("HH_TOKEN_TYPE", "application")
+            
+            // Refresh token обычно не предоставляется для application token
+            val refreshTokenSaved = tokenResponse.refreshToken?.let { refreshToken ->
+                envFileService.updateEnvVariable("HH_REFRESH_TOKEN", refreshToken)
+                true
+            } ?: false
 
             val responseBody = mutableMapOf<String, Any>(
                 "success" to true,
