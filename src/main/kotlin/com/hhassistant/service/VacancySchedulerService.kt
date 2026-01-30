@@ -248,6 +248,18 @@ class VacancySchedulerService(
         }
     }
 
+    /**
+     * Экранирует HTML-специальные символы для Telegram
+     */
+    private fun escapeHtml(text: String): String {
+        return text
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+            .replace("'", "&#39;")
+    }
+
     private fun buildTelegramMessage(
         vacancy: Vacancy,
         analysis: com.hhassistant.domain.entity.VacancyAnalysis,
@@ -256,14 +268,14 @@ class VacancySchedulerService(
 
         sb.appendLine("🎯 <b>Новая релевантная вакансия!</b>")
         sb.appendLine()
-        sb.appendLine("<b>${vacancy.name}</b>")
-        sb.appendLine("🏢 ${vacancy.employer}")
+        sb.appendLine("<b>${escapeHtml(vacancy.name)}</b>")
+        sb.appendLine("🏢 ${escapeHtml(vacancy.employer)}")
         if (vacancy.salary != null) {
-            sb.appendLine("💰 ${vacancy.salary}")
+            sb.appendLine("💰 ${escapeHtml(vacancy.salary)}")
         }
-        sb.appendLine("📍 ${vacancy.area}")
+        sb.appendLine("📍 ${escapeHtml(vacancy.area)}")
         if (vacancy.experience != null) {
-            sb.appendLine("💼 ${vacancy.experience}")
+            sb.appendLine("💼 ${escapeHtml(vacancy.experience)}")
         }
         sb.appendLine()
         sb.appendLine("🔗 <a href=\"${vacancy.url}\">Открыть вакансию на HH.ru</a>")
@@ -273,7 +285,7 @@ class VacancySchedulerService(
         sb.appendLine("   ❌ <a href=\"http://localhost:8080/api/vacancies/${vacancy.id}/mark-not-interested\">Неинтересная</a>")
         sb.appendLine()
         
-        // Добавляем описание вакансии
+        // Добавляем описание вакансии (экранируем HTML)
         if (!vacancy.description.isNullOrBlank()) {
             sb.appendLine("<b>📋 Описание вакансии:</b>")
             // Ограничиваем длину описания для Telegram (максимум 2000 символов)
@@ -282,21 +294,24 @@ class VacancySchedulerService(
             } else {
                 vacancy.description
             }
-            sb.appendLine(description)
+            // Экранируем HTML в описании
+            sb.appendLine(escapeHtml(description))
             sb.appendLine()
         }
         
         sb.appendLine("<b>📊 Оценка релевантности:</b> ${(analysis.relevanceScore * 100).toInt()}%")
         sb.appendLine()
         sb.appendLine("<b>💡 Обоснование:</b>")
-        sb.appendLine(analysis.reasoning)
+        // Экранируем HTML в обосновании
+        sb.appendLine(escapeHtml(analysis.reasoning))
         sb.appendLine()
 
-        // Сопроводительное письмо - всегда показываем, если оно есть
+        // Сопроводительное письмо - всегда показываем, если оно есть (экранируем HTML)
         if (analysis.suggestedCoverLetter != null) {
             sb.appendLine("<b>💌 Сгенерированное сопроводительное письмо:</b>")
             sb.appendLine()
-            sb.appendLine(analysis.suggestedCoverLetter)
+            // Экранируем HTML в сопроводительном письме
+            sb.appendLine(escapeHtml(analysis.suggestedCoverLetter))
             sb.appendLine()
         } else {
             sb.appendLine("ℹ️ <i>Сопроводительное письмо не было сгенерировано</i>")

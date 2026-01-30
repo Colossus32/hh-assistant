@@ -80,20 +80,40 @@ class TelegramClient(
         } catch (e: TelegramException) {
             throw e
         } catch (e: WebClientResponseException) {
-            log.error("Error sending message to Telegram API: ${e.message}", e)
-            throw mapToTelegramException(e)
+            // Логируем тело ответа для диагностики 400 ошибок
+            val responseBody = try {
+                e.responseBodyAsString
+            } catch (ex: Exception) {
+                "Unable to read response body: ${ex.message}"
+            }
+            log.error("Error sending message to Telegram API: ${e.statusCode} - ${e.message}")
+            log.error("Response body: $responseBody")
+            log.error("Request message length: ${text.length} chars")
+            log.error("Request message preview: ${text.take(200)}...")
+            throw mapToTelegramException(e, responseBody)
         } catch (e: Exception) {
             log.error("Unexpected error sending message to Telegram: ${e.message}", e)
             throw TelegramException.ConnectionException("Failed to connect to Telegram API: ${e.message}", e)
         }
     }
 
-    private fun mapToTelegramException(e: WebClientResponseException): TelegramException {
+    private fun mapToTelegramException(e: WebClientResponseException, responseBody: String? = null): TelegramException {
+        val errorDetails = responseBody ?: try {
+            e.responseBodyAsString
+        } catch (ex: Exception) {
+            null
+        }
+        
         return when (e.statusCode) {
-            HttpStatus.BAD_REQUEST -> TelegramException.InvalidChatException(
-                "Invalid request to Telegram API: ${e.message}",
-                e,
-            )
+            HttpStatus.BAD_REQUEST -> {
+                val errorMsg = buildString {
+                    append("Invalid request to Telegram API: ${e.message}")
+                    if (errorDetails != null) {
+                        append(" | Response: $errorDetails")
+                    }
+                }
+                TelegramException.InvalidChatException(errorMsg, e)
+            }
             HttpStatus.UNAUTHORIZED -> TelegramException.APIException(
                 "Unauthorized access to Telegram API. Check your bot token.",
                 e,
