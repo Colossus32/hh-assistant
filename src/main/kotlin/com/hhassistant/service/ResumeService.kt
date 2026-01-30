@@ -19,11 +19,11 @@ class ResumeService(
     @Value("\${app.resume.path:./resumes/resume.pdf}") private val resumePath: String,
 ) {
     private val log = KotlinLogging.logger {}
-    
+
     // Кэш резюме в памяти - загружается один раз при старте
     @Volatile
     private var cachedResume: Resume? = null
-    
+
     @Volatile
     private var cachedResumeStructure: com.hhassistant.domain.model.ResumeStructure? = null
 
@@ -37,11 +37,11 @@ class ResumeService(
             log.debug("Using cached resume from memory: ${it.fileName}")
             return it
         }
-        
+
         // Если кэша нет, загружаем резюме
         return loadResumeInternal()
     }
-    
+
     /**
      * Внутренний метод для загрузки резюме из источника
      */
@@ -93,7 +93,7 @@ class ResumeService(
             return emptyResume
         }
     }
-    
+
     /**
      * Предзагружает резюме в память при старте приложения
      * Вызывается из ApplicationReadyEvent или @PostConstruct
@@ -204,7 +204,7 @@ class ResumeService(
         if (cachedResumeStructure != null && cachedResume?.id == resume.id) {
             return cachedResumeStructure
         }
-        
+
         // Парсим структуру из JSON
         return resume.structuredData?.let {
             try {
@@ -218,7 +218,57 @@ class ResumeService(
             }
         }
     }
-    
+
+    /**
+     * Сохраняет резюме из PDF байтов (например, из Telegram)
+     */
+    suspend fun saveResumeFromBytes(
+        pdfBytes: ByteArray,
+        fileName: String,
+    ): Resume {
+        log.info("💾 [ResumeService] Saving resume from bytes: $fileName (${pdfBytes.size} bytes)")
+
+        // Деактивируем все существующие резюме
+        repository.findByIsActiveTrue().forEach { resume ->
+            repository.save(resume.copy(isActive = false))
+        }
+
+        // Извлекаем текст из PDF
+        val rawText = pdfParser.extractTextFromBytes(pdfBytes)
+        val structuredData = pdfParser.extractStructuredData(rawText)
+
+        // Сохраняем новое резюме
+        val savedResume = repository.save(
+            Resume(
+                fileName = fileName,
+                rawText = rawText,
+                structuredData = objectMapper.writeValueAsString(structuredData),
+                source = ResumeSource.MANUAL_UPLOAD,
+                isActive = true,
+            ),
+        )
+
+        // Обновляем кэш
+        cachedResume = savedResume
+        cachedResumeStructure = structuredData
+
+        log.info("✅ [ResumeService] Resume saved successfully: ${savedResume.fileName} (${rawText.length} chars, ${structuredData.skills.size} skills)")
+        return savedResume
+    }
+
+    /**
+     * Проверяет, есть ли активное резюме в системе
+     */
+    fun hasActiveResume(): Boolean {
+        val activeResume = repository.findFirstByIsActiveTrue()
+        if (activeResume != null) {
+            // Проверяем, что это не пустое резюме
+            return activeResume.fileName != "empty_resume.txt" &&
+                !activeResume.rawText.contains("Резюме не загружено")
+        }
+        return false
+    }
+
     /**
      * Очищает кэш резюме (полезно для тестирования или перезагрузки)
      */

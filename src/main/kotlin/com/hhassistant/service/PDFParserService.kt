@@ -32,6 +32,21 @@ class PDFParserService(
         }
     }
 
+    /**
+     * Извлекает текст из PDF из байтов
+     */
+    fun extractTextFromBytes(pdfBytes: ByteArray): String {
+        return Loader.loadPDF(pdfBytes).use { document ->
+            val stripper = PDFTextStripper()
+            stripper.setStartPage(1)
+            stripper.setEndPage(document.numberOfPages)
+            val text = stripper.getText(document)
+            text.trim()
+                .replace(Regex("\\s+"), " ")
+                .replace(Regex("\\n{3,}"), "\n\n")
+        }
+    }
+
     fun extractStructuredData(text: String): ResumeStructure {
         val normalizedText = text.lowercase()
 

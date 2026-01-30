@@ -2,10 +2,10 @@ package com.hhassistant.service
 
 import com.hhassistant.client.telegram.TelegramClient
 import com.hhassistant.config.AppConstants
+import kotlinx.coroutines.runBlocking
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
-import kotlinx.coroutines.runBlocking
 
 /**
  * Сервис для отправки системных уведомлений в Telegram
@@ -111,9 +111,9 @@ class NotificationService(
             return
         }
 
-        val isForbidden = errorMessage.contains("403", ignoreCase = true) || 
-                         errorMessage.contains("Forbidden", ignoreCase = true)
-        
+        val isForbidden = errorMessage.contains("403", ignoreCase = true) ||
+            errorMessage.contains("Forbidden", ignoreCase = true)
+
         val message = buildString {
             appendLine("🚨 <b>ВНИМАНИЕ: Проблема с токеном HH.ru!</b>")
             appendLine()
@@ -156,5 +156,27 @@ class NotificationService(
             }
         }
     }
-}
 
+    /**
+     * Отправляет произвольное сообщение в Telegram
+     */
+    fun sendMessage(text: String) {
+        if (!telegramEnabled) {
+            log.debug("📱 [Notification] Telegram disabled, skipping message")
+            return
+        }
+
+        runBlocking {
+            try {
+                val sent = telegramClient.sendMessage(text)
+                if (sent) {
+                    log.info("✅ [Notification] Message sent to Telegram")
+                } else {
+                    log.warn("⚠️ [Notification] Failed to send message (Telegram returned false)")
+                }
+            } catch (e: Exception) {
+                log.error("❌ [Notification] Failed to send message: ${e.message}", e)
+            }
+        }
+    }
+}
