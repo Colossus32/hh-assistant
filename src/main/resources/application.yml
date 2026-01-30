@@ -28,7 +28,7 @@ spring:
 
 app:
   schedule:
-    vacancy-check: "0 */15 * * * *"  # Every 15 minutes
+    vacancy-check: "0 */10 * * * *"  # Every 10 minutes
   max-vacancies-per-cycle: 50
   dry-run: false  # По умолчанию выключен, включается через профиль dry-run
   # Для работы с реальными вакансиями:
@@ -61,6 +61,9 @@ app:
     cron: "0 0 9 * * *"  # Cron expression for daily analysis (every day at 9:00 AM)
     log-file: logs/hh-assistant.log  # Path to log file
     lookback-hours: 24  # Number of hours to look back when analyzing logs
+    batch-size: 500  # Number of log lines per batch for analysis
+    max-batches: 10  # Maximum number of batches to process (to avoid too long analysis)
+    summary-first: true  # First create summaries of batches, then analyze summaries
   prompts:
     # Системный промпт для анализа вакансий (можно переопределить)
     analysis-system: |
