@@ -85,11 +85,13 @@ class VacancyAnalysisService(
         log.info("📊 [Ollama] Analysis result for '${vacancy.name}': isRelevant=${validatedResult.isRelevant}, relevanceScore=${String.format("%.2f", validatedResult.relevanceScore * 100)}%, matchedSkills=${validatedResult.matchedSkills.size}")
 
         // Генерируем сопроводительное письмо для релевантных вакансий
-        val coverLetter = if (validatedResult.isRelevant && validatedResult.relevanceScore >= minRelevanceScore) {
+        // Генерируем письмо, если вакансия релевантна ИЛИ score >= minRelevanceScore
+        // Это гарантирует, что письмо будет сгенерировано для всех вакансий, которые отправляются в Telegram
+        val coverLetter = if (validatedResult.isRelevant || validatedResult.relevanceScore >= minRelevanceScore) {
             try {
-                log.info("✍️ [Ollama] Generating cover letter for relevant vacancy ${vacancy.id}...")
+                log.info("✍️ [Ollama] Generating cover letter for vacancy ${vacancy.id} (isRelevant=${validatedResult.isRelevant}, score=${String.format("%.2f", validatedResult.relevanceScore * 100)}%)...")
                 val coverLetterResult = generateCoverLetter(vacancy, resume, resumeStructure, validatedResult)
-                log.info("✅ [Ollama] Cover letter generated (length: ${coverLetterResult.length} chars)")
+                log.info("✅ [Ollama] Cover letter generated successfully (length: ${coverLetterResult.length} chars)")
                 coverLetterResult
             } catch (e: Exception) {
                 log.warn("⚠️ [Ollama] Failed to generate cover letter for vacancy ${vacancy.id}: ${e.message}", e)
@@ -97,7 +99,7 @@ class VacancyAnalysisService(
                 null
             }
         } else {
-            log.debug("ℹ️ [Ollama] Skipping cover letter generation (not relevant or score too low)")
+            log.debug("ℹ️ [Ollama] Skipping cover letter generation (not relevant and score too low: ${String.format("%.2f", validatedResult.relevanceScore * 100)}% < ${minRelevanceScore * 100}%)")
             null
         }
 

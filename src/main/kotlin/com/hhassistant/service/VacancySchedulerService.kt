@@ -183,6 +183,14 @@ class VacancySchedulerService(
                 // Отправляем релевантные вакансии в Telegram
                 if (analysis.isRelevant) {
                     log.info("📱 [Scheduler] Vacancy ${vacancy.id} is relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%), sending to Telegram...")
+                    
+                    // Проверяем наличие сопроводительного письма
+                    if (analysis.suggestedCoverLetter == null) {
+                        log.warn("⚠️ [Scheduler] Vacancy ${vacancy.id} is relevant but cover letter is missing. This may indicate an issue with cover letter generation.")
+                    } else {
+                        log.info("✅ [Scheduler] Cover letter available for vacancy ${vacancy.id} (length: ${analysis.suggestedCoverLetter.length} chars)")
+                    }
+                    
                     try {
                         sendVacancyToTelegram(vacancy, analysis)
                         vacancyService.updateVacancyStatus(vacancy, VacancyStatus.SENT_TO_USER)
@@ -257,17 +265,36 @@ class VacancySchedulerService(
             sb.appendLine("💼 ${vacancy.experience}")
         }
         sb.appendLine()
-        sb.appendLine("🔗 <a href=\"${vacancy.url}\">Открыть вакансию</a>")
+        sb.appendLine("🔗 <a href=\"${vacancy.url}\">Открыть вакансию на HH.ru</a>")
         sb.appendLine()
-        sb.appendLine("<b>Оценка релевантности:</b> ${(analysis.relevanceScore * 100).toInt()}%")
-        sb.appendLine()
-        sb.appendLine("<b>Обоснование:</b>")
-        sb.appendLine(analysis.reasoning)
-
-        if (analysis.suggestedCoverLetter != null) {
+        
+        // Добавляем описание вакансии
+        if (!vacancy.description.isNullOrBlank()) {
+            sb.appendLine("<b>📋 Описание вакансии:</b>")
+            // Ограничиваем длину описания для Telegram (максимум 2000 символов)
+            val description = if (vacancy.description.length > 2000) {
+                vacancy.description.take(2000) + "..."
+            } else {
+                vacancy.description
+            }
+            sb.appendLine(description)
             sb.appendLine()
-            sb.appendLine("<b>💌 Предложенное сопроводительное письмо:</b>")
+        }
+        
+        sb.appendLine("<b>📊 Оценка релевантности:</b> ${(analysis.relevanceScore * 100).toInt()}%")
+        sb.appendLine()
+        sb.appendLine("<b>💡 Обоснование:</b>")
+        sb.appendLine(analysis.reasoning)
+        sb.appendLine()
+
+        // Сопроводительное письмо - всегда показываем, если оно есть
+        if (analysis.suggestedCoverLetter != null) {
+            sb.appendLine("<b>💌 Сгенерированное сопроводительное письмо:</b>")
+            sb.appendLine()
             sb.appendLine(analysis.suggestedCoverLetter)
+            sb.appendLine()
+        } else {
+            sb.appendLine("ℹ️ <i>Сопроводительное письмо не было сгенерировано</i>")
         }
 
         return sb.toString()
