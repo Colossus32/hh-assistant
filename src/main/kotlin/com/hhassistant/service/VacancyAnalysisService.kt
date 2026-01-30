@@ -24,6 +24,8 @@ class VacancyAnalysisService(
     private val objectMapper: ObjectMapper,
     private val promptConfig: PromptConfig,
     @Value("\${app.analysis.min-relevance-score:0.6}") private val minRelevanceScore: Double,
+    @Value("\${app.analysis.cover-letter.max-retries:3}") private val maxCoverLetterRetries: Int,
+    @Value("\${app.analysis.cover-letter.retry-delay-seconds:5}") private val coverLetterRetryDelaySeconds: Long,
 ) {
     private val log = KotlinLogging.logger {}
 
@@ -111,7 +113,7 @@ class VacancyAnalysisService(
                 // Если письмо не сгенерировано, добавляем в очередь ретраев
                 CoverLetterGenerationStatus.RETRY_QUEUED
             },
-            coverLetterAttempts = if (coverLetter == null) 1 else 0, // Считаем попытки только при неудаче
+            coverLetterAttempts = if (coverLetter == null) maxCoverLetterRetries else 0, // Если неудачно, считаем что все попытки использованы
             coverLetterLastAttemptAt = if (coverLetter == null) LocalDateTime.now() else null,
         )
 
@@ -193,7 +195,7 @@ class VacancyAnalysisService(
     }
 
     /**
-     * Генерирует сопроводительное письмо с ретраями (до 3 попыток)
+     * Генерирует сопроводительное письмо с ретраями (до maxCoverLetterRetries попыток)
      *
      * @param vacancy Вакансия
      * @param resume Резюме
@@ -207,38 +209,38 @@ class VacancyAnalysisService(
         resumeStructure: com.hhassistant.domain.model.ResumeStructure?,
         analysisResult: AnalysisResult,
     ): String? {
-        val maxRetries = 3
         var lastException: Exception? = null
 
-        for (attempt in 1..maxRetries) {
+        for (attempt in 1..maxCoverLetterRetries) {
             try {
-                log.info("✍️ [Ollama] Generating cover letter for vacancy ${vacancy.id} (attempt $attempt/$maxRetries)...")
+                log.info("✍️ [Ollama] Generating cover letter for vacancy ${vacancy.id} (attempt $attempt/$maxCoverLetterRetries)...")
                 val coverLetter = generateCoverLetter(vacancy, resume, resumeStructure, analysisResult)
                 log.info("✅ [Ollama] Cover letter generated successfully on attempt $attempt (length: ${coverLetter.length} chars)")
                 return coverLetter
             } catch (e: Exception) {
                 lastException = e
-                log.warn("⚠️ [Ollama] Cover letter generation attempt $attempt/$maxRetries failed for vacancy ${vacancy.id}: ${e.message}")
+                log.warn("⚠️ [Ollama] Cover letter generation attempt $attempt/$maxCoverLetterRetries failed for vacancy ${vacancy.id}: ${e.message}")
                 
-                if (attempt < maxRetries) {
-                    val delayMs = attempt * 1000L // Экспоненциальная задержка: 1s, 2s, 3s
+                if (attempt < maxCoverLetterRetries) {
+                    val delayMs = attempt * coverLetterRetryDelaySeconds * 1000L // Экспоненциальная задержка
                     log.info("🔄 [Ollama] Retrying cover letter generation in ${delayMs}ms...")
                     delay(delayMs)
                 } else {
-                    log.error("❌ [Ollama] All $maxRetries attempts to generate cover letter failed for vacancy ${vacancy.id}", e)
+                    log.error("❌ [Ollama] All $maxCoverLetterRetries attempts to generate cover letter failed for vacancy ${vacancy.id}", e)
                 }
             }
         }
 
         // Все попытки неудачны
-        log.error("❌ [Ollama] Failed to generate cover letter after $maxRetries attempts for vacancy ${vacancy.id}. Last error: ${lastException?.message}")
+        log.error("❌ [Ollama] Failed to generate cover letter after $maxCoverLetterRetries attempts for vacancy ${vacancy.id}. Last error: ${lastException?.message}")
         return null
     }
 
     /**
      * Генерирует сопроводительное письмо (одна попытка)
+     * Публичный метод для использования в CoverLetterRetryService
      */
-    private suspend fun generateCoverLetter(
+    suspend fun generateCoverLetter(
         vacancy: Vacancy,
         resume: com.hhassistant.domain.entity.Resume,
         resumeStructure: com.hhassistant.domain.model.ResumeStructure?,
@@ -305,7 +307,10 @@ class VacancyAnalysisService(
         return result
     }
 
-    private data class AnalysisResult(
+    /**
+     * Результат анализа вакансии (используется внутри сервиса и в CoverLetterRetryService)
+     */
+    data class AnalysisResult(
         @com.fasterxml.jackson.annotation.JsonProperty("is_relevant")
         val isRelevant: Boolean,
         @com.fasterxml.jackson.annotation.JsonProperty("relevance_score")
