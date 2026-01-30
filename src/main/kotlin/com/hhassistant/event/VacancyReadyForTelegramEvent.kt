@@ -12,4 +12,3 @@ class VacancyReadyForTelegramEvent(
     val vacancy: Vacancy,
     val analysis: VacancyAnalysis,
 ) : ApplicationEvent(source)
-

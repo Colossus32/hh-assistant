@@ -12,4 +12,3 @@ class CoverLetterGeneratedEvent(
     val vacancy: Vacancy,
     val analysis: VacancyAnalysis,
 ) : ApplicationEvent(source)
-

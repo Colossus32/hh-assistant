@@ -25,4 +25,3 @@ sealed class OllamaException(message: String, cause: Throwable?) : RuntimeExcept
     class CoverLetterGenerationException(message: String, cause: Throwable? = null) : OllamaException(message, cause)
 }
 
-

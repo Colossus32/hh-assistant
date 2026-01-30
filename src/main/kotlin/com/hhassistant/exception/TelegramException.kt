@@ -25,4 +25,3 @@ sealed class TelegramException(message: String, cause: Throwable? = null) : Runt
     class APIException(message: String, cause: Throwable? = null) : TelegramException(message, cause)
 }
 
-

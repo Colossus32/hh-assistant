@@ -25,10 +25,12 @@ class HHOAuthService(
     @Value("\${hh.oauth.scope:}") private val scope: String?,
 ) {
     private val log = KotlinLogging.logger {}
+
     // WebClient для OAuth операций (токен пользователя)
     private val oauthWebClient = WebClient.builder()
         .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_FORM_URLENCODED_VALUE)
         .build()
+
     // WebClient для получения токена приложения (использует другой endpoint: api.hh.ru)
     private val apiWebClient = WebClient.builder()
         .baseUrl("https://api.hh.ru")
@@ -107,10 +109,10 @@ class HHOAuthService(
         } catch (e: WebClientResponseException) {
             val responseBody = e.responseBodyAsString
             log.error("Failed to refresh token: ${e.statusCode} - $responseBody", e)
-            
+
             // Парсим error_description из ответа для более точной обработки
             val errorDescription = extractErrorDescription(responseBody)
-            
+
             throw when (e.statusCode.value()) {
                 400 -> {
                     // Специальная обработка для разных типов ошибок 400
@@ -165,10 +167,10 @@ class HHOAuthService(
     /**
      * Получает токен приложения (application token)
      * Токен приложения имеет неограниченный срок жизни и используется для доступа к публичному API
-     * 
+     *
      * Согласно документации: https://api.hh.ru/openapi/redoc#tag/Avtorizaciya-prilozheniya/operation/authorize
      * Токен приложения получается через POST https://api.hh.ru/token с grant_type=client_credentials
-     * 
+     *
      * @param userAgent User-Agent header (HH-User-Agent) - название приложения и контактная почта
      * @param host Доменное имя сайта (по умолчанию "hh.ru")
      * @param locale Идентификатор локали (по умолчанию "RU")
@@ -257,4 +259,3 @@ class HHOAuthService(
         }
     }
 }
-

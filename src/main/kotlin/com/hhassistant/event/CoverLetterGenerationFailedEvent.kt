@@ -13,4 +13,3 @@ class CoverLetterGenerationFailedEvent(
     val analysis: VacancyAnalysis,
     val attempts: Int,
 ) : ApplicationEvent(source)
-

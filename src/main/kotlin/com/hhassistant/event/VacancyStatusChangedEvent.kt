@@ -13,4 +13,3 @@ class VacancyStatusChangedEvent(
     val oldStatus: VacancyStatus?,
     val newStatus: VacancyStatus,
 ) : ApplicationEvent(source)
-

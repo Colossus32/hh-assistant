@@ -2,7 +2,6 @@ package com.hhassistant.config
 
 import mu.KotlinLogging
 import org.springframework.http.HttpHeaders
-import org.springframework.web.reactive.function.client.ClientRequest
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction
 
 /**
@@ -17,7 +16,7 @@ object WebClientRequestLoggingFilter {
             val hhUserAgentHeader = request.headers().getFirst("HH-User-Agent")
             val userAgentHeader = request.headers().getFirst(HttpHeaders.USER_AGENT)
             log.debug("🌐 [WebClient] Request to ${request.url()}: HH-User-Agent='$hhUserAgentHeader', User-Agent='$userAgentHeader'")
-            
+
             val authHeader = request.headers().getFirst(HttpHeaders.AUTHORIZATION)
             if (authHeader != null) {
                 val tokenPrefix = if (authHeader.length > 25) {
@@ -48,4 +47,3 @@ object WebClientRequestLoggingFilter {
         }
     }
 }
-

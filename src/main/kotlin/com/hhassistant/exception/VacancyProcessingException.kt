@@ -9,4 +9,3 @@ class VacancyProcessingException(
     cause: Throwable? = null,
 ) : RuntimeException(message, cause)
 
-

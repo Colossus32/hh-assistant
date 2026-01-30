@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Конфигурация кэширования с использованием Caffeine
- * 
+ *
  * Кэши используются для:
  * - HH.ru API запросы (детали вакансий)
  * - Запросы к БД (SearchConfig, список ID вакансий)
@@ -78,16 +78,15 @@ class CacheConfig {
     @Bean
     fun cacheManager(): CacheManager {
         val cacheManager = CaffeineCacheManager()
-        
+
         // Настройка кэшей по умолчанию
         cacheManager.setCaffeine(
             Caffeine.newBuilder()
                 .maximumSize(AppConstants.Cache.DEFAULT_MAX_SIZE.toLong())
                 .expireAfterWrite(10, TimeUnit.MINUTES)
-                .recordStats()
+                .recordStats(),
         )
-        
+
         return cacheManager
     }
 }
-

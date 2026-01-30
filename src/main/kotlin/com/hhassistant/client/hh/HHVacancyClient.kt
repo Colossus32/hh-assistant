@@ -46,9 +46,9 @@ class HHVacancyClient(
                         }
                         .build()
                 }
-            
+
             log.debug("🌐 [HH.ru API] Request URL will be logged by WebClientRequestLoggingFilter")
-            
+
             val response = requestSpec
                 .retrieve()
                 .bodyToMono<VacancySearchResponse>()
@@ -63,13 +63,13 @@ class HHVacancyClient(
         } catch (e: WebClientResponseException) {
             log.error("❌ [HH.ru API] Error searching vacancies: ${e.message}", e)
             val exception = mapToHHAPIException(e, "Failed to search vacancies")
-            
+
             // Если это ошибка авторизации, логируем детально
             if (exception is HHAPIException.UnauthorizedException) {
                 log.error("🚨 [HH.ru API] UNAUTHORIZED: Access token expired or invalid!")
                 log.error("🚨 [HH.ru API] Status code: ${e.statusCode}, Response: ${e.responseBodyAsString}")
             }
-            
+
             throw exception
         } catch (e: Exception) {
             log.error("Unexpected error searching vacancies: ${e.message}", e)
@@ -80,7 +80,7 @@ class HHVacancyClient(
     suspend fun getVacancyDetails(id: String): VacancyDto {
         // Проверяем кэш перед запросом к API
         @Suppress("UNCHECKED_CAST")
-        (vacancyDetailsCache.getIfPresent(id) as? VacancyDto)?.let { cached ->
+        (vacancyDetailsCache.getIfPresent(id) as VacancyDto?)?.let { cached ->
             log.debug("💾 [HH.ru API] Using cached vacancy details for ID: $id")
             return cached
         }

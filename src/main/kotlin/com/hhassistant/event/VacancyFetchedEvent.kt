@@ -11,4 +11,3 @@ class VacancyFetchedEvent(
     val vacancies: List<Vacancy>,
     val searchKeywords: String,
 ) : ApplicationEvent(source)
-

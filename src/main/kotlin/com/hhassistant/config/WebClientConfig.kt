@@ -41,7 +41,7 @@ class WebClientConfig(
         var builder = WebClient.builder()
             .baseUrl(baseUrl)
             .clientConnector(proxyManager.getConnector())
-        
+
         if (userAgent.isNotBlank() && !userAgent.contains("example.com", ignoreCase = true)) {
             // Добавляем HH-User-Agent только если указан реальный (не example.com)
             builder = builder.defaultHeader("HH-User-Agent", userAgent)
@@ -54,7 +54,7 @@ class WebClientConfig(
             log.warn("⚠️ [WebClient] HH-User-Agent не указан или содержит example.com - используем минимальный формат: $defaultUserAgent")
             log.warn("⚠️ [WebClient] Для production установите HH_USER_AGENT в .env: 'HH-Assistant/1.0 (your@email.com)'")
         }
-        
+
         builder = builder
             .defaultHeader(HttpHeaders.ACCEPT, acceptHeader)
             .filter(WebClientRequestLoggingFilter.create())
@@ -137,7 +137,6 @@ class WebClientConfig(
             }
         }
     }
-
 
     private fun errorLoggingFilter(): ExchangeFilterFunction {
         return ExchangeFilterFunction.ofResponseProcessor { response ->

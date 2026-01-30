@@ -37,14 +37,14 @@ data class VacancyAnalysis(
 
     @Column(name = "suggested_cover_letter", columnDefinition = "TEXT")
     val suggestedCoverLetter: String?,
-    
+
     @Enumerated(EnumType.STRING)
     @Column(name = "cover_letter_generation_status", length = 20, nullable = false)
     val coverLetterGenerationStatus: CoverLetterGenerationStatus = CoverLetterGenerationStatus.NOT_ATTEMPTED,
-    
+
     @Column(name = "cover_letter_attempts", nullable = false)
     val coverLetterAttempts: Int = 0,
-    
+
     @Column(name = "cover_letter_last_attempt_at")
     val coverLetterLastAttemptAt: LocalDateTime? = null,
 ) {
@@ -52,23 +52,23 @@ data class VacancyAnalysis(
      * Rich Domain Model: бизнес-логика внутри entity
      * Проверяет, успешно ли сгенерировано сопроводительное письмо
      */
-    fun hasCoverLetter(): Boolean = suggestedCoverLetter != null && 
+    fun hasCoverLetter(): Boolean = suggestedCoverLetter != null &&
         coverLetterGenerationStatus == CoverLetterGenerationStatus.SUCCESS
-    
+
     /**
      * Проверяет, можно ли повторить генерацию письма
      */
-    fun canRetryCoverLetter(): Boolean = 
+    fun canRetryCoverLetter(): Boolean =
         coverLetterGenerationStatus == CoverLetterGenerationStatus.RETRY_QUEUED ||
-        coverLetterGenerationStatus == CoverLetterGenerationStatus.FAILED
-    
+            coverLetterGenerationStatus == CoverLetterGenerationStatus.FAILED
+
     /**
      * Проверяет, была ли генерация письма завершена (успешно или неудачно)
      */
-    fun isCoverLetterGenerationComplete(): Boolean = 
+    fun isCoverLetterGenerationComplete(): Boolean =
         coverLetterGenerationStatus == CoverLetterGenerationStatus.SUCCESS ||
-        coverLetterGenerationStatus == CoverLetterGenerationStatus.FAILED
-    
+            coverLetterGenerationStatus == CoverLetterGenerationStatus.FAILED
+
     /**
      * Создает копию анализа с обновленным письмом
      */
@@ -78,7 +78,7 @@ data class VacancyAnalysis(
         coverLetterAttempts = 0,
         coverLetterLastAttemptAt = null,
     )
-    
+
     /**
      * Создает копию анализа с обновленным статусом генерации письма
      */
@@ -94,9 +94,9 @@ data class VacancyAnalysis(
 }
 
 enum class CoverLetterGenerationStatus {
-    NOT_ATTEMPTED,      // Письмо еще не пытались генерировать
-    IN_PROGRESS,        // Генерация в процессе
-    SUCCESS,            // Успешно сгенерировано
-    FAILED,             // Все попытки неудачны
-    RETRY_QUEUED,       // В очереди на повторную попытку
+    NOT_ATTEMPTED, // Письмо еще не пытались генерировать
+    IN_PROGRESS, // Генерация в процессе
+    SUCCESS, // Успешно сгенерировано
+    FAILED, // Все попытки неудачны
+    RETRY_QUEUED, // В очереди на повторную попытку
 }

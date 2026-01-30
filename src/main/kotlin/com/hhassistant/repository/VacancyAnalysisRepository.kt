@@ -15,7 +15,7 @@ interface VacancyAnalysisRepository : JpaRepository<VacancyAnalysis, Long> {
 
     @Query("SELECT va FROM VacancyAnalysis va WHERE va.isRelevant = true AND va.relevanceScore >= :minScore")
     fun findRelevantByMinScore(minScore: Double): List<VacancyAnalysis>
-    
+
     /**
      * Находит анализы, которые находятся в очереди ретраев и еще не достигли максимального количества попыток
      */
@@ -24,7 +24,7 @@ interface VacancyAnalysisRepository : JpaRepository<VacancyAnalysis, Long> {
         status: CoverLetterGenerationStatus,
         maxAttempts: Int,
     ): List<VacancyAnalysis>
-    
+
     /**
      * Находит анализы с неудачной генерацией письма (для повторной попытки)
      */

@@ -9,7 +9,9 @@ data class VacancyDto(
     val employer: EmployerDto?,
     val salary: SalaryDto?,
     val area: AreaDto?,
-    val url: String,
+    val url: String, // API URL (например, https://api.hh.ru/vacancies/123)
+    @JsonProperty("alternate_url")
+    val alternateUrl: String? = null, // Браузерная ссылка (например, https://hh.ru/vacancy/123)
     val description: String?,
     val experience: ExperienceDto?,
     @JsonProperty("published_at")

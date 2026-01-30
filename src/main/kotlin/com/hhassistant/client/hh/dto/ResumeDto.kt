@@ -37,4 +37,3 @@ data class TotalExperienceDto(
     val months: Int?,
 )
 
-

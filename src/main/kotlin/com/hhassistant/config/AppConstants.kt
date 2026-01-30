@@ -9,7 +9,7 @@ object AppConstants {
         const val LOCALHOST_BASE = "http://localhost:8080"
         const val API_VACANCIES_BASE = "$LOCALHOST_BASE/api/vacancies"
         const val OAUTH_AUTHORIZE = "$LOCALHOST_BASE/oauth/authorize"
-        
+
         fun vacancyMarkApplied(vacancyId: String) = "$API_VACANCIES_BASE/$vacancyId/mark-applied"
         fun vacancyMarkNotInterested(vacancyId: String) = "$API_VACANCIES_BASE/$vacancyId/mark-not-interested"
     }
@@ -74,5 +74,4 @@ object AppConstants {
         const val TOTAL_ATTEMPTS_MULTIPLIER = 2 // maxRetries * 2 для общего количества попыток
     }
 }
-
 

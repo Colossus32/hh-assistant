@@ -17,4 +17,3 @@ data class VacancySearchResponse(
     @JsonProperty("alternate_url")
     val alternateUrl: String? = null,
 )
-
