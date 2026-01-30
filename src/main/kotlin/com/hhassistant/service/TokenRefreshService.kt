@@ -21,7 +21,7 @@ class TokenRefreshService(
     /**
      * Проверяет и обновляет токен, если он истек или скоро истечет
      * Запускается каждые 12 часов (токен обычно живет 14 дней)
-     * 
+     *
      * Примечание: Не обновляет токен при старте, так как токен может быть еще валидным.
      * Обновление происходит только при ошибках 401/403 или по расписанию.
      * Application tokens не обновляются (они имеют неограниченный срок жизни).
@@ -34,7 +34,7 @@ class TokenRefreshService(
             log.debug("ℹ️ [TokenRefresh] Application token detected, skipping refresh (application tokens have unlimited lifetime)")
             return
         }
-        
+
         // Проверяем наличие refresh token перед попыткой обновления
         val refreshToken = envFileService.readEnvVariable("HH_REFRESH_TOKEN")
         if (refreshToken.isNullOrBlank()) {
@@ -50,7 +50,7 @@ class TokenRefreshService(
 
                 // Сохраняем новый access token
                 val accessTokenSaved = envFileService.updateEnvVariable("HH_ACCESS_TOKEN", tokenResponse.accessToken)
-                
+
                 // Сохраняем новый refresh token, если он был обновлен
                 val refreshTokenSaved = tokenResponse.refreshToken?.let { newRefreshToken ->
                     envFileService.updateEnvVariable("HH_REFRESH_TOKEN", newRefreshToken)
@@ -93,7 +93,7 @@ class TokenRefreshService(
             log.info("ℹ️ [TokenRefresh] If you get 403, the token may be invalid or the application may lack permissions")
             return false
         }
-        
+
         val refreshToken = envFileService.readEnvVariable("HH_REFRESH_TOKEN")
         if (refreshToken.isNullOrBlank()) {
             log.warn("⚠️ [TokenRefresh] No refresh token found for manual refresh")
@@ -137,4 +137,3 @@ class TokenRefreshService(
         }
     }
 }
-

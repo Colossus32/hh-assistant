@@ -57,7 +57,7 @@ class LogAnalysisService(
             try {
                 // Читаем логи за последние N часов
                 val logLines = readRecentLogs(lookbackHours)
-                
+
                 if (logLines.isEmpty()) {
                     log.info("ℹ️ [LogAnalysis] No logs found for analysis")
                     return@runBlocking
@@ -83,7 +83,7 @@ class LogAnalysisService(
      */
     private fun readRecentLogs(hours: Int): List<String> {
         val logFile = File(logFilePath)
-        
+
         if (!logFile.exists()) {
             log.warn("⚠️ [LogAnalysis] Log file not found: ${logFile.absolutePath}")
             return emptyList()
@@ -124,7 +124,7 @@ class LogAnalysisService(
     private fun extractTimestamp(line: String): LocalDateTime? {
         return try {
             if (line.length < AppConstants.Logging.LOG_TIMESTAMP_LENGTH) return null
-            
+
             val dateTimeStr = line.substring(0, AppConstants.Logging.LOG_TIMESTAMP_LENGTH)
             LocalDateTime.parse(dateTimeStr, DateTimeFormatter.ofPattern(AppConstants.Logging.LOG_TIMESTAMP_FORMAT))
         } catch (e: Exception) {
@@ -175,7 +175,7 @@ class LogAnalysisService(
         for ((index, batch) in batches.withIndex()) {
             try {
                 log.info("📝 [LogAnalysis] Creating summary for batch ${index + 1}/${batches.size} (${batch.size} lines)...")
-                
+
                 val summary = createBatchSummary(batch, index + 1, batches.size)
                 batchSummaries.add("=== Батч ${index + 1} ===\n$summary")
 
@@ -196,7 +196,7 @@ class LogAnalysisService(
 
         // Шаг 2: Анализируем саммари вместе с деталями из проблемных батчей
         log.info("🔍 [LogAnalysis] Analyzing ${batchSummaries.size} summaries and ${problematicBatches.size} problematic batch details...")
-        
+
         val finalAnalysis = analyzeSummariesWithDetails(batchSummaries, problematicBatches)
 
         return LogAnalysisResult(
@@ -212,7 +212,7 @@ class LogAnalysisService(
      */
     private suspend fun createBatchSummary(batch: List<String>, batchNumber: Int, totalBatches: Int): String {
         val batchText = batch.joinToString("\n")
-        
+
         val systemPrompt = """
             Ты - эксперт по анализу логов. Создай краткое резюме (до ${AppConstants.TextLimits.LOG_ANALYSIS_SUMMARY_WORDS} слов) следующего батча логов.
             
@@ -255,7 +255,7 @@ class LogAnalysisService(
         problematicBatches: List<Pair<Int, List<String>>>,
     ): String {
         val summariesText = summaries.joinToString("\n\n")
-        
+
         // Добавляем детали из проблемных батчей (ограничиваем размер)
         val problematicDetails = problematicBatches.take(AppConstants.Indices.PROBLEMATIC_BATCHES_LIMIT).joinToString("\n\n") { (batchNum, batch) ->
             "=== Детали проблемного батча $batchNum ===\n${batch.takeLast(AppConstants.TextLimits.PROBLEMATIC_BATCH_DETAILS_LINES).joinToString("\n")}"
@@ -276,19 +276,19 @@ class LogAnalysisService(
         """.trimIndent()
 
         val userPrompt = buildString {
-            appendLine("Проанализируй следующие резюме батчей логов за последние ${lookbackHours} часов:")
+            appendLine("Проанализируй следующие резюме батчей логов за последние $lookbackHours часов:")
             appendLine()
             appendLine("=== РЕЗЮМЕ БАТЧЕЙ ===")
             appendLine(summariesText)
             appendLine("=== КОНЕЦ РЕЗЮМЕ ===")
-            
+
             if (problematicDetails.isNotEmpty()) {
                 appendLine()
                 appendLine("=== ДЕТАЛИ ПРОБЛЕМНЫХ БАТЧЕЙ ===")
                 appendLine(problematicDetails)
                 appendLine("=== КОНЕЦ ДЕТАЛЕЙ ===")
             }
-            
+
             appendLine()
             appendLine("Предоставь структурированный анализ:")
             appendLine("- Критические ошибки (если есть)")
@@ -322,7 +322,7 @@ class LogAnalysisService(
         for ((index, batch) in batches.withIndex()) {
             try {
                 log.info("🔍 [LogAnalysis] Analyzing batch ${index + 1}/${batches.size} (${batch.size} lines)...")
-                
+
                 val batchAnalysis = analyzeSingleBatch(batch, index + 1, batches.size)
                 batchAnalyses.add("=== Анализ батча ${index + 1} ===\n$batchAnalysis")
             } catch (e: Exception) {
@@ -351,7 +351,7 @@ class LogAnalysisService(
      */
     private suspend fun analyzeSingleBatch(batch: List<String>, batchNumber: Int, totalBatches: Int): String {
         val batchText = batch.joinToString("\n")
-        
+
         val systemPrompt = """
             Ты - эксперт по анализу логов приложений. Проанализируй предоставленные логи и найди:
             
@@ -392,7 +392,7 @@ class LogAnalysisService(
      */
     private suspend fun combineBatchAnalyses(batchAnalyses: List<String>): String {
         val combinedText = batchAnalyses.joinToString("\n\n")
-        
+
         val systemPrompt = """
             Ты - эксперт по анализу логов. Объедини анализы нескольких батчей логов в единый структурированный отчет.
             
@@ -434,7 +434,7 @@ class LogAnalysisService(
         val message = buildString {
             appendLine("📊 <b>Ежедневный анализ логов приложения</b>")
             appendLine()
-            appendLine("📅 <b>Период анализа:</b> последние ${lookbackHours} часов")
+            appendLine("📅 <b>Период анализа:</b> последние $lookbackHours часов")
             appendLine("📋 <b>Проанализировано строк:</b> ${result.logLinesCount}")
             appendLine()
 

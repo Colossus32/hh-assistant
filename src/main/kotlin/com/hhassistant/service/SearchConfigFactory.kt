@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component
  */
 @Component
 class SearchConfigFactory {
-    
+
     /**
      * Создает SearchConfig из конфигурации YAML
      */
@@ -28,4 +28,3 @@ class SearchConfigFactory {
         )
     }
 }
-
