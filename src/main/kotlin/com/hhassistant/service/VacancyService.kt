@@ -13,6 +13,7 @@ import com.hhassistant.repository.VacancyRepository
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
+import java.util.concurrent.atomic.AtomicInteger
 
 @Service
 class VacancyService(
@@ -23,12 +24,16 @@ class VacancyService(
     private val notificationService: NotificationService,
     private val tokenRefreshService: TokenRefreshService,
     @Value("\${app.max-vacancies-per-cycle:50}") private val maxVacanciesPerCycle: Int,
-    @Value("\${app.search.keywords:}") private val yamlKeywords: String?,
+    @Value("\${app.search.keywords-rotation:#{null}}") private val yamlKeywordsRotation: List<String>?,
+    @Value("\${app.search.keywords:}") private val yamlKeywords: String?, // Оставляем для обратной совместимости
     @Value("\${app.search.area:}") private val yamlArea: String?,
     @Value("\${app.search.min-salary:}") private val yamlMinSalary: Int?,
     @Value("\${app.search.experience:}") private val yamlExperience: String?,
 ) {
     private val log = KotlinLogging.logger {}
+    
+    // Индекс для ротации ключевых слов
+    private val rotationIndex = AtomicInteger(0)
 
     /**
      * Результат загрузки вакансий
@@ -47,28 +52,46 @@ class VacancyService(
         log.info("🚀 [VacancyService] Starting to fetch new vacancies from HH.ru API")
 
         // Проверяем, есть ли настройки в application.yml
-        val activeConfigs = if (yamlKeywords.isNullOrBlank()) {
-            // Используем конфигурации из БД
-            val dbConfigs = searchConfigRepository.findByIsActiveTrue()
-            if (dbConfigs.isEmpty()) {
-                log.warn("⚠️ [VacancyService] No active search configurations found (neither in DB nor in application.yml)")
-                log.warn("⚠️ [VacancyService] Configure search via DB (INSERT INTO search_configs) OR via application.yml (app.search.keywords)")
-                return FetchResult(emptyList(), emptyList())
+        val activeConfigs = when {
+            // Приоритет 1: Ротация ключевых слов из application.yml
+            !yamlKeywordsRotation.isNullOrEmpty() -> {
+                val currentKeyword = getNextRotationKeyword(yamlKeywordsRotation)
+                log.info("📊 [VacancyService] Using keyword rotation from application.yml")
+                log.info("🔄 [VacancyService] Current rotation keyword: '$currentKeyword' (${yamlKeywordsRotation.size} keywords in rotation)")
+                val yamlConfig = SearchConfig(
+                    keywords = currentKeyword,
+                    area = yamlArea?.takeIf { it.isNotBlank() },
+                    minSalary = yamlMinSalary,
+                    maxSalary = null,
+                    experience = yamlExperience?.takeIf { it.isNotBlank() },
+                    isActive = true,
+                )
+                listOf(yamlConfig)
             }
-            log.info("📊 [VacancyService] Using search configurations from database (${dbConfigs.size} config(s))")
-            dbConfigs
-        } else {
-            // Используем конфигурацию из application.yml
-            log.info("📊 [VacancyService] Using search configuration from application.yml")
-            val yamlConfig = SearchConfig(
-                keywords = yamlKeywords,
-                area = yamlArea?.takeIf { it.isNotBlank() },
-                minSalary = yamlMinSalary,
-                maxSalary = null,
-                experience = yamlExperience?.takeIf { it.isNotBlank() },
-                isActive = true,
-            )
-            listOf(yamlConfig)
+            // Приоритет 2: Одно ключевое слово из application.yml (обратная совместимость)
+            !yamlKeywords.isNullOrBlank() -> {
+                log.info("📊 [VacancyService] Using single keyword from application.yml")
+                val yamlConfig = SearchConfig(
+                    keywords = yamlKeywords,
+                    area = yamlArea?.takeIf { it.isNotBlank() },
+                    minSalary = yamlMinSalary,
+                    maxSalary = null,
+                    experience = yamlExperience?.takeIf { it.isNotBlank() },
+                    isActive = true,
+                )
+                listOf(yamlConfig)
+            }
+            // Приоритет 3: Конфигурации из БД
+            else -> {
+                val dbConfigs = searchConfigRepository.findByIsActiveTrue()
+                if (dbConfigs.isEmpty()) {
+                    log.warn("⚠️ [VacancyService] No active search configurations found (neither in DB nor in application.yml)")
+                    log.warn("⚠️ [VacancyService] Configure search via DB (INSERT INTO search_configs) OR via application.yml (app.search.keywords-rotation)")
+                    return FetchResult(emptyList(), emptyList())
+                }
+                log.info("📊 [VacancyService] Using search configurations from database (${dbConfigs.size} config(s))")
+                dbConfigs
+            }
         }
 
         val searchKeywords = activeConfigs.map { it.keywords }
@@ -197,6 +220,28 @@ class VacancyService(
      */
     fun findVacanciesByStatus(status: VacancyStatus): List<Vacancy> {
         return vacancyRepository.findByStatus(status)
+    }
+    
+    /**
+     * Получает следующее ключевое слово из ротации (round-robin)
+     *
+     * @param keywords Список ключевых слов для ротации
+     * @return Текущее ключевое слово
+     */
+    private fun getNextRotationKeyword(keywords: List<String>): String {
+        if (keywords.isEmpty()) {
+            throw IllegalArgumentException("Keywords rotation list cannot be empty")
+        }
+        
+        val currentIndex = rotationIndex.getAndUpdate { current ->
+            // Переходим к следующему индексу, если достигли конца - возвращаемся к началу
+            (current + 1) % keywords.size
+        }
+        
+        val keyword = keywords[currentIndex]
+        log.debug("🔄 [VacancyService] Rotation: using keyword '$keyword' (index: $currentIndex/${keywords.size - 1})")
+        
+        return keyword
     }
 
     /**
