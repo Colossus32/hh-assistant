@@ -55,7 +55,7 @@ class TokenTestController(
         return try {
             log.info("🔍 [TokenTest] Attempting to fetch vacancies with keywords: '$keywords'")
             log.info("🔍 [TokenTest] Using token from config: ${if (tokenFromConfig.isNotBlank()) "✅ Present (${tokenFromConfig.length} chars, prefix: ${tokenFromConfig.take(10)})" else "❌ Missing"}")
-            
+
             val searchConfig = SearchConfig(
                 keywords = keywords,
                 area = null,
@@ -72,11 +72,13 @@ class TokenTestController(
             response["status"] = "✅ SUCCESS"
             response["message"] = "Token is valid and working!"
             response["vacancies_found"] = vacancies.size
-            response["sample_vacancies"] = vacancies.take(3).map { mapOf(
-                "id" to it.id,
-                "name" to it.name,
-                "employer" to it.employer?.name,
-            ) }
+            response["sample_vacancies"] = vacancies.take(3).map {
+                mapOf(
+                    "id" to it.id,
+                    "name" to it.name,
+                    "employer" to it.employer?.name,
+                )
+            }
 
             log.info("✅ [TokenTest] Token test successful: found ${vacancies.size} vacancies")
             ResponseEntity.ok(response)
@@ -125,4 +127,3 @@ class TokenTestController(
         return ResponseEntity.ok(response)
     }
 }
-

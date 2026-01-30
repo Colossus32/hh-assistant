@@ -1,8 +1,8 @@
 package com.hhassistant
 
+import com.hhassistant.config.VacancyServiceConfig
 import io.github.cdimascio.dotenv.Dotenv
 import mu.KotlinLogging
-import com.hhassistant.config.VacancyServiceConfig
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.runApplication

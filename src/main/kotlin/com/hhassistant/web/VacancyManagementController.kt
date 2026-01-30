@@ -38,7 +38,7 @@ class VacancyManagementController(
         log.info("📋 [VacancyManagement] Getting unviewed vacancies...")
         val vacancies = vacancyService.getUnviewedVacancies()
         log.info("✅ [VacancyManagement] Found ${vacancies.size} unviewed vacancies")
-        
+
         return ResponseEntity.ok(
             mapOf(
                 "count" to vacancies.size,
@@ -63,7 +63,7 @@ class VacancyManagementController(
     /**
      * Помечает вакансию как "откликнулся"
      * POST /api/vacancies/{id}/mark-applied
-     * 
+     *
      * Также можно использовать через GET для удобства клика по ссылке:
      * GET /api/vacancies/{id}/mark-applied
      */
@@ -73,7 +73,7 @@ class VacancyManagementController(
         log.info("✅ [VacancyManagement] Marking vacancy $id as APPLIED...")
         return updateVacancyStatus(id, VacancyStatus.APPLIED, "откликнулся")
     }
-    
+
     /**
      * GET версия для удобства клика по ссылке из Telegram
      */
@@ -85,7 +85,7 @@ class VacancyManagementController(
     /**
      * Помечает вакансию как "неинтересная"
      * POST /api/vacancies/{id}/mark-not-interested
-     * 
+     *
      * Также можно использовать через GET для удобства клика по ссылке:
      * GET /api/vacancies/{id}/mark-not-interested
      */
@@ -95,7 +95,7 @@ class VacancyManagementController(
         log.info("❌ [VacancyManagement] Marking vacancy $id as NOT_INTERESTED...")
         return updateVacancyStatus(id, VacancyStatus.NOT_INTERESTED, "неинтересная")
     }
-    
+
     /**
      * GET версия для удобства клика по ссылке из Telegram
      */
@@ -113,7 +113,7 @@ class VacancyManagementController(
     fun getVacancy(@PathVariable id: String): ResponseEntity<Map<String, Any>> {
         log.info("📋 [VacancyManagement] Getting vacancy $id...")
         val vacancy = vacancyService.getVacancyById(id)
-        
+
         return if (vacancy != null) {
             ResponseEntity.ok(
                 mapOf(
@@ -159,7 +159,7 @@ class VacancyManagementController(
         } else {
             vacancyService.findAllVacancies()
         }
-        
+
         return ResponseEntity.ok(
             mapOf(
                 "count" to vacancies.size,
@@ -185,7 +185,7 @@ class VacancyManagementController(
         statusDescription: String,
     ): ResponseEntity<Map<String, Any>> {
         val vacancy = vacancyService.getVacancyById(vacancyId)
-        
+
         return if (vacancy == null) {
             log.warn("⚠️ [VacancyManagement] Vacancy $vacancyId not found")
             ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -198,7 +198,7 @@ class VacancyManagementController(
         } else {
             val oldStatus = vacancy.status
             val updatedVacancy = vacancyStatusService.updateVacancyStatusById(vacancyId, newStatus)
-            
+
             if (updatedVacancy != null) {
                 log.info("✅ [VacancyManagement] Successfully marked vacancy $vacancyId as $statusDescription (status: $oldStatus -> $newStatus)")
                 ResponseEntity.ok(
@@ -226,4 +226,3 @@ class VacancyManagementController(
         }
     }
 }
-

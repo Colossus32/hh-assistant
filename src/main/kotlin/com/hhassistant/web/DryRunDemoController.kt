@@ -10,11 +10,10 @@ import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.exception.OllamaException
 import com.hhassistant.exception.TelegramException
+import com.hhassistant.health.OllamaHealthIndicator
 import kotlinx.coroutines.runBlocking
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
-import com.hhassistant.health.OllamaHealthIndicator
-import org.springframework.boot.actuate.health.Health
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
@@ -99,43 +98,43 @@ class DryRunDemoController(
             val analysis = try {
                 log.info { "Step 1: Calling Ollama to analyze vacancy..." }
                 analyzeVacancyWithFakeResume(vacancy)
-        } catch (e: OllamaException) {
-            log.error("Dry-run: OllamaException during analysis: ${e.message}", e)
-            return@runBlocking DryRunAnalysisResponse(
-                vacancy = vacancy,
-                analysis = VacancyAnalysis(
-                    vacancyId = vacancy.id,
-                    isRelevant = false,
-                    relevanceScore = 0.0,
-                    reasoning = "Ollama error: ${e.message}",
-                    matchedSkills = null,
-                    suggestedCoverLetter = null,
-                ),
-                telegram = DryRunTelegramResult(
-                    attempted = false,
-                    sent = false,
-                    error = "Ollama analysis failed: ${e.message}",
-                ),
-            )
-        } catch (e: Exception) {
-            log.error("Dry-run: Unexpected error analyzing vacancy with Ollama: ${e.message}", e)
-            return@runBlocking DryRunAnalysisResponse(
-                vacancy = vacancy,
-                analysis = VacancyAnalysis(
-                    vacancyId = vacancy.id,
-                    isRelevant = false,
-                    relevanceScore = 0.0,
-                    reasoning = "Unexpected error during analysis: ${e.message}",
-                    matchedSkills = null,
-                    suggestedCoverLetter = null,
-                ),
-                telegram = DryRunTelegramResult(
-                    attempted = false,
-                    sent = false,
-                    error = "Analysis failed: ${e.javaClass.simpleName}: ${e.message}",
-                ),
-            )
-        }
+            } catch (e: OllamaException) {
+                log.error("Dry-run: OllamaException during analysis: ${e.message}", e)
+                return@runBlocking DryRunAnalysisResponse(
+                    vacancy = vacancy,
+                    analysis = VacancyAnalysis(
+                        vacancyId = vacancy.id,
+                        isRelevant = false,
+                        relevanceScore = 0.0,
+                        reasoning = "Ollama error: ${e.message}",
+                        matchedSkills = null,
+                        suggestedCoverLetter = null,
+                    ),
+                    telegram = DryRunTelegramResult(
+                        attempted = false,
+                        sent = false,
+                        error = "Ollama analysis failed: ${e.message}",
+                    ),
+                )
+            } catch (e: Exception) {
+                log.error("Dry-run: Unexpected error analyzing vacancy with Ollama: ${e.message}", e)
+                return@runBlocking DryRunAnalysisResponse(
+                    vacancy = vacancy,
+                    analysis = VacancyAnalysis(
+                        vacancyId = vacancy.id,
+                        isRelevant = false,
+                        relevanceScore = 0.0,
+                        reasoning = "Unexpected error during analysis: ${e.message}",
+                        matchedSkills = null,
+                        suggestedCoverLetter = null,
+                    ),
+                    telegram = DryRunTelegramResult(
+                        attempted = false,
+                        sent = false,
+                        error = "Analysis failed: ${e.javaClass.simpleName}: ${e.message}",
+                    ),
+                )
+            }
 
             log.info { "Step 1 completed: analysis.isRelevant=${analysis.isRelevant}, relevanceScore=${analysis.relevanceScore}" }
 

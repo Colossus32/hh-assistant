@@ -64,16 +64,16 @@ class LoggingAspect {
      */
     private fun formatArguments(args: Array<Any?>): String {
         if (args.isEmpty()) return ""
-        
+
         return args.joinToString(", ") { arg ->
             when (arg) {
                 null -> "null"
                 is String -> if (arg.length > AppConstants.TextLimits.LOG_ARGUMENT_PREVIEW_LENGTH) "\"${arg.take(AppConstants.TextLimits.LOG_ARGUMENT_PREVIEW_LENGTH)}...\"" else "\"$arg\""
                 is Collection<*> -> "${arg.javaClass.simpleName}(size=${arg.size})"
                 is Array<*> -> "${arg.javaClass.simpleName}(size=${arg.size})"
-                else -> arg.toString().take(AppConstants.TextLimits.LOG_ARGUMENT_PREVIEW_LENGTH)
+                // Для data classes и других объектов показываем только имя класса, чтобы избежать JSON в логах
+                else -> "${arg.javaClass.simpleName}@${System.identityHashCode(arg).toString(16)}"
             }
         }
     }
 }
-

@@ -3,6 +3,7 @@ package com.hhassistant.web
 import com.hhassistant.client.hh.HHOAuthService
 import com.hhassistant.client.hh.dto.OAuthTokenResponse
 import com.hhassistant.service.EnvFileService
+import kotlinx.coroutines.runBlocking
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
@@ -11,7 +12,6 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
-import kotlinx.coroutines.runBlocking
 
 /**
  * Контроллер для OAuth 2.0 авторизации с HH.ru
@@ -53,7 +53,7 @@ class OAuthController(
     /**
      * Получает токен приложения (application token)
      * GET /oauth/application-token
-     * 
+     *
      * Токен приложения имеет неограниченный срок жизни и используется для доступа к публичному API вакансий.
      * Не требует авторизации пользователя.
      */
@@ -72,10 +72,10 @@ class OAuthController(
 
             // Автоматически сохраняем токен в .env файл
             val envUpdateSuccess = envFileService.updateEnvVariable("HH_ACCESS_TOKEN", tokenResponse.accessToken)
-            
+
             // Также сохраняем тип токена
             envFileService.updateEnvVariable("HH_TOKEN_TYPE", "application")
-            
+
             // Refresh token обычно не предоставляется для application token
             val refreshTokenSaved = tokenResponse.refreshToken?.let { refreshToken ->
                 envFileService.updateEnvVariable("HH_REFRESH_TOKEN", refreshToken)
@@ -112,7 +112,7 @@ class OAuthController(
             }
 
             responseBody["note"] = "Application token has unlimited lifetime and is suitable for public API access (vacancies search)"
-            
+
             if (refreshTokenSaved) {
                 responseBody["refresh_token_saved"] = true
                 log.info("✅ [OAuth] Refresh token also saved to .env file")
@@ -179,7 +179,7 @@ class OAuthController(
 
             // Автоматически сохраняем токен в .env файл
             val envUpdateSuccess = envFileService.updateEnvVariable("HH_ACCESS_TOKEN", tokenResponse.accessToken)
-            
+
             // Если есть refresh token, сохраняем его тоже
             val refreshTokenSaved = tokenResponse.refreshToken?.let { refreshToken ->
                 envFileService.updateEnvVariable("HH_REFRESH_TOKEN", refreshToken)
@@ -229,4 +229,3 @@ class OAuthController(
         }
     }
 }
-
