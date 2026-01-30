@@ -23,11 +23,6 @@ class HHVacancyClient(
     private val rateLimitService: RateLimitService,
 ) {
     private val log = KotlinLogging.logger {}
-    
-    // Флаг для отслеживания, было ли уже отправлено уведомление об истечении токена
-    // чтобы не спамить в Telegram при каждой ошибке
-    @Volatile
-    private var tokenExpiredAlertSent = false
 
     suspend fun searchVacancies(config: SearchConfig): List<VacancyDto> {
         // Проверяем rate limit перед запросом
