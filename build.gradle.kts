@@ -58,6 +58,9 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-cache")
     implementation("com.github.ben-manes.caffeine:caffeine:3.1.8")
 
+    // Metrics & Monitoring
+    implementation("io.micrometer:micrometer-registry-prometheus")
+
     // Environment variables (.env file support)
     implementation("io.github.cdimascio:dotenv-java:3.0.0")
 
