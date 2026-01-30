@@ -26,6 +26,7 @@ class VacancySchedulerService(
     private val vacancyAnalysisService: VacancyAnalysisService,
     private val telegramClient: TelegramClient,
     private val notificationService: NotificationService,
+    private val resumeService: ResumeService, // Добавляем для предзагрузки резюме
     @Value("\${app.dry-run:false}") private val dryRun: Boolean,
     @Value("\${app.analysis.max-concurrent-requests:3}") private val maxConcurrentRequests: Int,
 ) {
@@ -37,7 +38,17 @@ class VacancySchedulerService(
      */
     @EventListener(ApplicationReadyEvent::class)
     fun onApplicationReady() {
-        log.info("🚀 [Scheduler] Application ready, sending startup notification and running initial check...")
+        log.info("🚀 [Scheduler] Application ready, preloading resume and sending startup notification...")
+        
+        // Предзагружаем резюме в память при старте
+        runBlocking {
+            try {
+                resumeService.preloadResume()
+            } catch (e: Exception) {
+                log.error("❌ [Scheduler] Failed to preload resume: ${e.message}", e)
+                // Не прерываем старт приложения, если резюме не загрузилось
+            }
+        }
         
         // Отправляем уведомление о старте
         notificationService.sendStartupNotification()
