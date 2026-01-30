@@ -44,9 +44,10 @@ class CoverLetterRetryService(
         runBlocking {
             try {
                 // Получаем анализы, которые нужно повторить
+                // Проверяем что attempts < maxRetries * 2 (первые maxRetries попыток уже были при анализе)
                 val analysesToRetry = vacancyAnalysisRepository.findByCoverLetterGenerationStatusAndCoverLetterAttemptsLessThan(
                     CoverLetterGenerationStatus.RETRY_QUEUED,
-                    maxRetries,
+                    maxRetries * 2, // Общее количество попыток: maxRetries при анализе + maxRetries в очереди
                 )
 
                 if (analysesToRetry.isEmpty()) {

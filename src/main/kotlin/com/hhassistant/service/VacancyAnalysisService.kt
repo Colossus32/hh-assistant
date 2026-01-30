@@ -113,7 +113,9 @@ class VacancyAnalysisService(
                 // Если письмо не сгенерировано, добавляем в очередь ретраев
                 CoverLetterGenerationStatus.RETRY_QUEUED
             },
-            coverLetterAttempts = if (coverLetter == null) maxCoverLetterRetries else 0, // Если неудачно, считаем что все попытки использованы
+            // При первой неудаче: устанавливаем attempts = maxRetries (все попытки использованы)
+            // Но в очереди ретраев можно будет попробовать еще раз (до maxRetries * 2 общих попыток)
+            coverLetterAttempts = if (coverLetter == null) maxCoverLetterRetries else 0,
             coverLetterLastAttemptAt = if (coverLetter == null) LocalDateTime.now() else null,
         )
 
