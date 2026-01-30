@@ -92,7 +92,8 @@ class CoverLetterRetryService(
                             } else {
                                 // Не удалось сгенерировать
                                 val newAttempts = updatedAnalysis.coverLetterAttempts + 1
-                                val newStatus = if (newAttempts >= maxRetries) {
+                                val totalMaxAttempts = maxRetries * 2 // Общее количество попыток: maxRetries при анализе + maxRetries в очереди
+                                val newStatus = if (newAttempts >= totalMaxAttempts) {
                                     CoverLetterGenerationStatus.FAILED
                                 } else {
                                     CoverLetterGenerationStatus.RETRY_QUEUED
@@ -106,9 +107,9 @@ class CoverLetterRetryService(
                                 failureCount++
 
                                 if (newStatus == CoverLetterGenerationStatus.FAILED) {
-                                    log.warn("❌ [CoverLetterRetry] Failed to generate cover letter for analysis ${analysis.id} after $maxRetries attempts. Marking as FAILED.")
+                                    log.warn("❌ [CoverLetterRetry] Failed to generate cover letter for analysis ${analysis.id} after $totalMaxAttempts total attempts. Marking as FAILED.")
                                 } else {
-                                    log.warn("⚠️ [CoverLetterRetry] Failed to generate cover letter for analysis ${analysis.id} (attempt $newAttempts/$maxRetries). Queued for retry.")
+                                    log.warn("⚠️ [CoverLetterRetry] Failed to generate cover letter for analysis ${analysis.id} (attempt $newAttempts/$totalMaxAttempts). Queued for retry.")
                                 }
                             }
                         } catch (e: Exception) {
@@ -117,7 +118,8 @@ class CoverLetterRetryService(
 
                             // Возвращаем в очередь или помечаем как FAILED
                             val newAttempts = analysis.coverLetterAttempts + 1
-                            val newStatus = if (newAttempts >= maxRetries) {
+                            val totalMaxAttempts = maxRetries * 2 // Общее количество попыток
+                            val newStatus = if (newAttempts >= totalMaxAttempts) {
                                 CoverLetterGenerationStatus.FAILED
                             } else {
                                 CoverLetterGenerationStatus.RETRY_QUEUED
