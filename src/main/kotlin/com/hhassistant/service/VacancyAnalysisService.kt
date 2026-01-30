@@ -84,20 +84,11 @@ class VacancyAnalysisService(
 
         log.info("📊 [Ollama] Analysis result for '${vacancy.name}': isRelevant=${validatedResult.isRelevant}, relevanceScore=${String.format("%.2f", validatedResult.relevanceScore * 100)}%, matchedSkills=${validatedResult.matchedSkills.size}")
 
-        // Генерируем сопроводительное письмо для релевантных вакансий
+        // Генерируем сопроводительное письмо для релевантных вакансий с ретраями
         // Генерируем письмо, если вакансия релевантна ИЛИ score >= minRelevanceScore
         // Это гарантирует, что письмо будет сгенерировано для всех вакансий, которые отправляются в Telegram
         val coverLetter = if (validatedResult.isRelevant || validatedResult.relevanceScore >= minRelevanceScore) {
-            try {
-                log.info("✍️ [Ollama] Generating cover letter for vacancy ${vacancy.id} (isRelevant=${validatedResult.isRelevant}, score=${String.format("%.2f", validatedResult.relevanceScore * 100)}%)...")
-                val coverLetterResult = generateCoverLetter(vacancy, resume, resumeStructure, validatedResult)
-                log.info("✅ [Ollama] Cover letter generated successfully (length: ${coverLetterResult.length} chars)")
-                coverLetterResult
-            } catch (e: Exception) {
-                log.warn("⚠️ [Ollama] Failed to generate cover letter for vacancy ${vacancy.id}: ${e.message}", e)
-                // Не прерываем процесс, просто не генерируем письмо
-                null
-            }
+            generateCoverLetterWithRetry(vacancy, resume, resumeStructure, validatedResult)
         } else {
             log.debug("ℹ️ [Ollama] Skipping cover letter generation (not relevant and score too low: ${String.format("%.2f", validatedResult.relevanceScore * 100)}% < ${minRelevanceScore * 100}%)")
             null
@@ -190,13 +181,59 @@ class VacancyAnalysisService(
         }
     }
 
+    /**
+     * Генерирует сопроводительное письмо с ретраями (до 3 попыток)
+     *
+     * @param vacancy Вакансия
+     * @param resume Резюме
+     * @param resumeStructure Структурированные данные резюме
+     * @param analysisResult Результат анализа
+     * @return Сгенерированное письмо или null, если все попытки неудачны
+     */
+    private suspend fun generateCoverLetterWithRetry(
+        vacancy: Vacancy,
+        resume: com.hhassistant.domain.entity.Resume,
+        resumeStructure: com.hhassistant.domain.model.ResumeStructure?,
+        analysisResult: AnalysisResult,
+    ): String? {
+        val maxRetries = 3
+        var lastException: Exception? = null
+
+        for (attempt in 1..maxRetries) {
+            try {
+                log.info("✍️ [Ollama] Generating cover letter for vacancy ${vacancy.id} (attempt $attempt/$maxRetries)...")
+                val coverLetter = generateCoverLetter(vacancy, resume, resumeStructure, analysisResult)
+                log.info("✅ [Ollama] Cover letter generated successfully on attempt $attempt (length: ${coverLetter.length} chars)")
+                return coverLetter
+            } catch (e: Exception) {
+                lastException = e
+                log.warn("⚠️ [Ollama] Cover letter generation attempt $attempt/$maxRetries failed for vacancy ${vacancy.id}: ${e.message}")
+                
+                if (attempt < maxRetries) {
+                    val delayMs = attempt * 1000L // Экспоненциальная задержка: 1s, 2s, 3s
+                    log.info("🔄 [Ollama] Retrying cover letter generation in ${delayMs}ms...")
+                    kotlinx.coroutines.delay(delayMs)
+                } else {
+                    log.error("❌ [Ollama] All $maxRetries attempts to generate cover letter failed for vacancy ${vacancy.id}", e)
+                }
+            }
+        }
+
+        // Все попытки неудачны
+        log.error("❌ [Ollama] Failed to generate cover letter after $maxRetries attempts for vacancy ${vacancy.id}. Last error: ${lastException?.message}")
+        return null
+    }
+
+    /**
+     * Генерирует сопроводительное письмо (одна попытка)
+     */
     private suspend fun generateCoverLetter(
         vacancy: Vacancy,
         resume: com.hhassistant.domain.entity.Resume,
         resumeStructure: com.hhassistant.domain.model.ResumeStructure?,
         analysisResult: AnalysisResult,
     ): String {
-        log.info("Generating cover letter for vacancy: ${vacancy.id}")
+        log.debug("🔄 [Ollama] Generating cover letter for vacancy: ${vacancy.id}")
 
         val coverLetterPrompt = buildCoverLetterPrompt(vacancy, resume, resumeStructure, analysisResult)
 

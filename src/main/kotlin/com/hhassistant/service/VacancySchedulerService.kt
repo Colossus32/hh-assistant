@@ -182,11 +182,12 @@ class VacancySchedulerService(
 
                 // Отправляем релевантные вакансии в Telegram
                 if (analysis.isRelevant) {
-                    log.info("📱 [Scheduler] Vacancy ${vacancy.id} is relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%), sending to Telegram...")
+                    log.info("📱 [Scheduler] Vacancy ${vacancy.id} is relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%), preparing to send to Telegram...")
                     
                     // Проверяем наличие сопроводительного письма
                     if (analysis.suggestedCoverLetter == null) {
-                        log.warn("⚠️ [Scheduler] Vacancy ${vacancy.id} is relevant but cover letter is missing. This may indicate an issue with cover letter generation.")
+                        log.warn("⚠️ [Scheduler] Vacancy ${vacancy.id} is relevant but cover letter is missing after all retry attempts.")
+                        log.warn("⚠️ [Scheduler] Sending vacancy to Telegram WITHOUT cover letter (retries exhausted)")
                     } else {
                         log.info("✅ [Scheduler] Cover letter available for vacancy ${vacancy.id} (length: ${analysis.suggestedCoverLetter.length} chars)")
                     }
