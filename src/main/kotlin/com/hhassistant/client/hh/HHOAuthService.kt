@@ -13,6 +13,8 @@ import org.springframework.util.MultiValueMap
 import org.springframework.web.reactive.function.BodyInserters
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.WebClientResponseException
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 @Service
 class HHOAuthService(
@@ -20,6 +22,7 @@ class HHOAuthService(
     @Value("\${hh.oauth.client-secret}") private val clientSecret: String,
     @Value("\${hh.oauth.redirect-uri}") private val redirectUri: String,
     @Value("\${hh.oauth.token-url}") private val tokenUrl: String,
+    @Value("\${hh.oauth.scope:}") private val scope: String?,
 ) {
     private val log = KotlinLogging.logger {}
     private val webClient = WebClient.builder()
@@ -121,7 +124,15 @@ class HHOAuthService(
      * Генерирует URL для авторизации
      */
     fun getAuthorizationUrl(authorizationUrl: String): String {
-        return "$authorizationUrl?response_type=code&client_id=$clientId&redirect_uri=$redirectUri"
+        val redirectUriEncoded = URLEncoder.encode(redirectUri, StandardCharsets.UTF_8)
+        val baseUrl = "$authorizationUrl?response_type=code&client_id=$clientId&redirect_uri=$redirectUriEncoded"
+        // Добавляем scope, если он указан
+        return if (!scope.isNullOrBlank()) {
+            val scopeEncoded = URLEncoder.encode(scope, StandardCharsets.UTF_8)
+            "$baseUrl&scope=$scopeEncoded"
+        } else {
+            baseUrl
+        }
     }
 }
 

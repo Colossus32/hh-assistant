@@ -141,6 +141,9 @@ hh:
     redirect-uri: ${HH_REDIRECT_URI:http://localhost:8080/oauth/callback}
     authorization-url: https://hh.ru/oauth/authorize
     token-url: https://hh.ru/oauth/token
+    # Scope для доступа к API вакансий
+    # По умолчанию HH.ru предоставляет базовые права, но для некоторых операций могут потребоваться дополнительные scope
+    scope: ${HH_OAUTH_SCOPE:}
   proxy:
     enabled: ${PROXY_ENABLED:false}
     host: ${PROXY_HOST:}

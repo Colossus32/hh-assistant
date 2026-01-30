@@ -39,6 +39,7 @@ class WebClientConfig(
             .clientConnector(proxyManager.getConnector())
             .defaultHeader(HttpHeaders.USER_AGENT, userAgent)
             .defaultHeader(HttpHeaders.ACCEPT, acceptHeader)
+            .filter(WebClientRequestLoggingFilter.create())
             .filter(retryFilter())
             .filter(errorLoggingFilter())
 

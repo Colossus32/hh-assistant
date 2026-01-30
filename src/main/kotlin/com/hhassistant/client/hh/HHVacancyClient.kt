@@ -29,16 +29,9 @@ class HHVacancyClient(
         rateLimitService.tryConsume()
 
         log.info("🔍 [HH.ru API] Searching vacancies with config: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}, experience=${config.experience}")
-        
-        // Логируем информацию о токене (без самого токена)
-        val tokenInfo = webClient.mutate().build().let { client ->
-            // Проверяем, есть ли Authorization header в WebClient
-            "Authorization header configured"
-        }
-        log.debug("🔑 [HH.ru API] Token info: $tokenInfo")
 
         return try {
-            val response = webClient.get()
+            val uri = webClient.get()
                 .uri { builder ->
                     builder.path("/vacancies")
                         .queryParam("text", config.keywords)
@@ -51,6 +44,10 @@ class HHVacancyClient(
                         }
                         .build()
                 }
+            
+            log.debug("🌐 [HH.ru API] Request URL: ${uri.uri()}")
+            
+            val response = uri
                 .retrieve()
                 .bodyToMono<VacancySearchResponse>()
                 .awaitSingle()
