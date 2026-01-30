@@ -102,6 +102,11 @@ class HHVacancyClient(
                 "Unauthorized access to HH.ru API. Check your access token.",
                 e,
             )
+            HttpStatus.FORBIDDEN -> HHAPIException.UnauthorizedException(
+                "Forbidden (403): Access token may be invalid, expired, or lacks required permissions. " +
+                    "Response: ${e.responseBodyAsString}",
+                e,
+            )
             HttpStatus.NOT_FOUND -> HHAPIException.NotFoundException(
                 "Resource not found in HH.ru API: ${e.message}",
                 e,

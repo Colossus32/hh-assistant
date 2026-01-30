@@ -102,7 +102,7 @@ class NotificationService(
     }
 
     /**
-     * Отправляет алерт об истечении токена HH.ru
+     * Отправляет алерт об истечении токена HH.ru или проблеме с правами доступа
      */
     fun sendTokenExpiredAlert(errorMessage: String) {
         if (!telegramEnabled) {
@@ -110,10 +110,23 @@ class NotificationService(
             return
         }
 
+        val isForbidden = errorMessage.contains("403", ignoreCase = true) || 
+                         errorMessage.contains("Forbidden", ignoreCase = true)
+        
         val message = buildString {
             appendLine("🚨 <b>ВНИМАНИЕ: Проблема с токеном HH.ru!</b>")
             appendLine()
-            appendLine("❌ Access token для HH.ru API истек или недействителен.")
+            if (isForbidden) {
+                appendLine("❌ Access token для HH.ru API недействителен или не имеет необходимых прав доступа.")
+                appendLine()
+                appendLine("Возможные причины:")
+                appendLine("• Токен истек")
+                appendLine("• Токен недействителен")
+                appendLine("• Токен не имеет прав на поиск вакансий")
+                appendLine("• Неправильный формат токена")
+            } else {
+                appendLine("❌ Access token для HH.ru API истек или недействителен.")
+            }
             appendLine()
             appendLine("<b>Ошибка:</b>")
             appendLine("$errorMessage")
@@ -121,7 +134,8 @@ class NotificationService(
             appendLine("🔧 <b>Что делать:</b>")
             appendLine("1. Получите новый токен через OAuth flow")
             appendLine("2. Обновите HH_ACCESS_TOKEN в .env файле")
-            appendLine("3. Перезапустите приложение")
+            appendLine("3. Убедитесь, что токен имеет права на поиск вакансий")
+            appendLine("4. Перезапустите приложение")
             appendLine()
             appendLine("📖 Инструкция: см. docs/GET_TOKEN_STEP_BY_STEP.md")
         }

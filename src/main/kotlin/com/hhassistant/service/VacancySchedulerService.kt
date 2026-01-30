@@ -77,8 +77,10 @@ class VacancySchedulerService(
                 log.info("✅ [Scheduler] Step 1 completed: Fetched ${newVacancies.size} new vacancies from HH.ru")
                 
                 // Отправляем обновление статуса в Telegram
-                val hhApiStatus = if (newVacancies.isNotEmpty() || searchKeywords.isNotEmpty()) {
+                val hhApiStatus = if (newVacancies.isNotEmpty()) {
                     "✅ UP (найдено ${newVacancies.size} вакансий)"
+                } else if (searchKeywords.isNotEmpty()) {
+                    "✅ UP (запрос выполнен, новых вакансий не найдено)"
                 } else {
                     "⚠️ Проверка выполнена, но вакансии не найдены"
                 }
@@ -124,11 +126,26 @@ class VacancySchedulerService(
                 log.info("📊 [Scheduler]   - Total cycle time: ${cycleDuration}ms")
                 log.info("📊 [Scheduler] ========================================")
             } catch (e: com.hhassistant.exception.HHAPIException.UnauthorizedException) {
-                log.error("❌ [Scheduler] HH.ru API unauthorized error: ${e.message}", e)
-                // Отправляем алерт в Telegram об истечении токена
-                notificationService.sendTokenExpiredAlert(e.message ?: "Unauthorized access to HH.ru API")
+                log.error("❌ [Scheduler] HH.ru API unauthorized/forbidden error: ${e.message}", e)
+                // Отправляем алерт в Telegram об истечении токена или проблеме с правами
+                notificationService.sendTokenExpiredAlert(
+                    e.message ?: "Unauthorized or Forbidden access to HH.ru API. " +
+                        "Token may be invalid, expired, or lacks required permissions."
+                )
+                // Отправляем обновление статуса с ошибкой
+                notificationService.sendStatusUpdate(
+                    "❌ ERROR: Token invalid or insufficient permissions",
+                    emptyList(),
+                    0
+                )
             } catch (e: Exception) {
                 log.error("❌ [Scheduler] Error during scheduled vacancy check: ${e.message}", e)
+                // Отправляем обновление статуса с ошибкой
+                notificationService.sendStatusUpdate(
+                    "❌ ERROR: ${e.message?.take(100) ?: "Unknown error"}",
+                    emptyList(),
+                    0
+                )
             }
         }
     }

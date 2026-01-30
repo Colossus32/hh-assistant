@@ -90,11 +90,11 @@ class VacancyService(
                 }
             } catch (e: HHAPIException.UnauthorizedException) {
                 val configId = config.id?.toString() ?: "YAML"
-                log.error("🚨 [VacancyService] HH.ru API unauthorized error for config $configId: ${e.message}", e)
-                // Отправляем алерт в Telegram об истечении токена
-                notificationService.sendTokenExpiredAlert(e.message ?: "Unauthorized access to HH.ru API")
-                // Прерываем загрузку, так как токен недействителен
-                break
+                log.error("🚨 [VacancyService] HH.ru API unauthorized/forbidden error for config $configId: ${e.message}", e)
+                log.error("🚨 [VacancyService] This usually means: token expired, invalid, or lacks required permissions")
+                // Пробрасываем исключение дальше, чтобы оно обработалось в Scheduler
+                // и там отправился правильный статус с ошибкой
+                throw e
             } catch (e: HHAPIException.RateLimitException) {
                 val configId = config.id?.toString() ?: "YAML"
                 log.warn("⚠️ [VacancyService] Rate limit exceeded for config $configId, skipping: ${e.message}")

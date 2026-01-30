@@ -39,6 +39,7 @@ app:
     # Альтернативный способ настройки поиска через application.yml
     # Если указаны keywords, они будут использованы вместо конфигураций из БД
     # keywords: ${APP_SEARCH_KEYWORDS:}  # Например: "Kotlin Developer"
+    keywords: "Java"
     # area: ${APP_SEARCH_AREA:}  # Например: "Москва"
     # min-salary: ${APP_SEARCH_MIN_SALARY:}  # Например: 150000
     # experience: ${APP_SEARCH_EXPERIENCE:}  # Например: "От 3 лет"
