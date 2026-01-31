@@ -30,3 +30,4 @@ sealed class HHAPIException(message: String, cause: Throwable?) : RuntimeExcepti
     class APIException(message: String, cause: Throwable? = null) : HHAPIException(message, cause)
 }
 
+

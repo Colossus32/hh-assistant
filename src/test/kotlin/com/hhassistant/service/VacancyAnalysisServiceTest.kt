@@ -11,6 +11,8 @@ import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.domain.model.ResumeStructure
 import com.hhassistant.exception.OllamaException
 import com.hhassistant.repository.VacancyAnalysisRepository
+import io.github.resilience4j.circuitbreaker.CircuitBreaker
+import io.github.resilience4j.retry.Retry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -34,6 +36,8 @@ class VacancyAnalysisServiceTest {
     private lateinit var eventPublisher: org.springframework.context.ApplicationEventPublisher
     private lateinit var vacancyContentValidator: VacancyContentValidator
     private lateinit var metricsService: com.hhassistant.metrics.MetricsService
+    private lateinit var ollamaCircuitBreaker: CircuitBreaker
+    private lateinit var ollamaRetry: Retry
     private lateinit var service: VacancyAnalysisService
 
     @BeforeEach
@@ -47,6 +51,8 @@ class VacancyAnalysisServiceTest {
         eventPublisher = mockk(relaxed = true)
         vacancyContentValidator = mockk(relaxed = true)
         metricsService = mockk(relaxed = true)
+        ollamaCircuitBreaker = CircuitBreaker.ofDefaults("ollamaTest")
+        ollamaRetry = Retry.ofDefaults("ollamaTest")
         service = VacancyAnalysisService(
             ollamaClient = ollamaClient,
             resumeService = resumeService,
@@ -57,6 +63,8 @@ class VacancyAnalysisServiceTest {
             eventPublisher = eventPublisher,
             vacancyContentValidator = vacancyContentValidator,
             metricsService = metricsService,
+            ollamaCircuitBreaker = ollamaCircuitBreaker,
+            ollamaRetry = ollamaRetry,
             minRelevanceScore = 0.6,
         )
     }
@@ -82,8 +90,7 @@ class VacancyAnalysisServiceTest {
                 }
             """.trimIndent()
 
-            val coverLetterResponse = "Уважаемые коллеги! Я заинтересован в позиции..."
-            coEvery { ollamaClient.chat(any()) } returnsMany listOf(analysisResponse, coverLetterResponse)
+            coEvery { ollamaClient.chat(any()) } returns analysisResponse
 
             val savedAnalysis = com.hhassistant.domain.entity.VacancyAnalysis(
                 id = 1L,
@@ -92,7 +99,8 @@ class VacancyAnalysisServiceTest {
                 relevanceScore = 0.85,
                 reasoning = "Вакансия хорошо подходит: требуются навыки Kotlin и Spring Boot, которые есть в резюме",
                 matchedSkills = """["Kotlin", "Spring Boot", "PostgreSQL"]""",
-                suggestedCoverLetter = coverLetterResponse,
+                suggestedCoverLetter = null,
+                coverLetterGenerationStatus = com.hhassistant.domain.entity.CoverLetterGenerationStatus.RETRY_QUEUED,
             )
 
             every { repository.save(any()) } returns savedAnalysis
@@ -103,10 +111,11 @@ class VacancyAnalysisServiceTest {
             assertThat(result.isRelevant).isTrue
             assertThat(result.relevanceScore).isEqualTo(0.85)
             assertThat(result.matchedSkills).isNotNull
-            assertThat(result.suggestedCoverLetter).isNotNull
+            assertThat(result.suggestedCoverLetter).isNull()
 
             coVerify { ollamaClient.chat(any()) }
             verify { repository.save(any()) }
+            verify { coverLetterQueueService.enqueue(savedAnalysis.id!!, savedAnalysis.vacancyId, 1) }
         }
     }
 
@@ -224,7 +233,6 @@ class VacancyAnalysisServiceTest {
                 service.analyzeVacancy(vacancy)
             }
         }.isInstanceOf(OllamaException.ParsingException::class.java)
-            .hasMessageContaining("No valid JSON found")
 
         coVerify { ollamaClient.chat(any()) }
         verify(exactly = 0) { repository.save(any()) }
@@ -284,16 +292,8 @@ class VacancyAnalysisServiceTest {
                 }
             """.trimIndent()
 
-            // Первый вызов (анализ) успешен, второй (cover letter) падает
-            var callCount = 0
-            coEvery { ollamaClient.chat(any()) } answers {
-                callCount++
-                if (callCount == 1) {
-                    analysisResponse
-                } else {
-                    throw RuntimeException("Connection error")
-                }
-            }
+            // Анализ выполняется один раз; сопроводительное письмо генерируется асинхронно в очереди
+            coEvery { ollamaClient.chat(any()) } returns analysisResponse
 
             val savedAnalysis = com.hhassistant.domain.entity.VacancyAnalysis(
                 id = 1L,
@@ -302,7 +302,8 @@ class VacancyAnalysisServiceTest {
                 relevanceScore = 0.85,
                 reasoning = "Вакансия хорошо подходит",
                 matchedSkills = """["Kotlin", "Spring Boot"]""",
-                suggestedCoverLetter = null, // Cover letter не сгенерирован из-за ошибки
+                suggestedCoverLetter = null,
+                coverLetterGenerationStatus = com.hhassistant.domain.entity.CoverLetterGenerationStatus.RETRY_QUEUED,
             )
 
             every { repository.save(any()) } returns savedAnalysis
@@ -311,10 +312,12 @@ class VacancyAnalysisServiceTest {
 
             assertThat(result).isNotNull
             assertThat(result.isRelevant).isTrue
-            assertThat(result.suggestedCoverLetter).isNull() // Должен быть null при ошибке генерации
+            assertThat(result.suggestedCoverLetter).isNull()
+            assertThat(result.coverLetterGenerationStatus).isEqualTo(com.hhassistant.domain.entity.CoverLetterGenerationStatus.RETRY_QUEUED)
 
-            coVerify(exactly = 2) { ollamaClient.chat(any()) } // Анализ + попытка генерации письма
+            coVerify(exactly = 1) { ollamaClient.chat(any()) }
             verify { repository.save(any()) }
+            verify { coverLetterQueueService.enqueue(savedAnalysis.id!!, savedAnalysis.vacancyId, 1) }
         }
     }
 

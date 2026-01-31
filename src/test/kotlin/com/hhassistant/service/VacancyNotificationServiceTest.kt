@@ -34,8 +34,8 @@ class VacancyNotificationServiceTest {
         capturedMessages = mutableListOf()
 
         coEvery { telegramClient.sendMessage(any(), any()) } answers {
-            val message = args[0] as String
-            val keyboard = args[1] as? InlineKeyboardMarkup
+            val message = arg<String>(0)
+            val keyboard = arg<InlineKeyboardMarkup?>(1)
             capturedMessages.add(Pair(message, keyboard))
             true
         }
@@ -115,7 +115,7 @@ class VacancyNotificationServiceTest {
     }
 
     @Test
-    fun `should include inline keyboard with action buttons`() = runBlocking {
+    fun `should not include inline keyboard (buttons removed)`() = runBlocking {
         // Given
         val vacancy = createTestVacancy("1", "Java Developer")
         val analysis = createTestAnalysis(
@@ -130,13 +130,7 @@ class VacancyNotificationServiceTest {
 
         // Then
         val keyboard = capturedMessages[0].second
-        assertThat(keyboard).isNotNull
-        assertThat(keyboard!!.inlineKeyboard).hasSize(1)
-        assertThat(keyboard.inlineKeyboard[0]).hasSize(2)
-        assertThat(keyboard.inlineKeyboard[0][0].text).contains("Откликнулся")
-        assertThat(keyboard.inlineKeyboard[0][1].text).contains("Неинтересная")
-        assertThat(keyboard.inlineKeyboard[0][0].url).contains("/api/vacancies/${vacancy.id}/mark-applied")
-        assertThat(keyboard.inlineKeyboard[0][1].url).contains("/api/vacancies/${vacancy.id}/mark-not-interested")
+        assertThat(keyboard).isNull()
     }
 
     @Test

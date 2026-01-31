@@ -718,3 +718,4 @@ fun isAllowed(userId: String, limit: Int, windowSeconds: Int): Boolean {
 
 **Следующий шаг:** [Практические примеры проектирования](./SYSTEM_DESIGN_EXAMPLES.md)
 
+

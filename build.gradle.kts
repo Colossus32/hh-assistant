@@ -7,6 +7,7 @@ plugins {
     kotlin("plugin.spring") version "1.9.20"
     kotlin("plugin.jpa") version "1.9.20"
     id("org.jlleitschuh.gradle.ktlint") version "11.6.1"
+    jacoco
 }
 
 group = "com.hhassistant"
@@ -54,6 +55,11 @@ dependencies {
     // Rate Limiting
     implementation("com.bucket4j:bucket4j-core:8.10.1")
 
+    // Resilience4j for Circuit Breaker and Retry
+    implementation("io.github.resilience4j:resilience4j-spring-boot3:2.1.0")
+    implementation("io.github.resilience4j:resilience4j-kotlin:2.1.0")
+    implementation("io.github.resilience4j:resilience4j-micrometer:2.1.0")
+
     // Caching
     implementation("org.springframework.boot:spring-boot-starter-cache")
     implementation("com.github.ben-manes.caffeine:caffeine:3.1.8")
@@ -83,6 +89,27 @@ tasks.withType<KotlinCompile> {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+        csv.required.set(false)
+    }
+}
+
+tasks.jacocoTestCoverageVerification {
+    dependsOn(tasks.jacocoTestReport)
+    violationRules {
+        rule {
+            limit {
+                minimum = "0.60".toBigDecimal() // Минимум 60% покрытия
+            }
+        }
+    }
 }
 
 // KtLint configuration

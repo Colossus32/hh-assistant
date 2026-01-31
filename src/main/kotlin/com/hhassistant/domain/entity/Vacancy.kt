@@ -85,4 +85,5 @@ enum class VacancyStatus {
     SKIPPED, // Не релевантна
     APPLIED, // Откликнулся на вакансию
     NOT_INTERESTED, // Неинтересная вакансия (не удалять, но не показывать повторно)
+    FAILED, // Не удалось обработать после всех попыток (dead letter queue)
 }

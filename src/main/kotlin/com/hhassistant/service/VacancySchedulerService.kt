@@ -27,6 +27,7 @@ class VacancySchedulerService(
     private val vacancyStatusService: VacancyStatusService,
     private val notificationService: NotificationService,
     private val resumeService: ResumeService,
+    private val metricsService: com.hhassistant.metrics.MetricsService,
     @Value("\${app.dry-run:false}") private val dryRun: Boolean,
     @Value("\${app.analysis.max-concurrent-requests:3}") private val maxConcurrentRequests: Int,
 ) {
@@ -219,6 +220,7 @@ class VacancySchedulerService(
     /**
      * Обрабатывает одну вакансию: анализирует, обновляет статус и отправляет в Telegram при необходимости.
      * Использует semaphore для ограничения количества одновременных запросов к LLM.
+     * Продолжает обработку других вакансий даже при ошибке одной (graceful degradation).
      *
      * @param vacancy Вакансия для обработки
      * @return Результат анализа или null, если обработка не удалась
@@ -249,19 +251,44 @@ class VacancySchedulerService(
                 analysis
             }
         } catch (e: OllamaException) {
-            log.error("Ollama error analyzing vacancy ${vacancy.id}: ${e.message}", e)
-            // Помечаем как пропущенную, чтобы не анализировать снова (Rich Domain Model)
+            log.error("❌ [Scheduler] Ollama error analyzing vacancy ${vacancy.id}: ${e.message}", e)
+            // Помечаем как FAILED (dead letter queue), если это критическая ошибка после всех retry
+            // Если это временная ошибка (Circuit Breaker OPEN), помечаем как SKIPPED для повторной попытки позже
+            val status = if (e.message?.contains("Circuit Breaker is OPEN") == true) {
+                log.warn("⚠️ [Scheduler] Circuit Breaker is OPEN, marking vacancy ${vacancy.id} as SKIPPED for retry later")
+                VacancyStatus.SKIPPED
+            } else {
+                log.error("❌ [Scheduler] Critical error after retries, marking vacancy ${vacancy.id} as FAILED (dead letter queue)")
+                VacancyStatus.FAILED
+            }
             try {
-                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
+                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(status))
+                if (status == VacancyStatus.FAILED) {
+                    metricsService.incrementVacanciesFailed()
+                }
             } catch (updateError: Exception) {
-                log.error("Failed to update status for vacancy ${vacancy.id} after Ollama error", updateError)
+                log.error("❌ [Scheduler] Failed to update status for vacancy ${vacancy.id} after error", updateError)
             }
             null
         } catch (e: VacancyProcessingException) {
-            log.error("Error processing vacancy ${vacancy.id}: ${e.message}", e)
+            log.error("❌ [Scheduler] Error processing vacancy ${vacancy.id}: ${e.message}", e)
+            // Помечаем как FAILED для проблемных вакансий
+            try {
+                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
+                metricsService.incrementVacanciesFailed()
+            } catch (updateError: Exception) {
+                log.error("❌ [Scheduler] Failed to update status for vacancy ${vacancy.id} after processing error", updateError)
+            }
             null
         } catch (e: Exception) {
-            log.error("Unexpected error processing vacancy ${vacancy.id}: ${e.message}", e)
+            log.error("❌ [Scheduler] Unexpected error processing vacancy ${vacancy.id}: ${e.message}", e)
+            // Помечаем как FAILED для неожиданных ошибок
+            try {
+                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
+                metricsService.incrementVacanciesFailed()
+            } catch (updateError: Exception) {
+                log.error("❌ [Scheduler] Failed to update status for vacancy ${vacancy.id} after unexpected error", updateError)
+            }
             null
         }
     }

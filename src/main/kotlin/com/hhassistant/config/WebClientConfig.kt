@@ -116,6 +116,11 @@ class WebClientConfig(
             .build()
     }
 
+    @Bean
+    fun restTemplate(): org.springframework.web.client.RestTemplate {
+        return org.springframework.web.client.RestTemplate()
+    }
+
     private fun retryFilter(): ExchangeFilterFunction {
         return ExchangeFilterFunction.ofResponseProcessor { response ->
             if (response.statusCode().is5xxServerError ||

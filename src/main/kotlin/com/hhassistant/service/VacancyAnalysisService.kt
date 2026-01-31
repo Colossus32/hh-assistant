@@ -12,7 +12,12 @@ import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.event.VacancyAnalyzedEvent
 import com.hhassistant.exception.OllamaException
 import com.hhassistant.repository.VacancyAnalysisRepository
+import io.github.resilience4j.circuitbreaker.CircuitBreaker
+import io.github.resilience4j.kotlin.circuitbreaker.executeSuspendFunction
+import io.github.resilience4j.kotlin.retry.executeSuspendFunction
+import io.github.resilience4j.retry.Retry
 import mu.KotlinLogging
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
@@ -28,6 +33,8 @@ class VacancyAnalysisService(
     private val eventPublisher: ApplicationEventPublisher,
     private val vacancyContentValidator: VacancyContentValidator,
     private val metricsService: com.hhassistant.metrics.MetricsService,
+    @Qualifier("ollamaCircuitBreaker") private val ollamaCircuitBreaker: CircuitBreaker,
+    @Qualifier("ollamaRetry") private val ollamaRetry: Retry,
     @Value("\${app.analysis.min-relevance-score:0.6}") private val minRelevanceScore: Double,
 ) {
     private val log = KotlinLogging.logger {}
@@ -84,26 +91,37 @@ class VacancyAnalysisService(
         val analysisPrompt = buildAnalysisPrompt(vacancy, resume, resumeStructure)
         log.debug("📝 [Ollama] Analysis prompt prepared (length: ${analysisPrompt.length} chars)")
 
-        // Анализируем через LLM
+        // Анализируем через LLM с использованием Circuit Breaker и Retry
         log.info("🔄 [Ollama] Sending analysis request to Ollama...")
         val analysisStartTime = System.currentTimeMillis()
         val analysisResponse = try {
-            ollamaClient.chat(
-                listOf(
-                    ChatMessage(
-                        role = "system",
-                        content = buildSystemPrompt(),
-                    ),
-                    ChatMessage(
-                        role = "user",
-                        content = analysisPrompt,
-                    ),
-                ),
+            // Используем Circuit Breaker и Retry для защиты от сбоев
+            ollamaRetry.executeSuspendFunction {
+                ollamaCircuitBreaker.executeSuspendFunction {
+                    ollamaClient.chat(
+                        listOf(
+                            ChatMessage(
+                                role = "system",
+                                content = buildSystemPrompt(),
+                            ),
+                            ChatMessage(
+                                role = "user",
+                                content = analysisPrompt,
+                            ),
+                        ),
+                    )
+                }
+            }
+        } catch (e: io.github.resilience4j.circuitbreaker.CallNotPermittedException) {
+            log.error("❌ [Ollama] Circuit Breaker is OPEN for vacancy ${vacancy.id}: ${e.message}")
+            throw OllamaException.ConnectionException(
+                "Ollama service is temporarily unavailable (Circuit Breaker is OPEN). Please try again later.",
+                e,
             )
         } catch (e: Exception) {
-            log.error("❌ [Ollama] Failed to analyze vacancy ${vacancy.id} via Ollama: ${e.message}", e)
+            log.error("❌ [Ollama] Failed to analyze vacancy ${vacancy.id} via Ollama after retries: ${e.message}", e)
             throw OllamaException.ConnectionException(
-                "Failed to connect to Ollama service for vacancy analysis: ${e.message}",
+                "Failed to connect to Ollama service for vacancy analysis after retries: ${e.message}",
                 e,
             )
         }

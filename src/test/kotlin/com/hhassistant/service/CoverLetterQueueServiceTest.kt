@@ -20,7 +20,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -54,7 +54,7 @@ class CoverLetterQueueServiceTest {
         capturedEvents = mutableListOf()
 
         every { eventPublisher.publishEvent(any()) } answers {
-            val event = firstArg<ApplicationEvent>()
+            val event = arg<ApplicationEvent>(0)
             capturedEvents.add(event)
         }
 
@@ -74,7 +74,7 @@ class CoverLetterQueueServiceTest {
     }
 
     @Test
-    fun `should enqueue vacancy for cover letter generation`() = runTest {
+    fun `should enqueue vacancy for cover letter generation`() = runBlocking {
         // Given
         val vacancy = createTestVacancy("1", "Java Developer")
         val analysisId = 1L
@@ -99,7 +99,7 @@ class CoverLetterQueueServiceTest {
     }
 
     @Test
-    fun `should publish CoverLetterGeneratedEvent on successful generation`() = runTest {
+    fun `should publish CoverLetterGeneratedEvent on successful generation`() = runBlocking {
         // Given
         val vacancy = createTestVacancy("1", "Java Developer")
         val analysisId = 1L
@@ -115,20 +115,20 @@ class CoverLetterQueueServiceTest {
         coEvery { resumeService.loadResume() } returns createTestResume()
         every { resumeService.getResumeStructure(any()) } returns createTestResumeStructure()
         coEvery { coverLetterGenerationService.generateCoverLetter(any(), any(), any(), any()) } returns "Test cover letter"
-        every { vacancyAnalysisRepository.save(any()) } answers { args[0] as VacancyAnalysis }
+        every { vacancyAnalysisRepository.save(any()) } answers { arg(0) }
 
         // When
         service.enqueue(analysisId, vacancy.id)
 
         // Then
-        delay(500) // Даем время на обработку
+        delay(800) // Даем время на обработку (очередь работает на Dispatchers.Default)
         val coverLetterGeneratedEvents = capturedEvents.filterIsInstance<CoverLetterGeneratedEvent>()
         assertThat(coverLetterGeneratedEvents.size).isEqualTo(1)
         assertThat(coverLetterGeneratedEvents[0].vacancy.id).isEqualTo(vacancy.id)
     }
 
     @Test
-    fun `should publish VacancyReadyForTelegramEvent on successful generation`() = runTest {
+    fun `should publish VacancyReadyForTelegramEvent on successful generation`() = runBlocking {
         // Given
         val vacancy = createTestVacancy("1", "Java Developer")
         val analysisId = 1L
@@ -144,13 +144,13 @@ class CoverLetterQueueServiceTest {
         coEvery { resumeService.loadResume() } returns createTestResume()
         every { resumeService.getResumeStructure(any()) } returns createTestResumeStructure()
         coEvery { coverLetterGenerationService.generateCoverLetter(any(), any(), any(), any()) } returns "Test cover letter"
-        every { vacancyAnalysisRepository.save(any()) } answers { args[0] as VacancyAnalysis }
+        every { vacancyAnalysisRepository.save(any()) } answers { arg(0) }
 
         // When
         service.enqueue(analysisId, vacancy.id)
 
         // Then
-        delay(500)
+        delay(800)
         val readyEvents = capturedEvents.filterIsInstance<VacancyReadyForTelegramEvent>()
         assertThat(readyEvents.size).isEqualTo(1)
         assertThat(readyEvents[0].vacancy.id).isEqualTo(vacancy.id)
@@ -158,7 +158,7 @@ class CoverLetterQueueServiceTest {
     }
 
     @Test
-    fun `should retry on failure and publish CoverLetterGenerationFailedEvent after max retries`() = runTest {
+    fun `should retry on failure and publish CoverLetterGenerationFailedEvent after max retries`() = runBlocking {
         // Given
         val vacancy = createTestVacancy("1", "Java Developer")
         val analysisId = 1L
@@ -174,13 +174,13 @@ class CoverLetterQueueServiceTest {
         coEvery { resumeService.loadResume() } returns createTestResume()
         every { resumeService.getResumeStructure(any()) } returns createTestResumeStructure()
         coEvery { coverLetterGenerationService.generateCoverLetter(any(), any(), any(), any()) } throws OllamaException.CoverLetterGenerationException("Failed", RuntimeException())
-        every { vacancyAnalysisRepository.save(any()) } answers { args[0] as VacancyAnalysis }
+        every { vacancyAnalysisRepository.save(any()) } answers { arg(0) }
 
         // When
         service.enqueue(analysisId, vacancy.id)
 
         // Then
-        delay(2000) // Даем время на все попытки
+        delay(2500) // Даем время на все попытки (очередь + несколько re-enqueue)
         val failedEvents = capturedEvents.filterIsInstance<CoverLetterGenerationFailedEvent>()
         assertThat(failedEvents).isNotEmpty
         val lastFailedEvent = failedEvents.last()
@@ -193,7 +193,7 @@ class CoverLetterQueueServiceTest {
     }
 
     @Test
-    fun `should publish VacancyReadyForTelegramEvent without cover letter after max retries`() = runTest {
+    fun `should publish VacancyReadyForTelegramEvent without cover letter after max retries`() = runBlocking {
         // Given
         val vacancy = createTestVacancy("1", "Java Developer")
         val analysisId = 1L
@@ -209,13 +209,13 @@ class CoverLetterQueueServiceTest {
         coEvery { resumeService.loadResume() } returns createTestResume()
         every { resumeService.getResumeStructure(any()) } returns createTestResumeStructure()
         coEvery { coverLetterGenerationService.generateCoverLetter(any(), any(), any(), any()) } throws OllamaException.CoverLetterGenerationException("Failed", RuntimeException())
-        every { vacancyAnalysisRepository.save(any()) } answers { args[0] as VacancyAnalysis }
+        every { vacancyAnalysisRepository.save(any()) } answers { arg(0) }
 
         // When
         service.enqueue(analysisId, vacancy.id)
 
         // Then
-        delay(2000)
+        delay(2500)
         val readyEvents = capturedEvents.filterIsInstance<VacancyReadyForTelegramEvent>()
         assertThat(readyEvents.size).isEqualTo(1)
         assertThat(readyEvents[0].analysis.hasCoverLetter()).isFalse

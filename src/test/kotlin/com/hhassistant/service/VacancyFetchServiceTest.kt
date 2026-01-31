@@ -3,6 +3,7 @@ package com.hhassistant.service
 import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.client.hh.dto.VacancyDto
 import com.hhassistant.config.FormattingConfig
+import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.event.VacancyFetchedEvent
 import com.hhassistant.repository.SearchConfigRepository
@@ -46,13 +47,12 @@ class VacancyFetchServiceTest {
         tokenRefreshService = mockk(relaxed = true)
         searchConfigFactory = mockk(relaxed = true)
         searchConfig = com.hhassistant.config.VacancyServiceConfig()
-        vacancyIdsCache = com.github.benmanes.caffeine.cache.Caffeine.newBuilder().build()
+        vacancyIdsCache = com.github.benmanes.caffeine.cache.Caffeine.newBuilder().build<String, Set<String>>()
         metricsService = mockk(relaxed = true)
         capturedEvents = mutableListOf()
 
         every { eventPublisher.publishEvent(any<org.springframework.context.ApplicationEvent>()) } answers {
-            val event = args[0] as org.springframework.context.ApplicationEvent
-            capturedEvents.add(event)
+            capturedEvents.add(arg(0))
         }
 
         service = VacancyFetchService(
@@ -81,7 +81,7 @@ class VacancyFetchServiceTest {
         every { searchConfigRepository.findByIsActiveTrue() } returns listOf(searchConfig)
         coEvery { hhVacancyClient.searchVacancies(any()) } returns listOf(vacancyDto1, vacancyDto2)
         every { vacancyRepository.existsById(any()) } returns false
-        every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { args[0] as List<Vacancy> }
+        every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { arg(0) }
 
         // When
         val result = service.fetchAndSaveNewVacancies()
@@ -123,7 +123,7 @@ class VacancyFetchServiceTest {
         coEvery { hhVacancyClient.searchVacancies(any()) } returns listOf(vacancyDto1, vacancyDto2)
         every { vacancyRepository.existsById("1") } returns true // Уже существует
         every { vacancyRepository.existsById("2") } returns false
-        every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { args[0] as List<Vacancy> }
+        every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { arg(0) }
 
         // When
         val result = service.fetchAndSaveNewVacancies()
@@ -147,7 +147,7 @@ class VacancyFetchServiceTest {
             listOf(vacancyDto2),
         )
         every { vacancyRepository.existsById(any()) } returns false
-        every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { args[0] as List<Vacancy> }
+        every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { arg(0) }
 
         // When
         service.fetchAndSaveNewVacancies()

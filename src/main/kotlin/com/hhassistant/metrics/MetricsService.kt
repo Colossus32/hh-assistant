@@ -38,6 +38,11 @@ class MetricsService(
         .description("Total number of vacancies rejected by content validator")
         .register(meterRegistry)
 
+    private val vacanciesFailedCounter: Counter = Counter.builder("vacancies.failed")
+        .description("Total number of vacancies that failed processing (dead letter queue)")
+        .tag("status", "failed")
+        .register(meterRegistry)
+
     // ========== Счетчики событий ==========
     private val eventsPublishedCounter: Counter = Counter.builder("events.published")
         .description("Total number of events published")
@@ -123,6 +128,10 @@ class MetricsService(
         vacanciesRejectedByValidatorCounter.increment()
     }
 
+    fun incrementVacanciesFailed() {
+        vacanciesFailedCounter.increment()
+    }
+
     fun incrementEventsPublished(eventType: String) {
         eventsPublishedCounter.increment()
         Counter.builder("events.published.by_type")
@@ -179,5 +188,12 @@ class MetricsService(
 
     fun setActiveResume(hasActive: Boolean) {
         activeResume.set(if (hasActive) 1 else 0)
+    }
+
+    /**
+     * Получает MeterRegistry для регистрации кастомных метрик.
+     */
+    fun getMeterRegistry(): MeterRegistry {
+        return meterRegistry
     }
 }

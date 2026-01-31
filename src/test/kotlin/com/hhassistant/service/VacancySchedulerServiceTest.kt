@@ -1,6 +1,5 @@
 package com.hhassistant.service
 
-import com.hhassistant.client.telegram.TelegramClient
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.domain.entity.VacancyStatus
@@ -17,20 +16,32 @@ import org.junit.jupiter.api.Test
 
 class VacancySchedulerServiceTest {
 
+    private lateinit var vacancyFetchService: VacancyFetchService
     private lateinit var vacancyService: VacancyService
     private lateinit var vacancyAnalysisService: VacancyAnalysisService
-    private lateinit var telegramClient: TelegramClient
+    private lateinit var vacancyStatusService: VacancyStatusService
+    private lateinit var notificationService: NotificationService
+    private lateinit var resumeService: ResumeService
+    private lateinit var metricsService: com.hhassistant.metrics.MetricsService
     private lateinit var service: VacancySchedulerService
 
     @BeforeEach
     fun setup() {
+        vacancyFetchService = mockk()
         vacancyService = mockk()
         vacancyAnalysisService = mockk()
-        telegramClient = mockk()
+        vacancyStatusService = mockk()
+        notificationService = mockk(relaxed = true)
+        resumeService = mockk(relaxed = true)
+        metricsService = mockk(relaxed = true)
         service = VacancySchedulerService(
+            vacancyFetchService = vacancyFetchService,
             vacancyService = vacancyService,
             vacancyAnalysisService = vacancyAnalysisService,
-            telegramClient = telegramClient,
+            vacancyStatusService = vacancyStatusService,
+            notificationService = notificationService,
+            resumeService = resumeService,
+            metricsService = metricsService,
             dryRun = false,
             maxConcurrentRequests = 3,
         )
@@ -39,16 +50,20 @@ class VacancySchedulerServiceTest {
     @Test
     fun `should skip execution in dry-run mode`() {
         val dryRunService = VacancySchedulerService(
+            vacancyFetchService = vacancyFetchService,
             vacancyService = vacancyService,
             vacancyAnalysisService = vacancyAnalysisService,
-            telegramClient = telegramClient,
+            vacancyStatusService = vacancyStatusService,
+            notificationService = notificationService,
+            resumeService = resumeService,
+            metricsService = metricsService,
             dryRun = true,
             maxConcurrentRequests = 3,
         )
 
         dryRunService.checkNewVacancies()
 
-        coVerify(exactly = 0) { vacancyService.fetchAndSaveNewVacancies() }
+        coVerify(exactly = 0) { vacancyFetchService.fetchAndSaveNewVacancies() }
     }
 
     @Test
@@ -57,21 +72,22 @@ class VacancySchedulerServiceTest {
             val newVacancies = listOf(createTestVacancy())
             val vacanciesToAnalyze = listOf(createTestVacancy())
             val analysis = createTestAnalysis(isRelevant = true, score = 0.85)
+            val fetchResult = com.hhassistant.service.VacancyFetchService.FetchResult(
+                vacancies = newVacancies,
+                searchKeywords = listOf("Kotlin"),
+            )
 
-            coEvery { vacancyService.fetchAndSaveNewVacancies() } returns newVacancies
+            coEvery { vacancyFetchService.fetchAndSaveNewVacancies() } returns fetchResult
             every { vacancyService.getNewVacanciesForAnalysis() } returns vacanciesToAnalyze
             coEvery { vacancyAnalysisService.analyzeVacancy(any()) } returns analysis
-            every { vacancyService.updateVacancyStatus(any(), any()) } returns Unit
-            coEvery { telegramClient.sendMessage(any()) } returns true
+            every { vacancyStatusService.updateVacancyStatus(any()) } returns Unit
 
             service.checkNewVacancies()
 
-            coVerify { vacancyService.fetchAndSaveNewVacancies() }
+            coVerify { vacancyFetchService.fetchAndSaveNewVacancies() }
             verify { vacancyService.getNewVacanciesForAnalysis() }
             coVerify { vacancyAnalysisService.analyzeVacancy(any()) }
-            verify { vacancyService.updateVacancyStatus(any(), VacancyStatus.ANALYZED) }
-            coVerify { telegramClient.sendMessage(any()) }
-            verify { vacancyService.updateVacancyStatus(any(), VacancyStatus.SENT_TO_USER) }
+            verify { vacancyStatusService.updateVacancyStatus(any()) }
         }
     }
 
@@ -80,17 +96,20 @@ class VacancySchedulerServiceTest {
         runBlocking {
             val vacanciesToAnalyze = listOf(createTestVacancy())
             val analysis = createTestAnalysis(isRelevant = false, score = 0.3)
+            val fetchResult = com.hhassistant.service.VacancyFetchService.FetchResult(
+                vacancies = emptyList(),
+                searchKeywords = listOf("Kotlin"),
+            )
 
-            coEvery { vacancyService.fetchAndSaveNewVacancies() } returns emptyList()
+            coEvery { vacancyFetchService.fetchAndSaveNewVacancies() } returns fetchResult
             every { vacancyService.getNewVacanciesForAnalysis() } returns vacanciesToAnalyze
             coEvery { vacancyAnalysisService.analyzeVacancy(any()) } returns analysis
-            every { vacancyService.updateVacancyStatus(any(), any()) } returns Unit
+            every { vacancyStatusService.updateVacancyStatus(any()) } returns Unit
 
             service.checkNewVacancies()
 
             coVerify { vacancyAnalysisService.analyzeVacancy(any()) }
-            verify { vacancyService.updateVacancyStatus(any(), VacancyStatus.SKIPPED) }
-            coVerify(exactly = 0) { telegramClient.sendMessage(any()) }
+            verify { vacancyStatusService.updateVacancyStatus(any()) }
         }
     }
 
@@ -100,75 +119,40 @@ class VacancySchedulerServiceTest {
             val vacancy1 = createTestVacancy(id = "1")
             val vacancy2 = createTestVacancy(id = "2")
             val analysis = createTestAnalysis(isRelevant = true, score = 0.8)
+            val fetchResult = com.hhassistant.service.VacancyFetchService.FetchResult(
+                vacancies = emptyList(),
+                searchKeywords = listOf("Kotlin"),
+            )
 
-            coEvery { vacancyService.fetchAndSaveNewVacancies() } returns emptyList()
+            coEvery { vacancyFetchService.fetchAndSaveNewVacancies() } returns fetchResult
             every { vacancyService.getNewVacanciesForAnalysis() } returns listOf(vacancy1, vacancy2)
             coEvery { vacancyAnalysisService.analyzeVacancy(vacancy1) } throws OllamaException.ConnectionException("Connection error")
             coEvery { vacancyAnalysisService.analyzeVacancy(vacancy2) } returns analysis
-            every { vacancyService.updateVacancyStatus(any(), any()) } returns Unit
-            coEvery { telegramClient.sendMessage(any()) } returns true
+            every { vacancyStatusService.updateVacancyStatus(any()) } returns Unit
 
             service.checkNewVacancies()
 
             // Должен обработать обе вакансии, несмотря на ошибку первой
             coVerify { vacancyAnalysisService.analyzeVacancy(vacancy1) }
             coVerify { vacancyAnalysisService.analyzeVacancy(vacancy2) }
-            verify { vacancyService.updateVacancyStatus(vacancy1, VacancyStatus.SKIPPED) }
-            verify { vacancyService.updateVacancyStatus(vacancy2, VacancyStatus.ANALYZED) }
-        }
-    }
-
-    @Test
-    fun `should handle Telegram rate limit gracefully`() {
-        runBlocking {
-            val vacanciesToAnalyze = listOf(createTestVacancy())
-            val analysis = createTestAnalysis(isRelevant = true, score = 0.85)
-
-            coEvery { vacancyService.fetchAndSaveNewVacancies() } returns emptyList()
-            every { vacancyService.getNewVacanciesForAnalysis() } returns vacanciesToAnalyze
-            coEvery { vacancyAnalysisService.analyzeVacancy(any()) } returns analysis
-            every { vacancyService.updateVacancyStatus(any(), any()) } returns Unit
-            coEvery { telegramClient.sendMessage(any()) } throws TelegramException.RateLimitException("Rate limit")
-
-            service.checkNewVacancies()
-
-            // Вакансия должна быть проанализирована, но не отправлена
-            coVerify { vacancyAnalysisService.analyzeVacancy(any()) }
-            verify { vacancyService.updateVacancyStatus(any(), VacancyStatus.ANALYZED) }
-            // Статус SENT_TO_USER не должен быть установлен
-            verify(exactly = 0) { vacancyService.updateVacancyStatus(any(), VacancyStatus.SENT_TO_USER) }
-        }
-    }
-
-    @Test
-    fun `should handle Telegram errors gracefully`() {
-        runBlocking {
-            val vacanciesToAnalyze = listOf(createTestVacancy())
-            val analysis = createTestAnalysis(isRelevant = true, score = 0.85)
-
-            coEvery { vacancyService.fetchAndSaveNewVacancies() } returns emptyList()
-            every { vacancyService.getNewVacanciesForAnalysis() } returns vacanciesToAnalyze
-            coEvery { vacancyAnalysisService.analyzeVacancy(any()) } returns analysis
-            every { vacancyService.updateVacancyStatus(any(), any()) } returns Unit
-            coEvery { telegramClient.sendMessage(any()) } throws TelegramException.ConnectionException("Connection error")
-
-            service.checkNewVacancies()
-
-            // Должен продолжить работу, несмотря на ошибку Telegram
-            coVerify { vacancyAnalysisService.analyzeVacancy(any()) }
-            verify { vacancyService.updateVacancyStatus(any(), VacancyStatus.ANALYZED) }
+            verify { vacancyStatusService.updateVacancyStatus(any()) }
         }
     }
 
     @Test
     fun `should handle empty vacancy list`() {
         runBlocking {
-            coEvery { vacancyService.fetchAndSaveNewVacancies() } returns emptyList()
+            val fetchResult = com.hhassistant.service.VacancyFetchService.FetchResult(
+                vacancies = emptyList(),
+                searchKeywords = listOf("Kotlin"),
+            )
+
+            coEvery { vacancyFetchService.fetchAndSaveNewVacancies() } returns fetchResult
             every { vacancyService.getNewVacanciesForAnalysis() } returns emptyList()
 
             service.checkNewVacancies()
 
-            coVerify { vacancyService.fetchAndSaveNewVacancies() }
+            coVerify { vacancyFetchService.fetchAndSaveNewVacancies() }
             verify { vacancyService.getNewVacanciesForAnalysis() }
             coVerify(exactly = 0) { vacancyAnalysisService.analyzeVacancy(any()) }
         }

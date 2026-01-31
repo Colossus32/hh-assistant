@@ -200,6 +200,10 @@ telegram:
   chat-id: ${TELEGRAM_CHAT_ID:}
   enabled: ${TELEGRAM_ENABLED:true}
   content-type: application/json
+  polling:
+    enabled: ${TELEGRAM_POLLING_ENABLED:true}  # Включить polling для получения команд от пользователей
+    interval-seconds: ${TELEGRAM_POLLING_INTERVAL:5}  # Интервал между запросами getUpdates (в секундах)
+    timeout-seconds: ${TELEGRAM_POLLING_TIMEOUT:30}  # Таймаут для long polling (в секундах, 0-60)
 
 hh:
   api:
@@ -287,4 +291,15 @@ management:
       enabled: true
     telegram:
       enabled: true
+
+# Resilience4j configuration for Circuit Breaker and Retry
+resilience:
+  circuit-breaker:
+    failure-rate-threshold: 50  # Percentage of failures that will open the circuit
+    wait-duration-in-open-state-seconds: 60  # Time to wait before attempting to close the circuit
+    sliding-window-size: 10  # Number of calls to track in the sliding window
+    minimum-number-of-calls: 5  # Minimum number of calls before calculating failure rate
+  retry:
+    max-attempts: 3  # Maximum number of retry attempts
+    wait-duration-millis: 1000  # Wait duration between retries (in milliseconds)
 

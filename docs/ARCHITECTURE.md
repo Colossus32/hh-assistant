@@ -11,6 +11,8 @@ HH Assistant - это event-driven приложение для автомати�
 - **Async Processing**: Асинхронная обработка через `@Async`
 - **Queue-Based**: In-memory очередь для генерации сопроводительных писем
 - **Caching**: Кэширование данных для производительности
+- **Monitoring**: Метрики через Micrometer + Prometheus + Grafana
+- **Webhook Support**: Обработка входящих сообщений от Telegram
 
 ## Общая схема системы
 
@@ -31,6 +33,7 @@ graph TB
 
         subgraph "Event Bus"
             EB[ApplicationEventPublisher<br/>Spring Events]
+            ELA[EventLoggingAspect<br/>AOP logging]
         end
 
         subgraph "Core Services"
@@ -46,6 +49,12 @@ graph TB
             RS[ResumeService<br/>Кэш резюме]
             NS[NotificationService<br/>Системные уведомления]
             TRS[TokenRefreshService<br/>Обновление токенов]
+            VCV[VacancyContentValidator<br/>Валидация контента]
+        end
+
+        subgraph "Monitoring"
+            MS[MetricsService<br/>Micrometer]
+            PROM[Prometheus<br/>Metrics endpoint]
         end
 
         subgraph "Clients"
@@ -61,6 +70,11 @@ graph TB
         end
     end
 
+    subgraph "Monitoring Stack"
+        PROM_EXT[Prometheus<br/>Metrics collection]
+        GRAFANA[Grafana<br/>Visualization]
+    end
+
     %% External connections
     HHC --> HH
     HHRC --> HH
@@ -73,12 +87,13 @@ graph TB
     SCHED --> VS
     MGMT --> VSVC
     MGMT --> VS
-
+    
     %% Event flow
     VF -->|publishes| EB
     VA -->|publishes| EB
     CLQ -->|publishes| EB
     VS -->|publishes| EB
+    EB -->|AOP| ELA
     
     EB -->|listens| VN
     EB -->|listens| CLQ
@@ -88,21 +103,32 @@ graph TB
     VF --> VSVC
     VF --> TRS
     VF --> NS
+    VF --> MS
     
     VA --> OC
     VA --> RS
     VA --> CLQ
+    VA --> VCV
+    VA --> MS
     
     CLQ --> VA
     CLQ --> VS
     CLQ --> RS
+    CLQ --> MS
     
     VN --> TC
     VN --> VS
+    VN --> MS
+    
     
     VS --> REPO
     VSVC --> REPO
     REPO --> DB
+    
+    %% Monitoring
+    MS --> PROM
+    PROM --> PROM_EXT
+    PROM_EXT --> GRAFANA
 
     style VF fill:#e1f5ff
     style VA fill:#e1f5ff
@@ -110,6 +136,8 @@ graph TB
     style VN fill:#e1f5ff
     style VS fill:#e1f5ff
     style EB fill:#fff4e1
+    style MS fill:#e8f5e9
+    style VCV fill:#fff9c4
 ```
 
 ## Поток обработки вакансии
@@ -222,6 +250,9 @@ classDiagram
 | `NotificationService` | Системные уведомления (старт, ошибки) |
 | `TokenRefreshService` | Автоматическое обновление токенов HH.ru |
 | `VacancySchedulerService` | Планировщик задач (cron) |
+| `VacancyContentValidator` | Валидация содержимого вакансий по ключевым словам |
+| `MetricsService` | Управление метриками приложения (Micrometer) |
+| `EventLoggingAspect` | AOP логирование событий |
 
 ### Clients
 
@@ -242,6 +273,9 @@ classDiagram
 - **Caching**: Spring Cache + Caffeine
 - **Scheduling**: Spring @Scheduled
 - **Async Processing**: Spring @Async
+- **Monitoring**: Micrometer + Prometheus + Grafana
+- **Metrics**: Spring Boot Actuator
+- **AOP**: Spring AOP для логирования событий
 
 ## Принципы архитектуры
 
@@ -250,4 +284,5 @@ classDiagram
 3. **Loose Coupling**: Слабая связанность через события
 4. **Separation of Concerns**: Разделение бизнес-логики и инфраструктуры
 5. **Rich Domain Model**: Доменные сущности содержат бизнес-логику
+6. **Observability**: Полная видимость работы системы через метрики и логирование
 

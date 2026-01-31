@@ -28,7 +28,7 @@ class VacancyStatusServiceTest {
         capturedEvents = mutableListOf()
 
         every { eventPublisher.publishEvent(any()) } answers {
-            val event = firstArg<ApplicationEvent>()
+            val event = arg<ApplicationEvent>(0)
             capturedEvents.add(event)
         }
 

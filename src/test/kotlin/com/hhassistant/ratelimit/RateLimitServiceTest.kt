@@ -1,6 +1,8 @@
 package com.hhassistant.ratelimit
 
 import com.hhassistant.exception.HHAPIException
+import com.hhassistant.metrics.MetricsService
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -13,11 +15,13 @@ class RateLimitServiceTest {
 
     @BeforeEach
     fun setup() {
+        val metricsService = MetricsService(SimpleMeterRegistry())
         // Создаем сервис с низкими лимитами для тестирования
         rateLimitService = RateLimitService(
             requestsPerMinute = 2,
             burstCapacity = 3,
             waitOnLimitSeconds = 1,
+            metricsService = metricsService,
         )
     }
 

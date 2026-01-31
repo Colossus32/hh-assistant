@@ -20,6 +20,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.util.Optional
 
 class VacancyServiceTest {
 
@@ -27,6 +28,11 @@ class VacancyServiceTest {
     private lateinit var vacancyRepository: VacancyRepository
     private lateinit var searchConfigRepository: SearchConfigRepository
     private lateinit var formattingConfig: FormattingConfig
+    private lateinit var notificationService: com.hhassistant.service.NotificationService
+    private lateinit var tokenRefreshService: com.hhassistant.service.TokenRefreshService
+    private lateinit var searchConfigFactory: com.hhassistant.service.SearchConfigFactory
+    private lateinit var searchConfig: com.hhassistant.config.VacancyServiceConfig
+    private lateinit var vacancyIdsCache: com.github.benmanes.caffeine.cache.Cache<String, Set<String>>
     private lateinit var service: VacancyService
 
     @BeforeEach
@@ -38,12 +44,24 @@ class VacancyServiceTest {
             defaultCurrency = "RUR",
             areaNotSpecified = "Не указан",
         )
+        notificationService = mockk(relaxed = true)
+        tokenRefreshService = mockk(relaxed = true)
+        searchConfigFactory = mockk(relaxed = true)
+        searchConfig = mockk(relaxed = true)
+        vacancyIdsCache = com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+            .maximumSize(100)
+            .build<String, Set<String>>()
         service = VacancyService(
             hhVacancyClient = hhVacancyClient,
             vacancyRepository = vacancyRepository,
             searchConfigRepository = searchConfigRepository,
             formattingConfig = formattingConfig,
+            notificationService = notificationService,
+            tokenRefreshService = tokenRefreshService,
+            searchConfigFactory = searchConfigFactory,
+            searchConfig = searchConfig,
             maxVacanciesPerCycle = 50,
+            vacancyIdsCache = vacancyIdsCache,
         )
     }
 
@@ -61,7 +79,7 @@ class VacancyServiceTest {
 
             val result = service.fetchAndSaveNewVacancies()
 
-            assertThat(result).hasSize(1)
+            assertThat(result.vacancies).hasSize(1)
             coVerify { hhVacancyClient.searchVacancies(config) }
             verify { vacancyRepository.saveAll(any<List<Vacancy>>()) }
         }
@@ -80,7 +98,7 @@ class VacancyServiceTest {
 
             val result = service.fetchAndSaveNewVacancies()
 
-            assertThat(result).isEmpty()
+            assertThat(result.vacancies).isEmpty()
             verify(exactly = 0) { vacancyRepository.saveAll(any<List<Vacancy>>()) }
         }
     }
@@ -92,7 +110,7 @@ class VacancyServiceTest {
 
             val result = service.fetchAndSaveNewVacancies()
 
-            assertThat(result).isEmpty()
+            assertThat(result.vacancies).isEmpty()
             coVerify(exactly = 0) { hhVacancyClient.searchVacancies(any()) }
         }
     }
@@ -107,7 +125,7 @@ class VacancyServiceTest {
 
             val result = service.fetchAndSaveNewVacancies()
 
-            assertThat(result).isEmpty()
+            assertThat(result.vacancies).isEmpty()
             // Должен прервать обработку при rate limit
         }
     }
@@ -128,7 +146,7 @@ class VacancyServiceTest {
 
             val result = service.fetchAndSaveNewVacancies()
 
-            assertThat(result).hasSize(1)
+            assertThat(result.vacancies).hasSize(1)
             coVerify { hhVacancyClient.searchVacancies(config2) }
         }
     }
@@ -147,7 +165,7 @@ class VacancyServiceTest {
 
             val result = service.fetchAndSaveNewVacancies()
 
-            assertThat(result).hasSize(50)
+            assertThat(result.vacancies).hasSize(50)
         }
     }
 
@@ -171,9 +189,10 @@ class VacancyServiceTest {
         val vacancy = createTestVacancy(status = VacancyStatus.NEW)
         val updatedVacancy = vacancy.copy(status = VacancyStatus.ANALYZED)
 
+        every { vacancyRepository.findById(updatedVacancy.id) } returns Optional.of(vacancy)
         every { vacancyRepository.save(any<Vacancy>()) } returns updatedVacancy
 
-        service.updateVacancyStatus(vacancy, VacancyStatus.ANALYZED)
+        service.updateVacancyStatus(updatedVacancy)
 
         verify { vacancyRepository.save(any<Vacancy>()) }
     }
@@ -181,11 +200,13 @@ class VacancyServiceTest {
     @Test
     fun `should throw exception when update fails`() {
         val vacancy = createTestVacancy()
+        val updatedVacancy = vacancy.copy(status = VacancyStatus.ANALYZED)
 
+        every { vacancyRepository.findById(updatedVacancy.id) } returns Optional.of(vacancy)
         every { vacancyRepository.save(any<Vacancy>()) } throws RuntimeException("Database error")
 
         assertThatThrownBy {
-            service.updateVacancyStatus(vacancy, VacancyStatus.ANALYZED)
+            service.updateVacancyStatus(updatedVacancy)
         }.isInstanceOf(VacancyProcessingException::class.java)
             .hasMessageContaining("Failed to update vacancy status")
     }
