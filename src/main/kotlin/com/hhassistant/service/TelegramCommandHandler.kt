@@ -22,6 +22,7 @@ class TelegramCommandHandler(
     private val skillExtractionService: SkillExtractionService,
     private val vacancyService: VacancyService,
     private val exclusionRuleService: ExclusionRuleService,
+    private val analysisTimeService: AnalysisTimeService,
     @Value("\${app.api.base-url:http://localhost:8080}") private val apiBaseUrl: String,
 ) {
     private val log = KotlinLogging.logger {}
@@ -52,6 +53,7 @@ class TelegramCommandHandler(
         val response = when {
             text.startsWith("/start") -> handleStartCommand(chatId)
             text.startsWith("/status") -> handleStatusCommand(chatId)
+            text.startsWith("/stats") -> handleStatsCommand(chatId)
             text.startsWith("/vacancies_all") -> handleAllVacanciesCommand(chatId)
             text.startsWith("/vacancies") -> handleVacanciesCommand(chatId, text)
             text.startsWith("/exclusion_add_keyword") -> handleAddExclusionKeyword(chatId, text)
@@ -91,6 +93,7 @@ class TelegramCommandHandler(
             appendLine("📋 <b>Доступные команды:</b>")
             appendLine("   /start - Начать работу")
             appendLine("   /status - Статус системы")
+            appendLine("   /stats - Статистика по вакансиям")
             appendLine("   /vacancies - Список непросмотренных вакансий")
             appendLine("   /vacancies_all - Список всех вакансий (включая просмотренные)")
             appendLine("   /skills [N] - Топ навыков по популярности")
@@ -117,6 +120,62 @@ class TelegramCommandHandler(
         } catch (e: Exception) {
             log.error("Error getting status: ${e.message}", e)
             "❌ Ошибка при получении статуса: ${e.message}"
+        }
+    }
+
+    /**
+     * Обрабатывает команду /stats - показывает статистику по вакансиям
+     */
+    private fun handleStatsCommand(chatId: String): String {
+        return try {
+            log.info("📊 [TelegramCommand] Processing /stats command for chat $chatId")
+            
+            val averageTimeMs = analysisTimeService.getAverageTimeMs()
+            val statistics = vacancyService.getVacancyStatistics(averageTimeMs)
+            
+            buildString {
+                appendLine("📊 <b>Статистика по вакансиям:</b>")
+                appendLine()
+                appendLine("✅ <b>Обработано:</b> ${statistics.processedCount}")
+                appendLine("⏳ <b>В очереди на обработку:</b> ${statistics.queueCount}")
+                appendLine()
+                
+                if (statistics.averageAnalysisTimeMs != null) {
+                    val avgSeconds = statistics.averageAnalysisTimeMs / 1000.0
+                    appendLine("⏱️ <b>Среднее время обработки:</b> ${String.format("%.2f", avgSeconds)} сек")
+                } else {
+                    appendLine("⏱️ <b>Среднее время обработки:</b> Нет данных (еще не было анализов)")
+                }
+                
+                appendLine()
+                
+                if (statistics.estimatedTimeMs != null) {
+                    val estimatedSeconds = statistics.estimatedTimeMs / 1000.0
+                    val estimatedMinutes = estimatedSeconds / 60.0
+                    val estimatedHours = estimatedMinutes / 60.0
+                    
+                    when {
+                        estimatedHours >= 1.0 -> {
+                            appendLine("🕐 <b>Приблизительное время обработки оставшихся:</b> ${String.format("%.1f", estimatedHours)} ч (${String.format("%.1f", estimatedMinutes)} мин)")
+                        }
+                        estimatedMinutes >= 1.0 -> {
+                            appendLine("🕐 <b>Приблизительное время обработки оставшихся:</b> ${String.format("%.1f", estimatedMinutes)} мин")
+                        }
+                        else -> {
+                            appendLine("🕐 <b>Приблизительное время обработки оставшихся:</b> ${String.format("%.1f", estimatedSeconds)} сек")
+                        }
+                    }
+                } else {
+                    if (statistics.queueCount > 0) {
+                        appendLine("🕐 <b>Приблизительное время обработки оставшихся:</b> Неизвестно (нет данных о скорости обработки)")
+                    } else {
+                        appendLine("🕐 <b>Приблизительное время обработки оставшихся:</b> Очередь пуста")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            log.error("❌ [TelegramCommand] Error getting statistics: ${e.message}", e)
+            "❌ Ошибка при получении статистики: ${e.message}"
         }
     }
 
@@ -277,12 +336,16 @@ class TelegramCommandHandler(
      * Обрабатывает команду /help
      */
     private fun handleHelpCommand(chatId: String): String {
+        log.info("📖 [TelegramCommand] Processing /help command for chat $chatId")
         return buildString {
             appendLine("📖 <b>Справка по командам:</b>")
             appendLine()
             appendLine("<b>/start</b> - Начать работу с ботом")
             appendLine()
             appendLine("<b>/status</b> - Показать статус системы")
+            appendLine()
+            appendLine("<b>/stats</b> - Показать статистику по вакансиям")
+            appendLine("   Показывает количество обработанных вакансий, в очереди и приблизительное время обработки")
             appendLine()
             appendLine("<b>/vacancies</b> - Показать список непросмотренных вакансий")
             appendLine()
