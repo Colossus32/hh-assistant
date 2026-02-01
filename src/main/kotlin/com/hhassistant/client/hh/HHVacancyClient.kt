@@ -6,6 +6,7 @@ import com.hhassistant.client.hh.dto.VacancySearchResponse
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.exception.HHAPIException
 import com.hhassistant.ratelimit.RateLimitService
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.reactor.awaitSingle
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
@@ -26,12 +27,65 @@ class HHVacancyClient(
 ) {
     private val log = KotlinLogging.logger {}
 
+    /**
+     * Максимальная глубина результатов согласно документации HH.ru API
+     * per_page * page не может быть больше 2000
+     */
+    private val maxVacanciesDepth = 2000
+
     suspend fun searchVacancies(config: SearchConfig): List<VacancyDto> {
-        // Проверяем rate limit перед запросом
+        log.debug("[HH.ru API] Searching vacancies: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}, experience=${config.experience}")
+
+        // Check rate limit before first request
         rateLimitService.tryConsume()
 
-        log.info("🔍 [HH.ru API] Searching vacancies with config: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}, experience=${config.experience}")
+        // First, fetch first page to get total pages count
+        val firstPageResponse = fetchVacanciesPage(config, defaultPage)
+        val totalFound = firstPageResponse.found
+        val totalPages = firstPageResponse.pages
+        val allVacancies = firstPageResponse.items.toMutableList()
 
+        log.info("[HH.ru API] First page: ${firstPageResponse.items.size} vacancies, total found: $totalFound, total pages: $totalPages")
+
+        // Calculate max pages considering HH.ru API limit (2000 vacancies)
+        val maxPage = minOf(
+            totalPages - 1, // 0-based indexing
+            (maxVacanciesDepth / perPage) - 1 // HH.ru API limit
+        )
+
+        // Fetch remaining pages
+        if (maxPage > defaultPage) {
+            log.debug("[HH.ru API] Fetching additional pages: ${defaultPage + 1}..$maxPage")
+            
+            for (page in (defaultPage + 1)..maxPage) {
+                try {
+                    rateLimitService.tryConsume()
+                    
+                    val pageResponse = fetchVacanciesPage(config, page)
+                    allVacancies.addAll(pageResponse.items)
+                    
+                    log.trace("[HH.ru API] Page $page: ${pageResponse.items.size} vacancies (total so far: ${allVacancies.size})")
+                    
+                    // Small delay between requests to avoid rate limit
+                    kotlinx.coroutines.delay(100)
+                } catch (e: HHAPIException.RateLimitException) {
+                    log.warn("[HH.ru API] Rate limit exceeded while fetching page $page, stopping pagination")
+                    break
+                } catch (e: Exception) {
+                    log.warn("[HH.ru API] Error fetching page $page: ${e.message}, continuing with next page")
+                }
+            }
+        }
+
+        log.info("[HH.ru API] Total fetched: ${allVacancies.size} vacancies from ${minOf(maxPage + 1, totalPages)} pages (total available: $totalFound)")
+        
+        return allVacancies
+    }
+
+    /**
+     * Запрашивает одну страницу вакансий
+     */
+    private suspend fun fetchVacanciesPage(config: SearchConfig, page: Int): VacancySearchResponse {
         return try {
             val requestSpec = webClient.get()
                 .uri { builder ->
@@ -42,27 +96,20 @@ class HHVacancyClient(
                             config.minSalary?.let { queryParam("salary", it) }
                             config.experience?.let { queryParam("experience", it) }
                             queryParam("per_page", perPage)
-                            queryParam("page", defaultPage)
+                            queryParam("page", page)
                         }
                         .build()
                 }
-
-            log.debug("🌐 [HH.ru API] Request URL will be logged by WebClientRequestLoggingFilter")
 
             val response = requestSpec
                 .retrieve()
                 .bodyToMono<VacancySearchResponse>()
                 .awaitSingle()
 
-            log.info("✅ [HH.ru API] Received ${response.items.size} vacancies (found: ${response.found}, pages: ${response.pages})")
-            if (response.items.isNotEmpty()) {
-                log.debug("📋 [HH.ru API] First vacancy: ${response.items.first().name} (ID: ${response.items.first().id})")
-            }
-
-            response.items
+            response
         } catch (e: WebClientResponseException) {
-            log.error("❌ [HH.ru API] Error searching vacancies: ${e.message}", e)
-            val exception = mapToHHAPIException(e, "Failed to search vacancies")
+            log.error("❌ [HH.ru API] Error searching vacancies on page $page: ${e.message}", e)
+            val exception = mapToHHAPIException(e, "Failed to search vacancies on page $page")
 
             // Если это ошибка авторизации, логируем детально
             if (exception is HHAPIException.UnauthorizedException) {
@@ -72,23 +119,22 @@ class HHVacancyClient(
 
             throw exception
         } catch (e: Exception) {
-            log.error("Unexpected error searching vacancies: ${e.message}", e)
+            log.error("Unexpected error searching vacancies on page $page: ${e.message}", e)
             throw HHAPIException.ConnectionException("Failed to connect to HH.ru API: ${e.message}", e)
         }
     }
 
     suspend fun getVacancyDetails(id: String): VacancyDto {
-        // Проверяем кэш перед запросом к API
+        // Check cache before API request
         @Suppress("UNCHECKED_CAST")
         (vacancyDetailsCache.getIfPresent(id) as VacancyDto?)?.let { cached ->
-            log.debug("💾 [HH.ru API] Using cached vacancy details for ID: $id")
+            log.trace("[HH.ru API] Using cached vacancy details for ID: $id")
             return cached
         }
 
-        // Проверяем rate limit перед запросом
         rateLimitService.tryConsume()
 
-        log.info("🔍 [HH.ru API] Fetching vacancy details for ID: $id (cache miss)")
+        log.debug("[HH.ru API] Fetching vacancy details for ID: $id (cache miss)")
 
         return try {
             val vacancy = webClient.get()
@@ -97,16 +143,15 @@ class HHVacancyClient(
                 .bodyToMono<VacancyDto>()
                 .awaitSingle()
 
-            // Кэшируем результат
             vacancyDetailsCache.put(id, vacancy)
-            log.info("✅ [HH.ru API] Fetched and cached vacancy: ${vacancy.name} (ID: $id)")
+            log.debug("[HH.ru API] Fetched and cached vacancy: ${vacancy.name} (ID: $id)")
 
             vacancy
         } catch (e: WebClientResponseException) {
-            log.error("Error getting vacancy details from HH.ru API: ${e.message}", e)
+            log.error("[HH.ru API] Error getting vacancy details: ${e.message}", e)
             throw mapToHHAPIException(e, "Failed to get vacancy details for id: $id")
         } catch (e: Exception) {
-            log.error("Unexpected error getting vacancy details: ${e.message}", e)
+            log.error("[HH.ru API] Unexpected error getting vacancy details: ${e.message}", e)
             throw HHAPIException.ConnectionException("Failed to connect to HH.ru API: ${e.message}", e)
         }
     }

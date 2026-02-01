@@ -39,29 +39,24 @@ class VacancySchedulerService(
      */
     @EventListener(ApplicationReadyEvent::class)
     fun onApplicationReady() {
-        // Проверяем наличие резюме
         checkResumeAndNotify()
-        log.info("🚀 [Scheduler] Application ready, preloading resume and sending startup notification...")
+        log.info("[Scheduler] Application ready, preloading resume and sending startup notification...")
 
-        // Предзагружаем резюме в память при старте
         runBlocking {
             try {
                 resumeService.preloadResume()
             } catch (e: Exception) {
-                log.error("❌ [Scheduler] Failed to preload resume: ${e.message}", e)
-                // Не прерываем старт приложения, если резюме не загрузилось
+                log.error("[Scheduler] Failed to preload resume: ${e.message}", e)
             }
         }
 
-        // Отправляем уведомление о старте
         notificationService.sendStartupNotification()
 
-        // Запускаем первую проверку сразу
         if (!dryRun) {
-            log.info("🚀 [Scheduler] Running initial vacancy check on startup...")
+            log.info("[Scheduler] Running initial vacancy check on startup...")
             checkNewVacancies()
         } else {
-            log.info("ℹ️ [Scheduler] Dry-run mode enabled, skipping initial check")
+            log.debug("[Scheduler] Dry-run mode enabled, skipping initial check")
         }
     }
 
@@ -72,7 +67,7 @@ class VacancySchedulerService(
     @Scheduled(cron = "\${app.schedule.vacancy-check:0 */15 * * * *}")
     fun checkNewVacancies() {
         if (dryRun) {
-            log.info("ℹ️ [Scheduler] Dry-run mode enabled, skipping vacancy check")
+            log.debug("[Scheduler] Dry-run mode enabled, skipping vacancy check")
             return
         }
 
@@ -81,17 +76,15 @@ class VacancySchedulerService(
 
         runBlocking {
             try {
-                // Получаем вакансии через VacancyFetchService (публикует VacancyFetchedEvent)
                 val fetchResult = vacancyFetchService.fetchAndSaveNewVacancies()
                 sendStatusUpdate(VacancyService.FetchResult(fetchResult.vacancies, fetchResult.searchKeywords))
 
                 val vacanciesToAnalyze = getVacanciesForAnalysis()
                 if (vacanciesToAnalyze.isEmpty()) {
-                    log.info("ℹ️ [Scheduler] No vacancies to analyze, cycle completed")
+                    log.debug("[Scheduler] No vacancies to analyze, cycle completed")
                     return@runBlocking
                 }
 
-                // Анализируем вакансии (VacancyAnalysisService публикует VacancyAnalyzedEvent)
                 val analysisResults = analyzeVacancies(vacanciesToAnalyze)
                 logCycleSummary(cycleStartTime, fetchResult.vacancies.size, analysisResults)
             } catch (e: com.hhassistant.exception.HHAPIException.UnauthorizedException) {
@@ -125,27 +118,21 @@ class VacancySchedulerService(
      */
     private fun buildStatusMessage(fetchResult: VacancyService.FetchResult): String {
         return when {
-            fetchResult.vacancies.isNotEmpty() -> "✅ UP (найдено ${fetchResult.vacancies.size} вакансий)"
-            fetchResult.searchKeywords.isNotEmpty() -> "✅ UP (запрос выполнен, новых вакансий не найдено)"
-            else -> "⚠️ Проверка выполнена, но вакансии не найдены"
+            fetchResult.vacancies.isNotEmpty() -> "✅ UP (found ${fetchResult.vacancies.size} vacancies)"
+            fetchResult.searchKeywords.isNotEmpty() -> "✅ UP (request completed, no new vacancies found)"
+            else -> "⚠️ Check completed, but no vacancies found"
         }
     }
 
-    /**
-     * Получает вакансии для анализа
-     */
     private fun getVacanciesForAnalysis(): List<Vacancy> {
-        log.info("🔍 [Scheduler] Step 2: Getting vacancies for analysis...")
+        log.debug("[Scheduler] Getting vacancies for analysis...")
         val vacanciesToAnalyze = vacancyService.getNewVacanciesForAnalysis()
-        log.info("✅ [Scheduler] Step 2 completed: Found ${vacanciesToAnalyze.size} vacancies to analyze")
+        log.debug("[Scheduler] Found ${vacanciesToAnalyze.size} vacancies to analyze")
         return vacanciesToAnalyze
     }
 
-    /**
-     * Анализирует вакансии параллельно
-     */
     private suspend fun analyzeVacancies(vacanciesToAnalyze: List<Vacancy>): List<VacancyAnalysis?> {
-        log.info("🤖 [Scheduler] Step 3: Analyzing ${vacanciesToAnalyze.size} vacancies via Ollama (max concurrent: $maxConcurrentRequests)...")
+        log.info("[Scheduler] Analyzing ${vacanciesToAnalyze.size} vacancies via Ollama (max concurrent: $maxConcurrentRequests)...")
         val analysisResults = coroutineScope {
             vacanciesToAnalyze.map { vacancy ->
                 async {
@@ -153,22 +140,16 @@ class VacancySchedulerService(
                 }
             }.awaitAll()
         }
-        log.info("✅ [Scheduler] Step 3 completed: Analyzed ${analysisResults.count { it != null }} vacancies")
+        log.info("[Scheduler] Analyzed ${analysisResults.count { it != null }} vacancies")
         return analysisResults
     }
 
-    /**
-     * Логирует начало цикла проверки
-     */
     private fun logCycleStart() {
-        log.info("🚀 [Scheduler] ========================================")
-        log.info("🚀 [Scheduler] Starting scheduled vacancy check cycle")
-        log.info("🚀 [Scheduler] ========================================")
+        log.info("[Scheduler] ========================================")
+        log.info("[Scheduler] Starting scheduled vacancy check cycle")
+        log.info("[Scheduler] ========================================")
     }
 
-    /**
-     * Логирует итоги цикла проверки
-     */
     private fun logCycleSummary(
         cycleStartTime: Long,
         newVacanciesCount: Int,
@@ -179,21 +160,18 @@ class VacancySchedulerService(
         val sentToTelegramCount = analysisResults.count { it?.isRelevant == true }
         val cycleDuration = System.currentTimeMillis() - cycleStartTime
 
-        log.info("📊 [Scheduler] ========================================")
-        log.info("📊 [Scheduler] Cycle Summary:")
-        log.info("📊 [Scheduler]   - New vacancies fetched: $newVacanciesCount")
-        log.info("📊 [Scheduler]   - Vacancies analyzed: $analyzedCount")
-        log.info("📊 [Scheduler]   - Relevant vacancies: $relevantCount")
-        log.info("📊 [Scheduler]   - Sent to Telegram: $sentToTelegramCount")
-        log.info("📊 [Scheduler]   - Total cycle time: ${cycleDuration}ms")
-        log.info("📊 [Scheduler] ========================================")
+        log.info("[Scheduler] ========================================")
+        log.info("[Scheduler] Cycle Summary:")
+        log.info("[Scheduler]   - New vacancies fetched: $newVacanciesCount")
+        log.info("[Scheduler]   - Vacancies analyzed: $analyzedCount")
+        log.info("[Scheduler]   - Relevant vacancies: $relevantCount")
+        log.info("[Scheduler]   - Sent to Telegram: $sentToTelegramCount")
+        log.info("[Scheduler]   - Total cycle time: ${cycleDuration}ms")
+        log.info("[Scheduler] ========================================")
     }
 
-    /**
-     * Обрабатывает ошибку UnauthorizedException
-     */
     private fun handleUnauthorizedError(e: com.hhassistant.exception.HHAPIException.UnauthorizedException) {
-        log.error("❌ [Scheduler] HH.ru API unauthorized/forbidden error: ${e.message}", e)
+        log.error("[Scheduler] HH.ru API unauthorized/forbidden error: ${e.message}", e)
         notificationService.sendTokenExpiredAlert(
             e.message ?: "Unauthorized or Forbidden access to HH.ru API. " +
                 "Token may be invalid, expired, or lacks required permissions.",
@@ -205,11 +183,8 @@ class VacancySchedulerService(
         )
     }
 
-    /**
-     * Обрабатывает общие ошибки
-     */
     private fun handleGeneralError(e: Exception) {
-        log.error("❌ [Scheduler] Error during scheduled vacancy check: ${e.message}", e)
+        log.error("[Scheduler] Error during scheduled vacancy check: ${e.message}", e)
         notificationService.sendStatusUpdate(
             "❌ ERROR: ${e.message?.take(AppConstants.TextLimits.ERROR_MESSAGE_MAX_LENGTH) ?: "Unknown error"}",
             emptyList(),

@@ -65,6 +65,12 @@ class NotificationService(
             return
         }
 
+        // Не отправляем сообщение, если новых вакансий нет
+        if (vacanciesFound == 0) {
+            log.debug("📱 [Notification] No new vacancies found, skipping status update notification")
+            return
+        }
+
         val keywordsText = if (searchKeywords.isNotEmpty()) {
             searchKeywords.joinToString(", ") { "'$it'" }
         } else {

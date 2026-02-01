@@ -9,7 +9,7 @@ data class VacancyDto(
     val employer: EmployerDto?,
     val salary: SalaryDto?,
     val area: AreaDto?,
-    val url: String, // API URL (например, https://api.hh.ru/vacancies/123)
+    val url: String? = null, // API URL (например, https://api.hh.ru/vacancies/123) - может отсутствовать в некоторых ответах API
     @JsonProperty("alternate_url")
     val alternateUrl: String? = null, // Браузерная ссылка (например, https://hh.ru/vacancy/123)
     val description: String?,
@@ -17,6 +17,8 @@ data class VacancyDto(
     @JsonProperty("published_at")
     val publishedAt: String?,
     val snippet: SnippetDto?,
+    @JsonProperty("key_skills")
+    val keySkills: List<KeySkillDto>? = null,
 ) {
     fun toSalaryString(defaultCurrency: String = "RUR"): String? {
         return salary?.let {

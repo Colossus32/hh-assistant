@@ -1,0 +1,86 @@
+databaseChangeLog:
+  - changeSet:
+      id: create-exclusion-rules-table
+      author: system
+      changes:
+        - createTable:
+            tableName: exclusion_rules
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: text
+                  type: VARCHAR(500)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: type
+                  type: VARCHAR(20)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: case_sensitive
+                  type: BOOLEAN
+                  defaultValue: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: TIMESTAMP
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+        - addUniqueConstraint:
+            tableName: exclusion_rules
+            columnNames: text, type
+            constraintName: uk_exclusion_rules_text_type
+        - createIndex:
+            indexName: idx_exclusion_rules_type
+            tableName: exclusion_rules
+            columns:
+              - column:
+                  name: type
+        - sql:
+            sql: |
+              -- Migrate existing exclusion keywords from application.yml
+              INSERT INTO exclusion_rules (text, type, case_sensitive, created_at, updated_at)
+              VALUES
+                ('стажер', 'KEYWORD', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('Стажер', 'KEYWORD', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('intern', 'KEYWORD', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('стажировка', 'KEYWORD', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('без опыта', 'KEYWORD', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('junior', 'KEYWORD', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('джуниор', 'KEYWORD', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('trainee', 'KEYWORD', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('Lead', 'KEYWORD', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('QA', 'KEYWORD', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('Android', 'KEYWORD', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('Fullstack', 'KEYWORD', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+              ON CONFLICT (text, type) DO NOTHING;
+            rollback: DELETE FROM exclusion_rules WHERE type = 'KEYWORD';
+        - sql:
+            sql: |
+              -- Migrate existing exclusion phrases from application.yml
+              INSERT INTO exclusion_rules (text, type, case_sensitive, created_at, updated_at)
+              VALUES
+                ('без опыта работы', 'PHRASE', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('опыт не требуется', 'PHRASE', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('для начинающих', 'PHRASE', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('для студентов', 'PHRASE', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('стажировка', 'PHRASE', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('internship', 'PHRASE', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+              ON CONFLICT (text, type) DO NOTHING;
+            rollback: DELETE FROM exclusion_rules WHERE type = 'PHRASE';
+

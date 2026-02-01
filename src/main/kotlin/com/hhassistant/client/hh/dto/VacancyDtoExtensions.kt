@@ -14,7 +14,7 @@ fun VacancyDto.toEntity(formattingConfig: FormattingConfig): Vacancy {
         // Используем alternate_url если он есть и не пустой
         log.debug("🔗 [VacancyDto] Using alternateUrl for vacancy ${this.id}: ${this.alternateUrl}")
         this.alternateUrl
-    } else {
+    } else if (!this.url.isNullOrBlank()) {
         log.debug("🔗 [VacancyDto] alternateUrl is null/empty for vacancy ${this.id}, converting API URL: ${this.url}")
         // Преобразуем API URL в браузерную ссылку
         // https://api.hh.ru/vacancies/123?host=hh.ru -> https://hh.ru/vacancy/123
@@ -44,6 +44,11 @@ fun VacancyDto.toEntity(formattingConfig: FormattingConfig): Vacancy {
                 fallbackUrl
             }
         }
+    } else {
+        // Если и url, и alternateUrl отсутствуют, используем ID для формирования URL
+        val fallbackUrl = "https://hh.ru/vacancy/${this.id}"
+        log.debug("🔗 [VacancyDto] Both url and alternateUrl are null/empty for vacancy ${this.id}, using fallback URL: $fallbackUrl")
+        fallbackUrl
     }
     
     log.debug("🔗 [VacancyDto] Final browser URL for vacancy ${this.id}: $browserUrl")

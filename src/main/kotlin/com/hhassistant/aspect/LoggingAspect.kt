@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component
 import kotlin.system.measureTimeMillis
 
 /**
- * AOP аспект для централизованного логирования методов сервисов
+ * AOP aspect for centralized logging of service and client methods with performance measurement
  */
 @Aspect
 @Component
@@ -19,19 +19,27 @@ class LoggingAspect {
     private val log = KotlinLogging.logger {}
 
     /**
-     * Точка среза для всех публичных методов в сервисах
+     * Threshold for logging slow methods at INFO level (in milliseconds)
+     */
+    private val slowMethodThreshold = 100L
+
+    /**
+     * Pointcut for all public methods in services
      */
     @Pointcut("execution(public * com.hhassistant.service..*(..))")
     fun serviceMethods() {}
 
     /**
-     * Точка среза для всех публичных методов в клиентах
+     * Pointcut for all public methods in clients
      */
     @Pointcut("execution(public * com.hhassistant.client..*(..))")
     fun clientMethods() {}
 
     /**
-     * Логирование выполнения методов с измерением времени
+     * Logs method execution with timing measurement
+     * - DEBUG: all method calls
+     * - INFO: methods taking longer than threshold
+     * - ERROR: exceptions
      */
     @Around("serviceMethods() || clientMethods()")
     fun logMethodExecution(joinPoint: ProceedingJoinPoint): Any? {
@@ -40,8 +48,8 @@ class LoggingAspect {
         val methodName = signature.name
         val args = joinPoint.args
 
-        // Логируем вход в метод
-        log.debug { "▶️ [$className] Entering method: $methodName(${formatArguments(args)})" }
+        // Log method entry only at trace level to reduce noise
+        log.trace { "[$className] Entering method: $methodName(${formatArguments(args)})" }
 
         return try {
             val result: Any?
@@ -49,12 +57,16 @@ class LoggingAspect {
                 result = joinPoint.proceed()
             }
 
-            // Логируем успешное выполнение
-            log.debug { "✅ [$className] Method $methodName completed in ${duration}ms" }
+            // Log slow methods at INFO level, others at DEBUG
+            if (duration >= slowMethodThreshold) {
+                log.info { "[$className] Method $methodName completed in ${duration}ms (slow)" }
+            } else {
+                log.debug { "[$className] Method $methodName completed in ${duration}ms" }
+            }
             result
         } catch (e: Exception) {
-            // Логируем ошибку
-            log.error(e) { "❌ [$className] Method $methodName failed: ${e.message}" }
+            // Always log errors
+            log.error(e) { "[$className] Method $methodName failed: ${e.message}" }
             throw e
         }
     }

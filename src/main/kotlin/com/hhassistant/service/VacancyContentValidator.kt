@@ -6,33 +6,41 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 
 /**
- * Валидатор содержимого вакансии по ключевым словам/фразам
- * Выполняет проверку ДО анализа через LLM для экономии ресурсов
+ * Validator for vacancy content by exclusion keywords/phrases
+ * Performs validation BEFORE LLM analysis to save resources
+ * Uses ExclusionRuleService to get rules from database (with caching)
  */
 @Component
 class VacancyContentValidator(
+    private val exclusionRuleService: ExclusionRuleService,
+    // Fallback to config if DB is empty (for backward compatibility)
     @Value("\${app.analysis.exclusion-keywords:#{T(java.util.Collections).emptyList()}}")
-    private val exclusionKeywords: List<String>,
+    private val fallbackKeywords: List<String>,
     @Value("\${app.analysis.exclusion-phrases:#{T(java.util.Collections).emptyList()}}")
-    private val exclusionPhrases: List<String>,
+    private val fallbackPhrases: List<String>,
     @Value("\${app.analysis.exclusion-case-sensitive:false}")
-    private val caseSensitive: Boolean,
+    private val fallbackCaseSensitive: Boolean,
 ) {
     private val log = KotlinLogging.logger {}
 
     /**
-     * Проверяет вакансию на наличие запрещенных слов/фраз
+     * Validates vacancy for exclusion keywords/phrases
      *
-     * @param vacancy Вакансия для проверки
-     * @return ValidationResult с информацией о том, подходит ли вакансия и причиной отклонения
+     * @param vacancy Vacancy to validate
+     * @return ValidationResult with information about whether vacancy is valid and rejection reason
      */
     fun validate(vacancy: Vacancy): ValidationResult {
-        // Если списки пустые, валидация пропускается
+        // Get exclusion rules from database (cached), fallback to config if empty
+        val exclusionKeywords = exclusionRuleService.getAllKeywords().takeIf { it.isNotEmpty() } ?: fallbackKeywords
+        val exclusionPhrases = exclusionRuleService.getAllPhrases().takeIf { it.isNotEmpty() } ?: fallbackPhrases
+        val caseSensitive = exclusionRuleService.isCaseSensitive() || fallbackCaseSensitive
+
+        // If lists are empty, validation is skipped
         if (exclusionKeywords.isEmpty() && exclusionPhrases.isEmpty()) {
             return ValidationResult(isValid = true, rejectionReason = null)
         }
 
-        // Объединяем все текстовые поля вакансии для проверки
+        // Combine all text fields of vacancy for checking
         val textToCheck = buildString {
             append(vacancy.name)
             append(" ")
@@ -44,30 +52,30 @@ class VacancyContentValidator(
 
         val normalizedText = if (caseSensitive) textToCheck else textToCheck.lowercase()
 
-        // Проверяем ключевые слова
+        // Check keywords
         val foundKeywords = exclusionKeywords.filter { keyword ->
             val normalizedKeyword = if (caseSensitive) keyword else keyword.lowercase()
             normalizedText.contains(normalizedKeyword)
         }
 
-        // Проверяем фразы
+        // Check phrases
         val foundPhrases = exclusionPhrases.filter { phrase ->
             val normalizedPhrase = if (caseSensitive) phrase else phrase.lowercase()
             normalizedText.contains(normalizedPhrase)
         }
 
-        // Если найдены запрещенные слова или фразы - вакансия не подходит
+        // If forbidden words or phrases found - vacancy is not suitable
         if (foundKeywords.isNotEmpty() || foundPhrases.isNotEmpty()) {
             val reasons = mutableListOf<String>()
             if (foundKeywords.isNotEmpty()) {
-                reasons.add("найдены запрещенные слова: ${foundKeywords.joinToString(", ")}")
+                reasons.add("found exclusion keywords: ${foundKeywords.joinToString(", ")}")
             }
             if (foundPhrases.isNotEmpty()) {
-                reasons.add("найдены запрещенные фразы: ${foundPhrases.joinToString(", ")}")
+                reasons.add("found exclusion phrases: ${foundPhrases.joinToString(", ")}")
             }
 
             val rejectionReason = reasons.joinToString("; ")
-            log.info("🚫 [VacancyValidator] Вакансия ${vacancy.id} ('${vacancy.name}') отклонена: $rejectionReason")
+            log.debug("[VacancyValidator] Vacancy ${vacancy.id} ('${vacancy.name}') rejected: $rejectionReason")
 
             return ValidationResult(
                 isValid = false,

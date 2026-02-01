@@ -1,0 +1,20 @@
+databaseChangeLog:
+  - changeSet:
+      id: add-sent-to-telegram-at-column
+      author: system
+      changes:
+        - addColumn:
+            tableName: vacancies
+            columns:
+              - column:
+                  name: sent_to_telegram_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: true
+        - createIndex:
+            indexName: idx_vacancies_sent_to_telegram_at
+            tableName: vacancies
+            columns:
+              - column:
+                  name: sent_to_telegram_at
+

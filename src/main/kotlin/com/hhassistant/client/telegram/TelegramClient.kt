@@ -36,22 +36,37 @@ class TelegramClient(
     suspend fun sendMessage(
         text: String,
         replyMarkup: com.hhassistant.client.telegram.dto.InlineKeyboardMarkup? = null,
+    ): Boolean = sendMessage(chatId, text, replyMarkup)
+
+    /**
+     * Отправляет сообщение в Telegram в указанный чат.
+     *
+     * @param targetChatId ID чата для отправки сообщения
+     * @param text Текст сообщения для отправки
+     * @param replyMarkup Опциональная inline keyboard для сообщения
+     * @return true если сообщение успешно отправлено, false если отключено или не настроено
+     * @throws TelegramException если произошла ошибка при отправке (rate limit, invalid chat, etc.)
+     */
+    suspend fun sendMessage(
+        targetChatId: String,
+        text: String,
+        replyMarkup: com.hhassistant.client.telegram.dto.InlineKeyboardMarkup? = null,
     ): Boolean {
         if (!enabled) {
             log.debug("📱 [Telegram] Notifications are disabled, skipping message")
             return false
         }
 
-        if (botToken.isBlank() || chatId.isBlank()) {
+        if (botToken.isBlank() || targetChatId.isBlank()) {
             log.warn("⚠️ [Telegram] Bot token or chat ID is not configured, skipping message")
             return false
         }
 
-        log.info("📱 [Telegram] Sending message to chat ID: $chatId (message length: ${text.length} chars)")
+        log.info("📱 [Telegram] Sending message to chat ID: $targetChatId (message length: ${text.length} chars)")
 
         return try {
             val request = SendMessageRequest(
-                chatId = chatId,
+                chatId = targetChatId,
                 text = text,
                 parseMode = "HTML",
                 disableWebPagePreview = false,

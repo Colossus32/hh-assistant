@@ -42,6 +42,9 @@ data class Vacancy(
     @Column(name = "fetched_at", nullable = false)
     val fetchedAt: LocalDateTime = LocalDateTime.now(),
 
+    @Column(name = "sent_to_telegram_at")
+    val sentToTelegramAt: LocalDateTime? = null,
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20, nullable = false)
     val status: VacancyStatus = VacancyStatus.NEW,
@@ -55,7 +58,7 @@ data class Vacancy(
     /**
      * Проверяет, была ли вакансия отправлена пользователю
      */
-    fun isSentToUser(): Boolean = status == VacancyStatus.SENT_TO_USER
+    fun isSentToUser(): Boolean = status == VacancyStatus.SENT_TO_USER && sentToTelegramAt != null
 
     /**
      * Проверяет, была ли вакансия пропущена (не релевантна)
@@ -76,6 +79,14 @@ data class Vacancy(
      * Создает копию вакансии с новым статусом (immutability)
      */
     fun withStatus(newStatus: VacancyStatus): Vacancy = copy(status = newStatus)
+
+    /**
+     * Создает копию вакансии с отметкой времени отправки в Telegram
+     */
+    fun withSentToTelegramAt(sentAt: LocalDateTime): Vacancy = copy(
+        status = VacancyStatus.SENT_TO_USER,
+        sentToTelegramAt = sentAt,
+    )
 }
 
 enum class VacancyStatus {

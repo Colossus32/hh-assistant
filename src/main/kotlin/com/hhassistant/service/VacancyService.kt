@@ -193,6 +193,38 @@ class VacancyService(
     }
 
     /**
+     * Gets vacancies that were sent to Telegram
+     *
+     * @return List of vacancies that were successfully sent to Telegram
+     */
+    fun getSentToTelegramVacancies(): List<Vacancy> {
+        return vacancyRepository.findByStatusAndSentToTelegramAtIsNotNull(VacancyStatus.SENT_TO_USER)
+    }
+
+    /**
+     * Gets vacancies that were analyzed but not yet sent to Telegram
+     *
+     * @return List of vacancies ready to be sent but not sent yet
+     */
+    fun getNotSentToTelegramVacancies(): List<Vacancy> {
+        return vacancyRepository.findByStatusInAndSentToTelegramAtIsNull(
+            listOf(VacancyStatus.ANALYZED, VacancyStatus.SENT_TO_USER)
+        )
+    }
+
+    /**
+     * Checks if vacancy was sent to Telegram
+     *
+     * @param vacancyId ID of vacancy
+     * @return true if vacancy was sent, false otherwise
+     */
+    fun wasSentToTelegram(vacancyId: String): Boolean {
+        return vacancyRepository.findById(vacancyId)
+            .map { it.isSentToUser() }
+            .orElse(false)
+    }
+
+    /**
      * Получает вакансии по статусу
      *
      * @param status Статус вакансий

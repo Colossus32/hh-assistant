@@ -39,12 +39,20 @@ class VacancyNotificationService(
         log.info("📱 [Notification] Processing VacancyReadyForTelegramEvent for vacancy ${vacancy.id}")
 
         try {
-            runBlocking {
+            val sentAt = java.time.LocalDateTime.now()
+            val sentSuccessfully = runBlocking {
                 sendVacancyToTelegram(vacancy, analysis)
             }
-            vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SENT_TO_USER))
-            metricsService.incrementNotificationsSent()
-            log.info("✅ [Notification] Successfully sent vacancy ${vacancy.id} to Telegram")
+            
+            // Update status and sent timestamp only if message was actually sent
+            if (sentSuccessfully) {
+                vacancyStatusService.updateVacancyStatus(vacancy.withSentToTelegramAt(sentAt))
+                metricsService.incrementNotificationsSent()
+                log.info("[Notification] Successfully sent vacancy ${vacancy.id} to Telegram at $sentAt")
+            } else {
+                log.warn("[Notification] Message sending returned false for vacancy ${vacancy.id} (Telegram may be disabled or not configured)")
+                // Don't update status - vacancy remains in ANALYZED state
+            }
         } catch (e: TelegramException.RateLimitException) {
             metricsService.incrementNotificationsFailed()
             log.warn("⚠️ [Notification] Rate limit exceeded for Telegram, skipping vacancy ${vacancy.id} (will retry later)")
@@ -60,17 +68,20 @@ class VacancyNotificationService(
     }
 
     /**
-     * Отправляет вакансию в Telegram
+     * Sends vacancy to Telegram
+     * 
+     * @return true if message was successfully sent, false if Telegram is disabled or not configured
+     * @throws TelegramException if sending failed (rate limit, invalid chat, etc.)
      */
     private suspend fun sendVacancyToTelegram(
         vacancy: Vacancy,
         analysis: VacancyAnalysis,
-    ) {
-        // Исправляем URL вакансии, если он в неправильном формате (API URL вместо браузерного)
+    ): Boolean {
+        // Fix vacancy URL if it's in wrong format (API URL instead of browser URL)
         val correctedVacancy = vacancy.copy(url = normalizeVacancyUrl(vacancy.url, vacancy.id))
         val message = buildTelegramMessage(correctedVacancy, analysis)
-        // Убираем кнопки - они не используются
-        telegramClient.sendMessage(message, null)
+        // Send message and return result (true if sent, false if disabled/not configured)
+        return telegramClient.sendMessage(message, null)
     }
 
     /**

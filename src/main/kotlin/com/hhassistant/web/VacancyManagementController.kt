@@ -179,6 +179,137 @@ class VacancyManagementController(
         )
     }
 
+    /**
+     * Получает все вакансии с информацией о том, была ли вакансия просмотрена.
+     * 
+     * GET /api/vacancies/all
+     * 
+     * @return Список всех вакансий с флагом просмотра
+     */
+    @GetMapping("/all")
+    fun getAllVacanciesWithViewStatus(): ResponseEntity<Map<String, Any>> {
+        log.info("📋 [VacancyManagement] Getting all vacancies with view status...")
+        
+        val allVacancies = vacancyService.findAllVacancies()
+        
+        // Определяем статусы "просмотренных" вакансий
+        val viewedStatuses = listOf(
+            VacancyStatus.APPLIED,
+            VacancyStatus.NOT_INTERESTED,
+        )
+        
+        val vacanciesWithStatus = allVacancies.map { vacancy ->
+            val isViewed = vacancy.status in viewedStatuses
+            val wasSentToTelegram = vacancy.isSentToUser()
+            
+            mapOf(
+                "id" to vacancy.id,
+                "name" to vacancy.name,
+                "employer" to vacancy.employer,
+                "salary" to (vacancy.salary ?: ""),
+                "area" to vacancy.area,
+                "url" to vacancy.url,
+                "status" to vacancy.status.name,
+                "isViewed" to isViewed,
+                "viewed" to if (isViewed) "Да" else "Нет",
+                "wasSentToTelegram" to wasSentToTelegram,
+                "sentToTelegramAt" to (vacancy.sentToTelegramAt?.toString() ?: ""),
+            )
+        }
+
+        log.info("✅ [VacancyManagement] Returning ${vacanciesWithStatus.size} vacancies with view status")
+
+        return ResponseEntity.ok(
+            mapOf(
+                "count" to vacanciesWithStatus.size,
+                "vacancies" to vacanciesWithStatus,
+            ),
+        )
+    }
+
+    /**
+     * Gets vacancies that were sent to Telegram
+     * GET /api/vacancies/sent-to-telegram
+     */
+    @GetMapping("/sent-to-telegram")
+    fun getSentToTelegramVacancies(): ResponseEntity<Map<String, Any>> {
+        log.info("[VacancyManagement] Getting vacancies sent to Telegram...")
+        val vacancies = vacancyService.getSentToTelegramVacancies()
+        log.info("[VacancyManagement] Found ${vacancies.size} vacancies sent to Telegram")
+
+        return ResponseEntity.ok(
+            mapOf(
+                "count" to vacancies.size,
+                "vacancies" to vacancies.map { vacancy ->
+                    mapOf(
+                        "id" to vacancy.id,
+                        "name" to vacancy.name,
+                        "employer" to vacancy.employer,
+                        "url" to vacancy.url,
+                        "sentAt" to (vacancy.sentToTelegramAt?.toString() ?: ""),
+                        "status" to vacancy.status.name,
+                    )
+                },
+            ),
+        )
+    }
+
+    /**
+     * Gets vacancies that were analyzed but not sent to Telegram yet
+     * GET /api/vacancies/not-sent-to-telegram
+     */
+    @GetMapping("/not-sent-to-telegram")
+    fun getNotSentToTelegramVacancies(): ResponseEntity<Map<String, Any>> {
+        log.info("[VacancyManagement] Getting vacancies not sent to Telegram...")
+        val vacancies = vacancyService.getNotSentToTelegramVacancies()
+        log.info("[VacancyManagement] Found ${vacancies.size} vacancies not sent to Telegram")
+
+        return ResponseEntity.ok(
+            mapOf(
+                "count" to vacancies.size,
+                "vacancies" to vacancies.map { vacancy ->
+                    mapOf(
+                        "id" to vacancy.id,
+                        "name" to vacancy.name,
+                        "employer" to vacancy.employer,
+                        "url" to vacancy.url,
+                        "status" to vacancy.status.name,
+                    )
+                },
+            ),
+        )
+    }
+
+    /**
+     * Checks if vacancy was sent to Telegram
+     * GET /api/vacancies/{id}/sent-status
+     */
+    @GetMapping("/{id}/sent-status")
+    fun getVacancySentStatus(@PathVariable id: String): ResponseEntity<Map<String, Any>> {
+        log.info("[VacancyManagement] Checking sent status for vacancy $id...")
+        val vacancy = vacancyService.getVacancyById(id)
+        
+        if (vacancy == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(
+                    mapOf(
+                        "error" to "NOT_FOUND",
+                        "message" to "Vacancy with id $id not found",
+                    ),
+                )
+        }
+
+        val wasSent = vacancy.isSentToUser()
+        return ResponseEntity.ok(
+            mapOf(
+                "vacancyId" to vacancy.id,
+                "wasSentToTelegram" to wasSent,
+                "sentAt" to (vacancy.sentToTelegramAt?.toString() ?: ""),
+                "status" to vacancy.status.name,
+            ),
+        )
+    }
+
     private fun updateVacancyStatus(
         vacancyId: String,
         newStatus: VacancyStatus,

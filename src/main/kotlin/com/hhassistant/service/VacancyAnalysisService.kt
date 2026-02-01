@@ -2,6 +2,7 @@ package com.hhassistant.service
 
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.client.ollama.OllamaClient
 import com.hhassistant.client.ollama.dto.ChatMessage
 import com.hhassistant.config.AppConstants
@@ -33,6 +34,8 @@ class VacancyAnalysisService(
     private val eventPublisher: ApplicationEventPublisher,
     private val vacancyContentValidator: VacancyContentValidator,
     private val metricsService: com.hhassistant.metrics.MetricsService,
+    private val skillExtractionService: SkillExtractionService,
+    private val hhVacancyClient: HHVacancyClient,
     @Qualifier("ollamaCircuitBreaker") private val ollamaCircuitBreaker: CircuitBreaker,
     @Qualifier("ollamaRetry") private val ollamaRetry: Retry,
     @Value("\${app.analysis.min-relevance-score:0.6}") private val minRelevanceScore: Double,
@@ -184,6 +187,24 @@ class VacancyAnalysisService(
 
         // Публикуем событие анализа вакансии
         eventPublisher.publishEvent(VacancyAnalyzedEvent(this, vacancy, savedAnalysis))
+
+        // Извлекаем и сохраняем навыки из вакансии
+        try {
+            // Получаем key_skills из API (если доступны)
+            val keySkills = try {
+                val vacancyDto = hhVacancyClient.getVacancyDetails(vacancy.id)
+                vacancyDto.keySkills
+            } catch (e: Exception) {
+                log.debug("⚠️ [SkillExtraction] Could not fetch key_skills from API for vacancy ${vacancy.id}: ${e.message}")
+                null
+            }
+            
+            // Извлекаем и сохраняем навыки
+            skillExtractionService.extractAndSaveSkills(vacancy, keySkills)
+        } catch (e: Exception) {
+            log.error("❌ [SkillExtraction] Failed to extract skills for vacancy ${vacancy.id}: ${e.message}", e)
+            // Не прерываем основной пайплайн анализа из-за ошибки извлечения навыков
+        }
 
         // Если вакансия релевантна, но письмо не сгенерировано - добавляем в очередь
         if (savedAnalysis.isRelevant && !savedAnalysis.hasCoverLetter() && savedAnalysis.coverLetterGenerationStatus == CoverLetterGenerationStatus.RETRY_QUEUED) {
