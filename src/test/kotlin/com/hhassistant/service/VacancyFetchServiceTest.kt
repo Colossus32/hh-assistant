@@ -3,8 +3,8 @@ package com.hhassistant.service
 import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.client.hh.dto.VacancyDto
 import com.hhassistant.config.FormattingConfig
-import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.SearchConfig
+import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.event.VacancyFetchedEvent
 import com.hhassistant.repository.SearchConfigRepository
 import com.hhassistant.repository.VacancyRepository

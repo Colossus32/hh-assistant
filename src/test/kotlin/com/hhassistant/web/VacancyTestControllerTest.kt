@@ -76,9 +76,3 @@ class VacancyTestControllerTest(
             }
     }
 }
-
-
-
-
-
-

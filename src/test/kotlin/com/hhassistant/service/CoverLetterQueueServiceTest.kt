@@ -185,7 +185,7 @@ class CoverLetterQueueServiceTest {
         assertThat(failedEvents).isNotEmpty
         val lastFailedEvent = failedEvents.last()
         assertThat(lastFailedEvent.attempts).isEqualTo(3)
-        
+
         // После всех попыток должна быть отправлена вакансия без письма
         val readyEvents = capturedEvents.filterIsInstance<VacancyReadyForTelegramEvent>()
         assertThat(readyEvents.size).isEqualTo(1)

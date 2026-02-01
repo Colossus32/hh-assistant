@@ -1,12 +1,8 @@
 package com.hhassistant.web
 
 import com.hhassistant.client.hh.HHVacancyClient
-import com.hhassistant.client.hh.dto.AreaDto
-import com.hhassistant.client.hh.dto.EmployerDto
-import com.hhassistant.client.hh.dto.VacancyDto
 import com.hhassistant.service.EnvFileService
 import com.ninjasquad.springmockk.MockkBean
-import io.mockk.coEvery
 import io.mockk.every
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -53,9 +49,3 @@ class TokenTestControllerTest(
             }
     }
 }
-
-
-
-
-
-

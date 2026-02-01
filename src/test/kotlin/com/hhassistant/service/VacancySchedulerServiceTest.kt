@@ -4,7 +4,6 @@ import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.exception.OllamaException
-import com.hhassistant.exception.TelegramException
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
