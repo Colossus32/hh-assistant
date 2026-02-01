@@ -50,22 +50,22 @@ class HHVacancyClient(
         // Calculate max pages considering HH.ru API limit (2000 vacancies)
         val maxPage = minOf(
             totalPages - 1, // 0-based indexing
-            (maxVacanciesDepth / perPage) - 1 // HH.ru API limit
+            (maxVacanciesDepth / perPage) - 1, // HH.ru API limit
         )
 
         // Fetch remaining pages
         if (maxPage > defaultPage) {
             log.debug("[HH.ru API] Fetching additional pages: ${defaultPage + 1}..$maxPage")
-            
+
             for (page in (defaultPage + 1)..maxPage) {
                 try {
                     rateLimitService.tryConsume()
-                    
+
                     val pageResponse = fetchVacanciesPage(config, page)
                     allVacancies.addAll(pageResponse.items)
-                    
+
                     log.trace("[HH.ru API] Page $page: ${pageResponse.items.size} vacancies (total so far: ${allVacancies.size})")
-                    
+
                     // Small delay between requests to avoid rate limit
                     kotlinx.coroutines.delay(100)
                 } catch (e: HHAPIException.RateLimitException) {
@@ -78,7 +78,7 @@ class HHVacancyClient(
         }
 
         log.info("[HH.ru API] Total fetched: ${allVacancies.size} vacancies from ${minOf(maxPage + 1, totalPages)} pages (total available: $totalFound)")
-        
+
         return allVacancies
     }
 

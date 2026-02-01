@@ -120,7 +120,6 @@ class TelegramClient(
         }
     }
 
-
     private fun mapToTelegramException(e: WebClientResponseException, responseBody: String? = null): TelegramException {
         val errorDetails = responseBody ?: try {
             e.responseBodyAsString

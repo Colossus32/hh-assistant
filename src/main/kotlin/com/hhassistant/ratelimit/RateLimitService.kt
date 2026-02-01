@@ -92,7 +92,7 @@ class RateLimitService(
 
         val availableTokens = bucket.availableTokens
         log.warn("Rate limit exceeded. Available tokens: $availableTokens. Waiting ${waitOnLimitSeconds}s...")
-        
+
         // Инкрементируем счетчик превышений лимита
         rateLimitExceededCounter.increment()
         rateLimitWaitCounter.increment()

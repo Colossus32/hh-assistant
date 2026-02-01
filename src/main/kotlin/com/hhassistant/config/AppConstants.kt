@@ -16,6 +16,7 @@ object AppConstants {
 
     // Ограничения длины текста
     object TextLimits {
+        const val TELEGRAM_MESSAGE_MAX_LENGTH = 4096 // Максимальная длина сообщения в Telegram
         const val TELEGRAM_DESCRIPTION_MAX_LENGTH = 2000
         const val TELEGRAM_MESSAGE_PREVIEW_LENGTH = 200
         const val VACANCY_DESCRIPTION_PREVIEW_LENGTH = 500
@@ -74,9 +75,3 @@ object AppConstants {
         const val TOTAL_ATTEMPTS_MULTIPLIER = 2 // maxRetries * 2 для общего количества попыток
     }
 }
-
-
-
-
-
-
