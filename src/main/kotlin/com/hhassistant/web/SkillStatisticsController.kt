@@ -1,7 +1,7 @@
 package com.hhassistant.web
 
-import com.hhassistant.service.SkillStatisticsService
 import com.hhassistant.service.SkillStatistics
+import com.hhassistant.service.SkillStatisticsService
 import mu.KotlinLogging
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -23,9 +23,9 @@ class SkillStatisticsController(
 
     /**
      * Получает топ навыков по популярности.
-     * 
+     *
      * GET /api/skills/top?limit=20
-     * 
+     *
      * @param limit Максимальное количество навыков для возврата (по умолчанию 20)
      * @return Список навыков с их статистикой
      */
@@ -54,9 +54,9 @@ class SkillStatisticsController(
 
     /**
      * Получает статистику для конкретного навыка.
-     * 
+     *
      * GET /api/skills/{skillName}
-     * 
+     *
      * @param skillName Название навыка
      * @return Статистика навыка или 404, если навык не найден
      */
@@ -68,7 +68,7 @@ class SkillStatisticsController(
 
         return try {
             val statistics = skillStatisticsService.getSkillStatistics(skillName)
-            
+
             if (statistics == null) {
                 log.warn("⚠️ [SkillStatistics API] Skill not found: $skillName")
                 ResponseEntity.notFound().build()
@@ -84,9 +84,9 @@ class SkillStatisticsController(
 
     /**
      * Получает общую статистику по навыкам.
-     * 
+     *
      * GET /api/skills/stats
-     * 
+     *
      * @return Общая статистика (количество навыков, проанализированных вакансий)
      */
     @GetMapping("/stats")
@@ -140,8 +140,3 @@ data class OverallStatisticsResponse(
      */
     val totalVacanciesAnalyzed: Int,
 )
-
-
-
-
-

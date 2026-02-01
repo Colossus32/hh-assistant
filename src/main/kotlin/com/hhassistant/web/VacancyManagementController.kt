@@ -181,27 +181,27 @@ class VacancyManagementController(
 
     /**
      * Получает все вакансии с информацией о том, была ли вакансия просмотрена.
-     * 
+     *
      * GET /api/vacancies/all
-     * 
+     *
      * @return Список всех вакансий с флагом просмотра
      */
     @GetMapping("/all")
     fun getAllVacanciesWithViewStatus(): ResponseEntity<Map<String, Any>> {
         log.info("📋 [VacancyManagement] Getting all vacancies with view status...")
-        
+
         val allVacancies = vacancyService.findAllVacancies()
-        
+
         // Определяем статусы "просмотренных" вакансий
         val viewedStatuses = listOf(
             VacancyStatus.APPLIED,
             VacancyStatus.NOT_INTERESTED,
         )
-        
+
         val vacanciesWithStatus = allVacancies.map { vacancy ->
             val isViewed = vacancy.status in viewedStatuses
             val wasSentToTelegram = vacancy.isSentToUser()
-            
+
             mapOf(
                 "id" to vacancy.id,
                 "name" to vacancy.name,
@@ -288,7 +288,7 @@ class VacancyManagementController(
     fun getVacancySentStatus(@PathVariable id: String): ResponseEntity<Map<String, Any>> {
         log.info("[VacancyManagement] Checking sent status for vacancy $id...")
         val vacancy = vacancyService.getVacancyById(id)
-        
+
         if (vacancy == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(
