@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicReference
 @Service
 class AnalysisTimeService {
     private val log = KotlinLogging.logger {}
-    
+
     // Атомарная ссылка для thread-safe доступа к среднему времени
     private val averageTimeMs = AtomicReference<Double?>(null)
 
@@ -54,4 +54,3 @@ class AnalysisTimeService {
         log.debug("📊 [AnalysisTime] Average time reset")
     }
 }
-

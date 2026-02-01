@@ -1,7 +1,6 @@
 package com.hhassistant.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.readValue
 import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.client.hh.dto.KeySkillDto
 import com.hhassistant.client.ollama.OllamaClient
@@ -11,7 +10,6 @@ import com.hhassistant.domain.entity.Skill
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancySkill
 import com.hhassistant.exception.HHAPIException
-import com.hhassistant.exception.OllamaException
 import com.hhassistant.repository.SkillRepository
 import com.hhassistant.repository.VacancyRepository
 import com.hhassistant.repository.VacancySkillRepository
@@ -25,7 +23,7 @@ import org.springframework.transaction.annotation.Transactional
 
 /**
  * Сервис для извлечения навыков из вакансий.
- * 
+ *
  * Стратегия извлечения:
  * 1. Приоритет: использовать key_skills из API HH.ru (если есть)
  * 2. Fallback: извлечение через LLM из описания (если key_skills недостаточно)
@@ -44,7 +42,7 @@ class SkillExtractionService(
     private val hhVacancyClient: HHVacancyClient,
 ) {
     private val log = KotlinLogging.logger {}
-    
+
     /**
      * Минимальное количество навыков для использования key_skills без дополнения через LLM
      */
@@ -52,7 +50,7 @@ class SkillExtractionService(
 
     /**
      * Извлекает навыки из вакансии и сохраняет их в БД.
-     * 
+     *
      * @param vacancy Вакансия для извлечения навыков
      * @param keySkillsFromApi Навыки из API HH.ru (если есть)
      * @return Список извлеченных и сохраненных навыков
@@ -124,7 +122,7 @@ class SkillExtractionService(
     private suspend fun extractSkillsFromDescription(vacancy: Vacancy): List<String> {
         return try {
             val prompt = buildSkillExtractionPrompt(vacancy)
-            
+
             val response = ollamaRetry.executeSuspendFunction {
                 ollamaCircuitBreaker.executeSuspendFunction {
                     ollamaClient.chat(
@@ -170,11 +168,11 @@ class SkillExtractionService(
         return try {
             // Пытаемся извлечь JSON из ответа (может быть обернут в markdown)
             val jsonText = extractJsonFromResponse(response)
-            
+
             // Парсим JSON
             val jsonNode = objectMapper.readTree(jsonText)
             val skillsArray = jsonNode.get("skills") ?: return emptyList()
-            
+
             if (skillsArray.isArray) {
                 skillsArray.map { it.asText().trim() }.filter { it.isNotBlank() }
             } else {
@@ -191,16 +189,16 @@ class SkillExtractionService(
      */
     private fun extractJsonFromResponse(response: String): String {
         var text = response.trim()
-        
+
         // Удаляем markdown блоки кода
         text = text.replace(Regex("```json\\s*"), "")
         text = text.replace(Regex("```\\s*"), "")
         text = text.trim()
-        
+
         // Ищем JSON объект в тексте
         val jsonStart = text.indexOf('{')
         val jsonEnd = text.lastIndexOf('}')
-        
+
         return if (jsonStart >= 0 && jsonEnd > jsonStart) {
             text.substring(jsonStart, jsonEnd + 1)
         } else {
@@ -225,9 +223,9 @@ class SkillExtractionService(
      */
     private fun saveOrUpdateSkill(skillName: String): Skill {
         val normalizedName = normalizeSkillName(skillName)
-        
+
         val existingSkill = skillRepository.findByNormalizedName(normalizedName).orElse(null)
-        
+
         return if (existingSkill != null) {
             // Навык уже существует - увеличиваем счетчик
             val updated = existingSkill.incrementOccurrence()
@@ -262,13 +260,13 @@ class SkillExtractionService(
 
     /**
      * Извлекает навыки из всех вакансий, для которых они еще не извлечены.
-     * 
+     *
      * @param vacancies Список вакансий для обработки
      * @return Количество обработанных вакансий
      */
     suspend fun extractSkillsForAllVacancies(vacancies: List<Vacancy>): Int {
         log.info("🔍 [SkillExtraction] Starting skill extraction for ${vacancies.size} vacancies")
-        
+
         var processedCount = 0
         var errorCount = 0
 
@@ -304,7 +302,7 @@ class SkillExtractionService(
                 // Извлекаем и сохраняем навыки
                 extractAndSaveSkills(vacancy, keySkills)
                 processedCount++
-                
+
                 log.info("✅ [SkillExtraction] Successfully extracted skills for vacancy ${vacancy.id} ($processedCount/${vacancies.size})")
             } catch (e: Exception) {
                 errorCount++
@@ -325,14 +323,13 @@ class SkillExtractionService(
         try {
             // Удаляем связи вакансия-навык
             vacancySkillRepository.deleteByVacancyId(vacancyId)
-            
+
             // Удаляем саму вакансию
             vacancyRepository.deleteById(vacancyId)
-            
+
             log.info("✅ [SkillExtraction] Deleted vacancy $vacancyId and related skills")
         } catch (e: Exception) {
             log.error("❌ [SkillExtraction] Failed to delete vacancy $vacancyId: ${e.message}", e)
         }
     }
 }
-

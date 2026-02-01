@@ -1,6 +1,5 @@
 package com.hhassistant.service
 
-import com.hhassistant.domain.entity.Skill
 import com.hhassistant.repository.SkillRepository
 import com.hhassistant.repository.VacancySkillRepository
 import mu.KotlinLogging
@@ -9,7 +8,7 @@ import org.springframework.transaction.annotation.Transactional
 
 /**
  * Сервис для работы со статистикой навыков.
- * 
+ *
  * Предоставляет методы для:
  * - Получения топ навыков по популярности
  * - Расчет частоты встречаемости навыков
@@ -24,7 +23,7 @@ class SkillStatisticsService(
 
     /**
      * Получает топ навыков по частоте встречаемости.
-     * 
+     *
      * @param limit Максимальное количество навыков для возврата
      * @return Список статистики навыков, отсортированный по частоте (от большего к меньшему)
      */
@@ -53,7 +52,7 @@ class SkillStatisticsService(
 
     /**
      * Получает статистику для конкретного навыка.
-     * 
+     *
      * @param skillName Название навыка (оригинальное или нормализованное)
      * @return Статистика навыка или null, если навык не найден
      */
@@ -110,7 +109,7 @@ class SkillStatisticsService(
 
     /**
      * Рассчитывает процент встречаемости навыка.
-     * 
+     *
      * @param occurrenceCount Количество раз, когда навык был найден
      * @param totalVacancies Общее количество проанализированных вакансий
      * @return Процент встречаемости (0.0 - 100.0)
@@ -159,8 +158,3 @@ data class SkillStatistics(
      */
     val frequencyPercentage: Double,
 )
-
-
-
-
-

@@ -6,6 +6,7 @@ import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.event.CoverLetterGeneratedEvent
 import com.hhassistant.event.CoverLetterGenerationFailedEvent
+import com.hhassistant.event.VacancyAnalyzedEvent
 import com.hhassistant.event.VacancyReadyForTelegramEvent
 import com.hhassistant.exception.OllamaException
 import com.hhassistant.repository.VacancyAnalysisRepository
@@ -149,6 +150,34 @@ class CoverLetterQueueService(
                 log.error("❌ [CoverLetterQueue] Error loading pending vacancies on startup: ${e.message}", e)
             }
         }
+    }
+
+    /**
+     * Обрабатывает событие анализа вакансии
+     * Если очередь отключена, сразу отправляет релевантные вакансии в Telegram без письма
+     */
+    @EventListener
+    fun handleVacancyAnalyzed(event: VacancyAnalyzedEvent) {
+        val vacancy = event.vacancy
+        val analysis = event.analysis
+
+        // Если очередь отключена и вакансия релевантна - отправляем сразу без письма
+        if (!queueEnabled && analysis.isRelevant && !analysis.hasCoverLetter()) {
+            log.info("📤 [CoverLetterQueue] Queue is disabled, sending relevant vacancy ${vacancy.id} to Telegram without cover letter")
+
+            // Помечаем как NOT_ATTEMPTED, так как генерация отключена
+            val updatedAnalysis = analysis.withCoverLetterStatus(
+                CoverLetterGenerationStatus.NOT_ATTEMPTED,
+                0,
+            )
+            vacancyAnalysisRepository.save(updatedAnalysis)
+
+            // Публикуем событие готовности к отправке в Telegram (без письма)
+            eventPublisher.publishEvent(VacancyReadyForTelegramEvent(this, vacancy, updatedAnalysis))
+            return
+        }
+
+        // Если очередь включена, добавляем в очередь (логика в VacancyAnalysisService)
     }
 
     /**
