@@ -3,8 +3,14 @@ package com.hhassistant.service
 import com.hhassistant.client.telegram.TelegramClient
 import com.hhassistant.client.telegram.dto.Update
 import com.hhassistant.exception.TelegramException
+import jakarta.annotation.PreDestroy
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.context.event.ApplicationReadyEvent
@@ -17,6 +23,7 @@ import org.springframework.stereotype.Service
  * Обрабатывает команды и сообщения от пользователей.
  *
  * Использует long polling для эффективного получения обновлений.
+ * Обработка команд выполняется асинхронно через корутины, не блокируя поток.
  */
 @Service
 class TelegramPollingService(
@@ -29,6 +36,13 @@ class TelegramPollingService(
     private val log = KotlinLogging.logger {}
     private var lastUpdateId: Long? = null
     private var isPolling = false
+
+    // CoroutineScope для асинхронной обработки polling и команд
+    private val pollingScope = CoroutineScope(
+        Dispatchers.Default + SupervisorJob() + CoroutineExceptionHandler { _, exception ->
+            log.error("❌ [TelegramPolling] Unhandled exception in polling coroutine: ${exception.message}", exception)
+        },
+    )
 
     /**
      * Запускает polling после старта приложения
@@ -45,6 +59,7 @@ class TelegramPollingService(
     /**
      * Периодически опрашивает Telegram API для получения новых обновлений.
      * Использует long polling для уменьшения количества запросов.
+     * Обработка выполняется асинхронно через корутины, не блокируя поток.
      */
     @Scheduled(fixedDelayString = "\${telegram.polling.interval-seconds:5}", initialDelay = 10000)
     fun pollUpdates() {
@@ -53,8 +68,9 @@ class TelegramPollingService(
         }
 
         isPolling = true
-        try {
-            runBlocking {
+        // Запускаем polling асинхронно, не блокируя поток
+        pollingScope.launch {
+            try {
                 try {
                     val updates = telegramClient.getUpdates(
                         offset = lastUpdateId?.let { it + 1 },
@@ -76,14 +92,15 @@ class TelegramPollingService(
                     log.error("❌ [TelegramPolling] Unexpected error: ${e.message}", e)
                     delay(5000)
                 }
+            } finally {
+                isPolling = false
             }
-        } finally {
-            isPolling = false
         }
     }
 
     /**
-     * Обрабатывает полученные обновления
+     * Обрабатывает полученные обновления.
+     * Каждая команда обрабатывается асинхронно, не блокируя обработку других команд.
      */
     private suspend fun processUpdates(updates: List<Update>) {
         for (update in updates) {
@@ -98,7 +115,14 @@ class TelegramPollingService(
 
                     if (chatId != null && text != null) {
                         log.info("📱 [TelegramPolling] Received message from chat $chatId: $text")
-                        telegramCommandHandler.handleCommand(chatId, text)
+                        // Запускаем обработку команды асинхронно, не блокируя обработку других команд
+                        pollingScope.launch {
+                            try {
+                                telegramCommandHandler.handleCommand(chatId, text)
+                            } catch (e: Exception) {
+                                log.error("❌ [TelegramPolling] Error handling command: ${e.message}", e)
+                            }
+                        }
                     } else {
                         log.debug("📱 [TelegramPolling] Update ${update.updateId} has no message or text, skipping")
                     }
@@ -108,10 +132,13 @@ class TelegramPollingService(
             }
         }
     }
+
+    /**
+     * Корректное завершение работы при остановке приложения
+     */
+    @PreDestroy
+    fun shutdown() {
+        log.info("📱 [TelegramPolling] Shutting down polling service...")
+        pollingScope.coroutineContext.cancel()
+    }
 }
-
-
-
-
-
-

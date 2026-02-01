@@ -1,15 +1,19 @@
 package com.hhassistant.service
 
 import com.hhassistant.client.telegram.TelegramClient
+import com.hhassistant.config.AppConstants
 import com.hhassistant.domain.entity.VacancyStatus
-import kotlinx.coroutines.runBlocking
+import com.hhassistant.dto.ApiResponse
+import com.hhassistant.dto.VacancyListResponse
+import com.hhassistant.service.SkillStatistics
+import com.hhassistant.web.TopSkillsResponse
+import kotlinx.coroutines.reactor.awaitSingle
 import mu.KotlinLogging
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
-import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
-import org.springframework.web.client.RestTemplate
-import org.springframework.web.client.getForObject
-import org.springframework.web.client.postForObject
+import org.springframework.web.reactive.function.client.WebClient
+import org.springframework.web.reactive.function.client.bodyToMono
 
 /**
  * Обработчик команд Telegram бота.
@@ -18,7 +22,7 @@ import org.springframework.web.client.postForObject
 @Service
 class TelegramCommandHandler(
     private val telegramClient: TelegramClient,
-    private val restTemplate: RestTemplate,
+    @Qualifier("internalApiWebClient") private val webClient: WebClient,
     private val skillExtractionService: SkillExtractionService,
     private val vacancyService: VacancyService,
     private val exclusionRuleService: ExclusionRuleService,
@@ -27,58 +31,95 @@ class TelegramCommandHandler(
 ) {
     private val log = KotlinLogging.logger {}
 
+    companion object {
+        private const val TELEGRAM_MESSAGE_MAX_LENGTH = AppConstants.TextLimits.TELEGRAM_MESSAGE_MAX_LENGTH
+        private const val VACANCY_ID_PATTERN = "^[0-9]+$"
+        private const val DEFAULT_SKILLS_LIMIT = 20
+        private const val MAX_SKILLS_LIMIT = 100
+        private const val MAX_VACANCIES_TO_SHOW = 10
+        private const val MAX_ALL_VACANCIES_TO_SHOW = 50
+        private const val MAX_EXCLUSION_PARAM_LENGTH = 200
+    }
+
     /**
      * Обрабатывает команду или сообщение от пользователя.
      *
      * @param chatId ID чата пользователя
      * @param text Текст команды или сообщения
      */
-    fun handleCommand(chatId: String, text: String) {
+    suspend fun handleCommand(chatId: String, text: String) {
         log.info("📱 [TelegramCommand] Handling command from chat $chatId: $text")
 
-        // Команда /skills требует асинхронной обработки, обрабатываем отдельно
-        if (text.startsWith("/skills")) {
-            runBlocking {
-                try {
-                    val response = handleSkillsCommand(chatId, text)
-                    telegramClient.sendMessage(chatId, response)
-                } catch (e: Exception) {
-                    log.error("❌ [TelegramCommand] Failed to handle /skills command: ${e.message}", e)
-                    telegramClient.sendMessage(chatId, "❌ Ошибка при обработке команды /skills: ${e.message}")
+        try {
+            val response = when {
+                text == "/start" -> handleStartCommand(chatId)
+                text == "/status" -> handleStatusCommand(chatId)
+                text == "/stats" -> handleStatsCommand(chatId)
+                text == "/vacancies_all" -> handleAllVacanciesCommand(chatId)
+                text.startsWith("/vacancies ") -> handleVacanciesCommand(chatId, text)
+                text == "/vacancies" -> handleVacanciesCommand(chatId, text)
+                text.startsWith("/skills ") -> handleSkillsCommand(chatId, text)
+                text == "/skills" -> handleSkillsCommand(chatId, text)
+                text.startsWith("/exclusion_add_keyword ") -> handleAddExclusionKeyword(chatId, text)
+                text.startsWith("/exclusion_add_phrase ") -> handleAddExclusionPhrase(chatId, text)
+                text.startsWith("/exclusion_remove_keyword ") -> handleRemoveExclusionKeyword(chatId, text)
+                text.startsWith("/exclusion_remove_phrase ") -> handleRemoveExclusionPhrase(chatId, text)
+                text == "/exclusion_list" -> handleListExclusions(chatId)
+                text.startsWith("/sent_status ") -> handleSentStatusCommand(chatId, text)
+                text == "/sent_status" -> handleSentStatusCommand(chatId, text)
+                text == "/help" -> handleHelpCommand(chatId)
+                text.matches(Regex("/mark-applied-\\d+")) -> handleMarkAppliedCommand(chatId, text)
+                text.matches(Regex("/mark-not-interested-\\d+")) -> handleMarkNotInterestedCommand(chatId, text)
+                else -> {
+                    log.debug("[TelegramCommand] Unknown command: $text")
+                    "❓ Неизвестная команда. Используйте /help для списка доступных команд."
                 }
             }
-            return
-        }
 
-        val response = when {
-            text.startsWith("/start") -> handleStartCommand(chatId)
-            text.startsWith("/status") -> handleStatusCommand(chatId)
-            text.startsWith("/stats") -> handleStatsCommand(chatId)
-            text.startsWith("/vacancies_all") -> handleAllVacanciesCommand(chatId)
-            text.startsWith("/vacancies") -> handleVacanciesCommand(chatId, text)
-            text.startsWith("/exclusion_add_keyword") -> handleAddExclusionKeyword(chatId, text)
-            text.startsWith("/exclusion_add_phrase") -> handleAddExclusionPhrase(chatId, text)
-            text.startsWith("/exclusion_remove_keyword") -> handleRemoveExclusionKeyword(chatId, text)
-            text.startsWith("/exclusion_remove_phrase") -> handleRemoveExclusionPhrase(chatId, text)
-            text.startsWith("/exclusion_list") -> handleListExclusions(chatId)
-            text.startsWith("/sent_status") -> handleSentStatusCommand(chatId, text)
-            text.startsWith("/help") -> handleHelpCommand(chatId)
-            text.matches(Regex("/mark-applied-\\d+")) -> handleMarkAppliedCommand(chatId, text)
-            text.matches(Regex("/mark-not-interested-\\d+")) -> handleMarkNotInterestedCommand(chatId, text)
-            else -> {
-                log.debug("[TelegramCommand] Unknown command: $text")
-                "❓ Unknown command. Use /help for list of available commands."
+            sendMessageSafely(chatId, response)
+        } catch (e: Exception) {
+            log.error("❌ [TelegramCommand] Failed to handle command: ${e.message}", e)
+            sendMessageSafely(chatId, "❌ Ошибка при обработке команды: ${e.message ?: "Неизвестная ошибка"}")
+        }
+    }
+
+    /**
+     * Отправляет сообщение с проверкой длины и разбиением на части при необходимости
+     */
+    private suspend fun sendMessageSafely(chatId: String, message: String) {
+        if (message.length <= TELEGRAM_MESSAGE_MAX_LENGTH) {
+            telegramClient.sendMessage(chatId, message)
+        } else {
+            // Разбиваем сообщение на части
+            val parts = message.chunked(TELEGRAM_MESSAGE_MAX_LENGTH - 100) // Оставляем запас
+            parts.forEachIndexed { index, part ->
+                val partMessage = if (parts.size > 1) {
+                    "📄 Часть ${index + 1} из ${parts.size}\n\n$part"
+                } else {
+                    part
+                }
+                telegramClient.sendMessage(chatId, partMessage)
             }
         }
+    }
 
-        runBlocking {
-            try {
-                // Отправляем ответ в тот же чат, откуда пришла команда
-                telegramClient.sendMessage(chatId, response)
-            } catch (e: Exception) {
-                log.error("❌ [TelegramCommand] Failed to send response: ${e.message}", e)
-            }
-        }
+    /**
+     * Валидирует ID вакансии
+     */
+    private fun validateVacancyId(vacancyId: String): Boolean {
+        return vacancyId.matches(Regex(VACANCY_ID_PATTERN))
+    }
+
+    /**
+     * Экранирует HTML-специальные символы для безопасной вставки в HTML сообщения
+     */
+    private fun escapeHtml(text: String): String {
+        return text
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+            .replace("'", "&#39;")
     }
 
     /**
@@ -107,19 +148,13 @@ class TelegramCommandHandler(
      * Обрабатывает команду /status
      */
     private fun handleStatusCommand(chatId: String): String {
-        return try {
-            // Можно добавить вызов REST API для получения статуса
-            buildString {
-                appendLine("📊 <b>Статус системы:</b>")
-                appendLine()
-                appendLine("✅ Бот работает")
-                appendLine("✅ REST API доступен")
-                appendLine()
-                appendLine("💡 Используйте /vacancies для просмотра вакансий.")
-            }
-        } catch (e: Exception) {
-            log.error("Error getting status: ${e.message}", e)
-            "❌ Ошибка при получении статуса: ${e.message}"
+        return buildString {
+            appendLine("📊 <b>Статус системы:</b>")
+            appendLine()
+            appendLine("✅ Бот работает")
+            appendLine("✅ REST API доступен")
+            appendLine()
+            appendLine("💡 Используйте /vacancies для просмотра вакансий.")
         }
     }
 
@@ -129,31 +164,31 @@ class TelegramCommandHandler(
     private fun handleStatsCommand(chatId: String): String {
         return try {
             log.info("📊 [TelegramCommand] Processing /stats command for chat $chatId")
-            
+
             val averageTimeMs = analysisTimeService.getAverageTimeMs()
             val statistics = vacancyService.getVacancyStatistics(averageTimeMs)
-            
+
             buildString {
                 appendLine("📊 <b>Статистика по вакансиям:</b>")
                 appendLine()
                 appendLine("✅ <b>Обработано:</b> ${statistics.processedCount}")
                 appendLine("⏳ <b>В очереди на обработку:</b> ${statistics.queueCount}")
                 appendLine()
-                
+
                 if (statistics.averageAnalysisTimeMs != null) {
                     val avgSeconds = statistics.averageAnalysisTimeMs / 1000.0
                     appendLine("⏱️ <b>Среднее время обработки:</b> ${String.format("%.2f", avgSeconds)} сек")
                 } else {
                     appendLine("⏱️ <b>Среднее время обработки:</b> Нет данных (еще не было анализов)")
                 }
-                
+
                 appendLine()
-                
+
                 if (statistics.estimatedTimeMs != null) {
                     val estimatedSeconds = statistics.estimatedTimeMs / 1000.0
                     val estimatedMinutes = estimatedSeconds / 60.0
                     val estimatedHours = estimatedMinutes / 60.0
-                    
+
                     when {
                         estimatedHours >= 1.0 -> {
                             appendLine("🕐 <b>Приблизительное время обработки оставшихся:</b> ${String.format("%.1f", estimatedHours)} ч (${String.format("%.1f", estimatedMinutes)} мин)")
@@ -175,95 +210,95 @@ class TelegramCommandHandler(
             }
         } catch (e: Exception) {
             log.error("❌ [TelegramCommand] Error getting statistics: ${e.message}", e)
-            "❌ Ошибка при получении статистики: ${e.message}"
+            "❌ Ошибка при получении статистики: ${e.message ?: "Неизвестная ошибка"}"
         }
     }
 
     /**
      * Обрабатывает команду /vacancies
      */
-    private fun handleVacanciesCommand(chatId: String, text: String): String {
+    private suspend fun handleVacanciesCommand(chatId: String, text: String): String {
         return try {
             val url = "$apiBaseUrl/api/vacancies/unviewed"
-            val response = restTemplate.getForObject<Map<String, Any>>(url)
+            val response = webClient.get()
+                .uri(url)
+                .retrieve()
+                .onStatus({ it.isError }) { response ->
+                    response.bodyToMono<String>().map { body ->
+                        RuntimeException("API error: ${response.statusCode()} - $body")
+                    }
+                }
+                .bodyToMono<VacancyListResponse>()
+                .awaitSingle()
 
-            val count = response?.get("count") as? Int ?: 0
-            val vacancies = response?.get("vacancies") as? List<Map<String, Any>> ?: emptyList()
-
-            if (count == 0) {
+            if (response.count == 0) {
                 "📋 <b>Непросмотренные вакансии:</b>\n\nНет новых вакансий."
             } else {
                 buildString {
-                    appendLine("📋 <b>Непросмотренные вакансии ($count):</b>")
+                    appendLine("📋 <b>Непросмотренные вакансии (${response.count}):</b>")
                     appendLine()
-                    vacancies.take(10).forEachIndexed { index, vacancy ->
-                        val id = vacancy["id"] as? String ?: ""
-                        val name = vacancy["name"] as? String ?: "Без названия"
-                        val employer = vacancy["employer"] as? String ?: "Не указан"
-                        val salary = vacancy["salary"] as? String ?: "Не указана"
-                        val url = vacancy["url"] as? String ?: ""
-
-                        appendLine("${index + 1}. <b>$name</b>")
-                        appendLine("   💼 $employer")
-                        appendLine("   💰 $salary")
-                        appendLine("   🔗 <a href=\"$url\">Открыть на HH.ru</a>")
-                        appendLine("   ✅ /mark-applied-$id | ❌ /mark-not-interested-$id")
+                    response.vacancies.take(MAX_VACANCIES_TO_SHOW).forEachIndexed { index, vacancy ->
+                        appendLine("${index + 1}. <b>${escapeHtml(vacancy.name)}</b>")
+                        appendLine("   💼 ${escapeHtml(vacancy.employer)}")
+                        appendLine("   💰 ${escapeHtml(vacancy.salary)}")
+                        appendLine("   🔗 <a href=\"${vacancy.url}\">Открыть на HH.ru</a>")
+                        appendLine("   ✅ /mark-applied-${vacancy.id} | ❌ /mark-not-interested-${vacancy.id}")
                         appendLine()
                     }
-                    if (count > 10) {
-                        appendLine("... и еще ${count - 10} вакансий")
+                    if (response.count > MAX_VACANCIES_TO_SHOW) {
+                        appendLine("... и еще ${response.count - MAX_VACANCIES_TO_SHOW} вакансий")
                     }
                 }
             }
         } catch (e: Exception) {
             log.error("Error getting vacancies: ${e.message}", e)
-            "❌ Ошибка при получении вакансий: ${e.message}"
+            "❌ Ошибка при получении вакансий: ${e.message ?: "Неизвестная ошибка"}"
         }
     }
 
     /**
      * Обрабатывает команду /vacancies_all - показывает все вакансии (включая просмотренные)
      */
-    private fun handleAllVacanciesCommand(chatId: String): String {
+    private suspend fun handleAllVacanciesCommand(chatId: String): String {
         return try {
             val url = "$apiBaseUrl/api/vacancies/all"
-            val response = restTemplate.getForObject<Map<String, Any>>(url)
+            val response = webClient.get()
+                .uri(url)
+                .retrieve()
+                .onStatus({ it.isError }) { response ->
+                    response.bodyToMono<String>().map { body ->
+                        RuntimeException("API error: ${response.statusCode()} - $body")
+                    }
+                }
+                .bodyToMono<VacancyListResponse>()
+                .awaitSingle()
 
-            val count = response?.get("count") as? Int ?: 0
-            val vacancies = response?.get("vacancies") as? List<Map<String, Any>> ?: emptyList()
-
-            if (count == 0) {
+            if (response.count == 0) {
                 "📋 <b>Все вакансии:</b>\n\nВ базе данных пока нет вакансий."
             } else {
                 buildString {
-                    appendLine("📋 <b>Все вакансии ($count):</b>")
+                    appendLine("📋 <b>Все вакансии (${response.count}):</b>")
                     appendLine()
-                    
-                    vacancies.forEachIndexed { index, vacancy ->
-                        val id = vacancy["id"] as? String ?: ""
-                        val name = vacancy["name"] as? String ?: "Без названия"
-                        val employer = vacancy["employer"] as? String ?: "Не указан"
-                        val salary = vacancy["salary"] as? String ?: "Не указана"
-                        val url = vacancy["url"] as? String ?: ""
-                        val isViewed = vacancy["isViewed"] as? Boolean ?: false
-                        val viewed = if (isViewed) "✅ Просмотрена" else "🆕 Не просмотрена"
-                        
-                        appendLine("${index + 1}. <b>$name</b>")
-                        appendLine("   💼 $employer")
-                        appendLine("   💰 $salary")
-                        appendLine("   🔗 <a href=\"$url\">Открыть на HH.ru</a>")
+
+                    response.vacancies.take(MAX_ALL_VACANCIES_TO_SHOW).forEachIndexed { index, vacancy ->
+                        val viewed = if (vacancy.isViewed == true) "✅ Просмотрена" else "🆕 Не просмотрена"
+
+                        appendLine("${index + 1}. <b>${escapeHtml(vacancy.name)}</b>")
+                        appendLine("   💼 ${escapeHtml(vacancy.employer)}")
+                        appendLine("   💰 ${escapeHtml(vacancy.salary)}")
+                        appendLine("   🔗 <a href=\"${vacancy.url}\">Открыть на HH.ru</a>")
                         appendLine("   $viewed")
                         appendLine()
                     }
-                    
-                    if (count > 50) {
-                        appendLine("... показано 50 из $count вакансий")
+
+                    if (response.count > MAX_ALL_VACANCIES_TO_SHOW) {
+                        appendLine("... показано $MAX_ALL_VACANCIES_TO_SHOW из ${response.count} вакансий")
                     }
                 }
             }
         } catch (e: Exception) {
             log.error("Error getting all vacancies: ${e.message}", e)
-            "❌ Ошибка при получении всех вакансий: ${e.message}"
+            "❌ Ошибка при получении всех вакансий: ${e.message ?: "Неизвестная ошибка"}"
         }
     }
 
@@ -275,9 +310,9 @@ class TelegramCommandHandler(
             // Парсим параметр limit из команды (например, /skills 10)
             val parts = text.split(" ", limit = 2)
             val limit = if (parts.size > 1) {
-                parts[1].toIntOrNull() ?: 20
+                parts[1].toIntOrNull()?.takeIf { it in 1..MAX_SKILLS_LIMIT } ?: DEFAULT_SKILLS_LIMIT
             } else {
-                20
+                DEFAULT_SKILLS_LIMIT
             }
 
             // Шаг 1: Проверяем, есть ли вакансии без навыков
@@ -287,48 +322,50 @@ class TelegramCommandHandler(
             if (vacanciesWithoutSkills.isNotEmpty()) {
                 // Есть вакансии без навыков - извлекаем их
                 log.info("📊 [TelegramCommand] Found ${vacanciesWithoutSkills.size} vacancies without skills, extracting...")
-                
+
                 // Отправляем сообщение о начале обработки
                 telegramClient.sendMessage(
                     chatId,
                     "⏳ <b>Извлечение навыков из вакансий...</b>\n\n" +
-                    "Найдено ${vacanciesWithoutSkills.size} вакансий без навыков.\n" +
-                    "Обрабатываю их, пожалуйста, подождите..."
+                        "Найдено ${vacanciesWithoutSkills.size} вакансий без навыков.\n" +
+                        "Обрабатываю их, пожалуйста, подождите...",
                 )
 
                 // Извлекаем навыки из всех вакансий без навыков
                 val processedCount = skillExtractionService.extractSkillsForAllVacancies(vacanciesWithoutSkills)
-                
+
                 log.info("✅ [TelegramCommand] Extracted skills from $processedCount vacancies")
             }
 
             // Шаг 2: Получаем статистику навыков
             val url = "$apiBaseUrl/api/skills/top?limit=$limit"
-            val response = restTemplate.getForObject<Map<String, Any>>(url)
+            val response = webClient.get()
+                .uri(url)
+                .retrieve()
+                .onStatus({ it.isError }) { response ->
+                    response.bodyToMono<String>().map { body ->
+                        RuntimeException("API error: ${response.statusCode()} - $body")
+                    }
+                }
+                .bodyToMono<TopSkillsResponse>()
+                .awaitSingle()
 
-            val skills = response?.get("skills") as? List<Map<String, Any>> ?: emptyList()
-            val totalVacancies = response?.get("totalVacanciesAnalyzed") as? Int ?: 0
-
-            if (skills.isEmpty()) {
+            if (response.skills.isEmpty()) {
                 "📊 <b>Топ навыков:</b>\n\nНет данных. Навыки будут извлекаться при анализе вакансий."
             } else {
                 buildString {
                     appendLine("📊 <b>Топ навыков по популярности:</b>")
                     appendLine()
-                    skills.forEachIndexed { index, skill ->
-                        val skillName = skill["skillName"] as? String ?: "Неизвестно"
-                        val frequency = skill["frequencyPercentage"] as? Double ?: 0.0
-                        val occurrenceCount = skill["occurrenceCount"] as? Int ?: 0
-                        
-                        appendLine("${index + 1}. <b>$skillName</b> - ${String.format("%.1f", frequency)}% ($occurrenceCount вакансий)")
+                    response.skills.forEachIndexed { index, skill: SkillStatistics ->
+                        appendLine("${index + 1}. <b>${escapeHtml(skill.skillName)}</b> - ${String.format("%.1f", skill.frequencyPercentage)}% (${skill.occurrenceCount} вакансий)")
                     }
                     appendLine()
-                    appendLine("Всего проанализировано: <b>$totalVacancies</b> вакансий")
+                    appendLine("Всего проанализировано: <b>${response.totalVacanciesAnalyzed}</b> вакансий")
                 }
             }
         } catch (e: Exception) {
             log.error("Error getting skills: ${e.message}", e)
-            "❌ Ошибка при получении статистики навыков: ${e.message}"
+            "❌ Ошибка при получении статистики навыков: ${e.message ?: "Неизвестная ошибка"}"
         }
     }
 
@@ -354,22 +391,22 @@ class TelegramCommandHandler(
             appendLine("<b>/skills [N]</b> - Показать топ навыков по популярности")
             appendLine("   Пример: /skills 10 (показать топ-10 навыков)")
             appendLine()
-            appendLine("<b>/exclusion_list</b> - List all exclusion rules (keywords and phrases)")
+            appendLine("<b>/exclusion_list</b> - Показать все правила исключения (ключевые слова и фразы)")
             appendLine()
-            appendLine("<b>/exclusion_add_keyword &lt;word&gt;</b> - Add exclusion keyword")
+            appendLine("<b>/exclusion_add_keyword &lt;слово&gt;</b> - Добавить ключевое слово для исключения")
             appendLine("   Пример: /exclusion_add_keyword remote")
             appendLine()
-            appendLine("<b>/exclusion_add_phrase &lt;phrase&gt;</b> - Add exclusion phrase")
+            appendLine("<b>/exclusion_add_phrase &lt;фраза&gt;</b> - Добавить фразу для исключения")
             appendLine("   Пример: /exclusion_add_phrase без опыта работы")
             appendLine()
-            appendLine("<b>/exclusion_remove_keyword &lt;word&gt;</b> - Remove exclusion keyword")
+            appendLine("<b>/exclusion_remove_keyword &lt;слово&gt;</b> - Удалить ключевое слово из исключений")
             appendLine("   Пример: /exclusion_remove_keyword remote")
             appendLine()
-            appendLine("<b>/exclusion_remove_phrase &lt;phrase&gt;</b> - Remove exclusion phrase")
+            appendLine("<b>/exclusion_remove_phrase &lt;фраза&gt;</b> - Удалить фразу из исключений")
             appendLine("   Пример: /exclusion_remove_phrase без опыта работы")
             appendLine()
-            appendLine("<b>/sent_status [vacancy_id]</b> - Check if vacancy was sent to Telegram")
-            appendLine("   Пример: /sent_status (summary) или /sent_status 12345678 (specific vacancy)")
+            appendLine("<b>/sent_status [vacancy_id]</b> - Проверить, была ли вакансия отправлена в Telegram")
+            appendLine("   Пример: /sent_status (сводка) или /sent_status 12345678 (конкретная вакансия)")
             appendLine()
             appendLine("<b>/mark-applied-{id}</b> - Отметить вакансию как \"откликнулся\"")
             appendLine("   Пример: /mark-applied-12345678")
@@ -384,216 +421,244 @@ class TelegramCommandHandler(
     /**
      * Обрабатывает команду /mark-applied-{id}
      */
-    private fun handleMarkAppliedCommand(chatId: String, text: String): String {
+    private suspend fun handleMarkAppliedCommand(chatId: String, text: String): String {
         val vacancyId = text.removePrefix("/mark-applied-")
+        if (!validateVacancyId(vacancyId)) {
+            return "❌ Неверный формат ID вакансии"
+        }
+
         return try {
             val url = "$apiBaseUrl/api/vacancies/$vacancyId/mark-applied"
-            val response = restTemplate.postForObject<Map<String, Any>>(url, null)
+            val response = webClient.post()
+                .uri(url)
+                .retrieve()
+                .onStatus({ it.isError }) { response ->
+                    response.bodyToMono<String>().map { body ->
+                        RuntimeException("API error: ${response.statusCode()} - $body")
+                    }
+                }
+                .bodyToMono<ApiResponse>()
+                .awaitSingle()
 
-            if (response?.get("success") == true) {
+            if (response.success) {
                 "✅ Вакансия отмечена как \"откликнулся\""
             } else {
-                val message = response?.get("message") as? String ?: "Ошибка"
+                val message = response.message ?: "Ошибка"
                 "❌ $message"
             }
         } catch (e: Exception) {
             log.error("Error marking vacancy as applied: ${e.message}", e)
-            "❌ Ошибка при обновлении статуса: ${e.message}"
+            "❌ Ошибка при обновлении статуса: ${e.message ?: "Неизвестная ошибка"}"
         }
     }
 
     /**
      * Обрабатывает команду /mark-not-interested-{id}
      */
-    private fun handleMarkNotInterestedCommand(chatId: String, text: String): String {
+    private suspend fun handleMarkNotInterestedCommand(chatId: String, text: String): String {
         val vacancyId = text.removePrefix("/mark-not-interested-")
+        if (!validateVacancyId(vacancyId)) {
+            return "❌ Неверный формат ID вакансии"
+        }
+
         return try {
             val url = "$apiBaseUrl/api/vacancies/$vacancyId/mark-not-interested"
-            val response = restTemplate.postForObject<Map<String, Any>>(url, null)
+            val response = webClient.post()
+                .uri(url)
+                .retrieve()
+                .onStatus({ it.isError }) { response ->
+                    response.bodyToMono<String>().map { body ->
+                        RuntimeException("API error: ${response.statusCode()} - $body")
+                    }
+                }
+                .bodyToMono<ApiResponse>()
+                .awaitSingle()
 
-            if (response?.get("success") == true) {
+            if (response.success) {
                 "✅ Вакансия отмечена как \"неинтересная\""
             } else {
-                val message = response?.get("message") as? String ?: "Ошибка"
+                val message = response.message ?: "Ошибка"
                 "❌ $message"
             }
         } catch (e: Exception) {
             log.error("Error marking vacancy as not interested: ${e.message}", e)
-            "❌ Ошибка при обновлении статуса: ${e.message}"
+            "❌ Ошибка при обновлении статуса: ${e.message ?: "Неизвестная ошибка"}"
         }
     }
 
     /**
-     * Handles /exclusion_add_keyword <word> command
+     * Обрабатывает команды добавления/удаления exclusion правил
+     */
+    private fun handleExclusionCommand(
+        chatId: String,
+        text: String,
+        commandPrefix: String,
+        isAdd: Boolean,
+        isKeyword: Boolean,
+    ): String {
+        val param = text.removePrefix(commandPrefix).trim()
+        if (param.isEmpty()) {
+            val type = if (isKeyword) "слово" else "фраза"
+            val example = if (isKeyword) "remote" else "без опыта работы"
+            return "❌ Использование: $commandPrefix &lt;$type&gt;\nПример: $commandPrefix $example"
+        }
+        if (param.length > MAX_EXCLUSION_PARAM_LENGTH) {
+            return "❌ Слишком длинное значение (максимум $MAX_EXCLUSION_PARAM_LENGTH символов)"
+        }
+
+        return try {
+            if (isAdd) {
+                if (isKeyword) {
+                    exclusionRuleService.addKeyword(param)
+                    "✅ Добавлено ключевое слово для исключения: '$param'\nКэш обновлен."
+                } else {
+                    exclusionRuleService.addPhrase(param)
+                    "✅ Добавлена фраза для исключения: '$param'\nКэш обновлен."
+                }
+            } else {
+                val removed = if (isKeyword) {
+                    exclusionRuleService.removeKeyword(param)
+                } else {
+                    exclusionRuleService.removePhrase(param)
+                }
+                if (removed) {
+                    val type = if (isKeyword) "ключевое слово" else "фраза"
+                    "✅ Удалено $type из исключений: '$param'\nКэш обновлен."
+                } else {
+                    val type = if (isKeyword) "ключевое слово" else "фраза"
+                    "⚠️ $type '$param' не найдено"
+                }
+            }
+        } catch (e: Exception) {
+            val action = if (isAdd) "добавлении" else "удалении"
+            val type = if (isKeyword) "ключевого слова" else "фразы"
+            log.error("[TelegramCommand] Error $action exclusion $type: ${e.message}", e)
+            "❌ Ошибка при $action $type: ${e.message ?: "Неизвестная ошибка"}"
+        }
+    }
+
+    /**
+     * Обрабатывает команду /exclusion_add_keyword <word>
      */
     private fun handleAddExclusionKeyword(chatId: String, text: String): String {
-        val keyword = text.removePrefix("/exclusion_add_keyword").trim()
-        if (keyword.isEmpty()) {
-            return "❌ Usage: /exclusion_add_keyword <word>\nExample: /exclusion_add_keyword remote"
-        }
-
-        return try {
-            exclusionRuleService.addKeyword(keyword)
-            "✅ Added exclusion keyword: '$keyword'\nCache invalidated."
-        } catch (e: Exception) {
-            log.error("[TelegramCommand] Error adding exclusion keyword: ${e.message}", e)
-            "❌ Error adding keyword: ${e.message}"
-        }
+        return handleExclusionCommand(chatId, text, "/exclusion_add_keyword ", isAdd = true, isKeyword = true)
     }
 
     /**
-     * Handles /exclusion_add_phrase <phrase> command
+     * Обрабатывает команду /exclusion_add_phrase <phrase>
      */
     private fun handleAddExclusionPhrase(chatId: String, text: String): String {
-        val phrase = text.removePrefix("/exclusion_add_phrase").trim()
-        if (phrase.isEmpty()) {
-            return "❌ Usage: /exclusion_add_phrase <phrase>\nExample: /exclusion_add_phrase без опыта работы"
-        }
-
-        return try {
-            exclusionRuleService.addPhrase(phrase)
-            "✅ Added exclusion phrase: '$phrase'\nCache invalidated."
-        } catch (e: Exception) {
-            log.error("[TelegramCommand] Error adding exclusion phrase: ${e.message}", e)
-            "❌ Error adding phrase: ${e.message}"
-        }
+        return handleExclusionCommand(chatId, text, "/exclusion_add_phrase ", isAdd = true, isKeyword = false)
     }
 
     /**
-     * Handles /exclusion_remove_keyword <word> command
+     * Обрабатывает команду /exclusion_remove_keyword <word>
      */
     private fun handleRemoveExclusionKeyword(chatId: String, text: String): String {
-        val keyword = text.removePrefix("/exclusion_remove_keyword").trim()
-        if (keyword.isEmpty()) {
-            return "❌ Usage: /exclusion_remove_keyword <word>\nExample: /exclusion_remove_keyword remote"
-        }
-
-        return try {
-            val removed = exclusionRuleService.removeKeyword(keyword)
-            if (removed) {
-                "✅ Removed exclusion keyword: '$keyword'\nCache invalidated."
-            } else {
-                "⚠️ Keyword '$keyword' not found"
-            }
-        } catch (e: Exception) {
-            log.error("[TelegramCommand] Error removing exclusion keyword: ${e.message}", e)
-            "❌ Error removing keyword: ${e.message}"
-        }
+        return handleExclusionCommand(chatId, text, "/exclusion_remove_keyword ", isAdd = false, isKeyword = true)
     }
 
     /**
-     * Handles /exclusion_remove_phrase <phrase> command
+     * Обрабатывает команду /exclusion_remove_phrase <phrase>
      */
     private fun handleRemoveExclusionPhrase(chatId: String, text: String): String {
-        val phrase = text.removePrefix("/exclusion_remove_phrase").trim()
-        if (phrase.isEmpty()) {
-            return "❌ Usage: /exclusion_remove_phrase <phrase>\nExample: /exclusion_remove_phrase без опыта работы"
-        }
-
-        return try {
-            val removed = exclusionRuleService.removePhrase(phrase)
-            if (removed) {
-                "✅ Removed exclusion phrase: '$phrase'\nCache invalidated."
-            } else {
-                "⚠️ Phrase '$phrase' not found"
-            }
-        } catch (e: Exception) {
-            log.error("[TelegramCommand] Error removing exclusion phrase: ${e.message}", e)
-            "❌ Error removing phrase: ${e.message}"
-        }
+        return handleExclusionCommand(chatId, text, "/exclusion_remove_phrase ", isAdd = false, isKeyword = false)
     }
 
     /**
-     * Handles /exclusion_list command
+     * Обрабатывает команду /exclusion_list
      */
     private fun handleListExclusions(chatId: String): String {
         return try {
             val rules = exclusionRuleService.listAll()
-            val keywords = rules["keywords"] ?: emptyList()
-            val phrases = rules["phrases"] ?: emptyList()
+            val keywords = rules["keywords"] ?: emptyList<String>()
+            val phrases = rules["phrases"] ?: emptyList<String>()
 
             buildString {
-                appendLine("📋 <b>Exclusion Rules</b>")
+                appendLine("📋 <b>Правила исключения</b>")
                 appendLine()
-                appendLine("<b>Keywords (${keywords.size}):</b>")
+                appendLine("<b>Ключевые слова (${keywords.size}):</b>")
                 if (keywords.isEmpty()) {
-                    appendLine("   (none)")
+                    appendLine("   (нет)")
                 } else {
                     keywords.forEach { appendLine("   • $it") }
                 }
                 appendLine()
-                appendLine("<b>Phrases (${phrases.size}):</b>")
+                appendLine("<b>Фразы (${phrases.size}):</b>")
                 if (phrases.isEmpty()) {
-                    appendLine("   (none)")
+                    appendLine("   (нет)")
                 } else {
                     phrases.forEach { appendLine("   • $it") }
                 }
             }
         } catch (e: Exception) {
             log.error("[TelegramCommand] Error listing exclusions: ${e.message}", e)
-            "❌ Error listing exclusions: ${e.message}"
+            "❌ Ошибка при получении списка исключений: ${e.message ?: "Неизвестная ошибка"}"
         }
     }
 
     /**
-     * Handles /sent_status [vacancy_id] command
-     * Shows status of vacancy sending to Telegram
+     * Обрабатывает команду /sent_status [vacancy_id]
+     * Показывает статус отправки вакансии в Telegram
      */
-    private fun handleSentStatusCommand(chatId: String, text: String): String {
+    private suspend fun handleSentStatusCommand(chatId: String, text: String): String {
         val parts = text.split(" ", limit = 2)
         if (parts.size < 2 || parts[1].isBlank()) {
             return try {
-                // If no ID provided, show summary
+                // Если ID не указан, показываем сводку
                 val sentCount = vacancyService.getSentToTelegramVacancies().size
                 val notSentCount = vacancyService.getNotSentToTelegramVacancies().size
-                
+
                 buildString {
-                    appendLine("📊 <b>Telegram Sending Status</b>")
+                    appendLine("📊 <b>Статус отправки в Telegram</b>")
                     appendLine()
-                    appendLine("✅ Sent to Telegram: $sentCount")
-                    appendLine("⏳ Not sent yet: $notSentCount")
+                    appendLine("✅ Отправлено в Telegram: $sentCount")
+                    appendLine("⏳ Еще не отправлено: $notSentCount")
                     appendLine()
-                    appendLine("Usage: /sent_status &lt;vacancy_id&gt;")
-                    appendLine("Example: /sent_status 12345678")
+                    appendLine("Использование: /sent_status &lt;vacancy_id&gt;")
+                    appendLine("Пример: /sent_status 12345678")
                 }
             } catch (e: Exception) {
                 log.error("[TelegramCommand] Error getting sent status summary: ${e.message}", e)
-                "❌ Error getting status: ${e.message}"
+                "❌ Ошибка при получении статуса: ${e.message ?: "Неизвестная ошибка"}"
             }
         }
 
         val vacancyId = parts[1].trim()
+        if (!validateVacancyId(vacancyId)) {
+            return "❌ Неверный формат ID вакансии"
+        }
+
         return try {
             val wasSent = vacancyService.wasSentToTelegram(vacancyId)
             val vacancy = vacancyService.getVacancyById(vacancyId)
-            
+
             if (vacancy == null) {
-                "❌ Vacancy with ID '$vacancyId' not found"
+                "❌ Вакансия с ID '$vacancyId' не найдена"
             } else {
                 buildString {
-                    appendLine("📋 <b>Vacancy Sending Status</b>")
+                    appendLine("📋 <b>Статус отправки вакансии</b>")
                     appendLine()
                     appendLine("<b>ID:</b> ${vacancy.id}")
-                    appendLine("<b>Name:</b> ${vacancy.name}")
-                    appendLine("<b>Status:</b> ${vacancy.status.name}")
+                    appendLine("<b>Название:</b> ${escapeHtml(vacancy.name)}")
+                    appendLine("<b>Статус:</b> ${vacancy.status.name}")
                     appendLine()
                     if (wasSent) {
-                        appendLine("✅ <b>Sent to Telegram:</b> Yes")
+                        appendLine("✅ <b>Отправлено в Telegram:</b> Да")
                         vacancy.sentToTelegramAt?.let {
-                            appendLine("📅 <b>Sent at:</b> $it")
+                            appendLine("📅 <b>Отправлено:</b> $it")
                         }
                     } else {
-                        appendLine("❌ <b>Sent to Telegram:</b> No")
+                        appendLine("❌ <b>Отправлено в Telegram:</b> Нет")
                         if (vacancy.status == VacancyStatus.ANALYZED) {
-                            appendLine("ℹ️ Vacancy is analyzed but not sent yet")
+                            appendLine("ℹ️ Вакансия проанализирована, но еще не отправлена")
                         }
                     }
                 }
             }
         } catch (e: Exception) {
             log.error("[TelegramCommand] Error checking sent status: ${e.message}", e)
-            "❌ Error checking status: ${e.message}"
+            "❌ Ошибка при проверке статуса: ${e.message ?: "Неизвестная ошибка"}"
         }
     }
 }
-
