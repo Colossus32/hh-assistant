@@ -36,11 +36,20 @@ class VacancyAnalysisService(
     private val metricsService: com.hhassistant.metrics.MetricsService,
     private val skillExtractionService: SkillExtractionService,
     private val hhVacancyClient: HHVacancyClient,
+    private val analysisTimeService: AnalysisTimeService,
     @Qualifier("ollamaCircuitBreaker") private val ollamaCircuitBreaker: CircuitBreaker,
     @Qualifier("ollamaRetry") private val ollamaRetry: Retry,
     @Value("\${app.analysis.min-relevance-score:0.6}") private val minRelevanceScore: Double,
 ) {
     private val log = KotlinLogging.logger {}
+
+    /**
+     * Получает текущее состояние Circuit Breaker для Ollama
+     * @return Состояние Circuit Breaker: "CLOSED", "OPEN", "HALF_OPEN"
+     */
+    fun getCircuitBreakerState(): String {
+        return ollamaCircuitBreaker.state.name
+    }
 
     /**
      * Анализирует вакансию на релевантность для кандидата с использованием LLM.
@@ -54,6 +63,15 @@ class VacancyAnalysisService(
         repository.findByVacancyId(vacancy.id)?.let {
             log.debug("Vacancy ${vacancy.id} already analyzed, returning existing analysis")
             return it
+        }
+
+        // Проверяем состояние Circuit Breaker перед анализом
+        val circuitBreakerState = ollamaCircuitBreaker.state
+        if (circuitBreakerState.name == "OPEN") {
+            log.warn("⚠️ [Ollama] Circuit Breaker is OPEN, skipping analysis for vacancy ${vacancy.id}")
+            throw OllamaException.ConnectionException(
+                "Ollama service is temporarily unavailable (Circuit Breaker is OPEN). Please try again later.",
+            )
         }
 
         log.info("🤖 [Ollama] Starting analysis for vacancy: ${vacancy.id} - '${vacancy.name}' (${vacancy.employer})")
@@ -130,6 +148,8 @@ class VacancyAnalysisService(
         }
         val analysisDuration = System.currentTimeMillis() - analysisStartTime
         metricsService.recordVacancyAnalysisTime(analysisDuration)
+        // Обновляем среднее время обработки
+        analysisTimeService.updateAverageTime(analysisDuration)
         log.info("✅ [Ollama] Received analysis response from Ollama (took ${analysisDuration}ms, response length: ${analysisResponse.length} chars)")
 
         // Парсим ответ
