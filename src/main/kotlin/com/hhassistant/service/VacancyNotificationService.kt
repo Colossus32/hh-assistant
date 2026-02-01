@@ -4,7 +4,6 @@ import com.hhassistant.client.telegram.TelegramClient
 import com.hhassistant.config.AppConstants
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
-import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.event.VacancyReadyForTelegramEvent
 import com.hhassistant.exception.TelegramException
 import kotlinx.coroutines.runBlocking
@@ -43,7 +42,7 @@ class VacancyNotificationService(
             val sentSuccessfully = runBlocking {
                 sendVacancyToTelegram(vacancy, analysis)
             }
-            
+
             // Update status and sent timestamp only if message was actually sent
             if (sentSuccessfully) {
                 vacancyStatusService.updateVacancyStatus(vacancy.withSentToTelegramAt(sentAt))
@@ -69,7 +68,7 @@ class VacancyNotificationService(
 
     /**
      * Sends vacancy to Telegram
-     * 
+     *
      * @return true if message was successfully sent, false if Telegram is disabled or not configured
      * @throws TelegramException if sending failed (rate limit, invalid chat, etc.)
      */
@@ -110,7 +109,6 @@ class VacancyNotificationService(
             }
         }
     }
-
 
     /**
      * Формирует сообщение для Telegram
@@ -167,6 +165,11 @@ class VacancyNotificationService(
             sb.appendLine(escapeHtml(truncatedLetter))
             sb.appendLine()
         }
+
+        // Добавляем команду для пометки вакансии как неинтересной
+        sb.appendLine("━━━━━━━━━━━━━━━━━━━━")
+        sb.appendLine("❌ <code>/mark-not-interested-${vacancy.id}</code>")
+        sb.appendLine("   Отметить как неинтересную")
 
         return sb.toString()
     }

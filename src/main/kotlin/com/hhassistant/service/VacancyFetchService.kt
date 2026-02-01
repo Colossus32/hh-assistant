@@ -191,17 +191,17 @@ class VacancyFetchService(
         val filteredDtos = vacancyDtos.filter { vacancyDto ->
             val experienceId = vacancyDto.experience?.id?.lowercase()
             val experienceName = vacancyDto.experience?.name?.lowercase() ?: ""
-            
+
             // Exclude "moreThan6" experience level
-            val isMoreThan6Years = experienceId == "morethan6" || 
-                                   experienceName.contains("более 6") || 
-                                   experienceName.contains("свыше 6") ||
-                                   experienceName.contains("more than 6")
-            
+            val isMoreThan6Years = experienceId == "morethan6" ||
+                experienceName.contains("более 6") ||
+                experienceName.contains("свыше 6") ||
+                experienceName.contains("more than 6")
+
             if (isMoreThan6Years) {
                 log.trace("[VacancyFetch] Excluding vacancy ${vacancyDto.id} - experience: ${vacancyDto.experience?.name} (more than 6 years)")
             }
-            
+
             !isMoreThan6Years
         }
 

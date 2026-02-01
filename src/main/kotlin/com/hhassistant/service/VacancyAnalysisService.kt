@@ -218,7 +218,7 @@ class VacancyAnalysisService(
                 log.debug("⚠️ [SkillExtraction] Could not fetch key_skills from API for vacancy ${vacancy.id}: ${e.message}")
                 null
             }
-            
+
             // Извлекаем и сохраняем навыки
             skillExtractionService.extractAndSaveSkills(vacancy, keySkills)
         } catch (e: Exception) {
@@ -329,7 +329,7 @@ class VacancyAnalysisService(
         // Ищем все markdown блоки с JSON
         val markdownJsonPattern = Regex("```(?:json)?\\s*\\n(.*?)\\n```", RegexOption.DOT_MATCHES_ALL)
         val matches = markdownJsonPattern.findAll(response)
-        
+
         // Если нашли markdown блоки, берем первый
         matches.firstOrNull()?.let {
             val extracted = it.groupValues[1].trim()
@@ -472,7 +472,7 @@ class VacancyAnalysisService(
                 val newline = matchResult.groupValues[3]
                 val valueAfter = matchResult.groupValues[4]
                 val quote = matchResult.groupValues[5]
-                
+
                 // Заменяем переносы строк на пробелы
                 val escapedNewline = when (newline) {
                     "\n" -> "\\n"
@@ -480,7 +480,7 @@ class VacancyAnalysisService(
                     "\t" -> "\\t"
                     else -> newline
                 }
-                
+
                 "$key$valueBefore$escapedNewline$valueAfter$quote"
             }
             .replace(Regex("""("reasoning"\s*:\s*"[^"]*?)(\n|\r|\t)""")) { matchResult ->

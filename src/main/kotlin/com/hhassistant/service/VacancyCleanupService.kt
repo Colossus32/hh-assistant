@@ -1,7 +1,6 @@
 package com.hhassistant.service
 
 import com.hhassistant.client.hh.HHVacancyClient
-import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.exception.HHAPIException
 import com.hhassistant.repository.VacancyAnalysisRepository
 import com.hhassistant.repository.VacancyRepository
@@ -15,7 +14,7 @@ import org.springframework.transaction.annotation.Transactional
 
 /**
  * Сервис для очистки несуществующих вакансий из базы данных.
- * 
+ *
  * Проверяет вакансии на существование в HH.ru API и удаляет те, которые больше не существуют (404).
  */
 @Service
@@ -41,7 +40,7 @@ class VacancyCleanupService(
         }
 
         log.info("🧹 [VacancyCleanup] Starting cleanup of non-existent vacancies...")
-        
+
         runBlocking {
             val allVacancies = vacancyRepository.findAll()
             log.info("📊 [VacancyCleanup] Checking ${allVacancies.size} vacancies for existence...")
@@ -55,7 +54,7 @@ class VacancyCleanupService(
                 batch.forEach { vacancy ->
                     try {
                         checkedCount++
-                        
+
                         // Проверяем существование вакансии через API
                         try {
                             hhVacancyClient.getVacancyDetails(vacancy.id)
@@ -81,7 +80,7 @@ class VacancyCleanupService(
                         errorCount++
                     }
                 }
-                
+
                 // Небольшая задержка между батчами для избежания rate limit
                 if (batch.size == batchSize) {
                     kotlinx.coroutines.delay(1000) // 1 секунда между батчами
@@ -94,7 +93,7 @@ class VacancyCleanupService(
 
     /**
      * Проверяет и удаляет несуществующую вакансию.
-     * 
+     *
      * @param vacancyId ID вакансии для проверки
      * @return true если вакансия была удалена, false если существует или произошла ошибка
      */
@@ -124,16 +123,16 @@ class VacancyCleanupService(
             // Удаляем связи вакансия-навык
             vacancySkillRepository.deleteByVacancyId(vacancyId)
             log.debug("🗑️ [VacancyCleanup] Deleted VacancySkill links for vacancy $vacancyId")
-            
+
             // Удаляем анализы вакансии
             vacancyAnalysisRepository.findByVacancyId(vacancyId)?.let { analysis ->
                 vacancyAnalysisRepository.delete(analysis)
                 log.debug("🗑️ [VacancyCleanup] Deleted VacancyAnalysis for vacancy $vacancyId")
             }
-            
+
             // Удаляем саму вакансию
             vacancyRepository.deleteById(vacancyId)
-            
+
             log.info("✅ [VacancyCleanup] Deleted vacancy $vacancyId and all related data")
         } catch (e: Exception) {
             log.error("❌ [VacancyCleanup] Failed to delete vacancy $vacancyId: ${e.message}", e)
@@ -141,8 +140,3 @@ class VacancyCleanupService(
         }
     }
 }
-
-
-
-
-

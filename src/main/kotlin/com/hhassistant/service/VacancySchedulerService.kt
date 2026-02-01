@@ -6,10 +6,16 @@ import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.exception.OllamaException
 import com.hhassistant.exception.VacancyProcessingException
+import jakarta.annotation.PreDestroy
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import mu.KotlinLogging
@@ -34,6 +40,13 @@ class VacancySchedulerService(
     private val log = KotlinLogging.logger {}
     private val analysisSemaphore = Semaphore(maxConcurrentRequests)
 
+    // CoroutineScope для асинхронной обработки анализа вакансий
+    private val schedulerScope = CoroutineScope(
+        Dispatchers.Default + SupervisorJob() + CoroutineExceptionHandler { _, exception ->
+            log.error("❌ [Scheduler] Unhandled exception in scheduler coroutine: ${exception.message}", exception)
+        }
+    )
+
     /**
      * Запускает проверку вакансий сразу после старта приложения
      */
@@ -42,7 +55,8 @@ class VacancySchedulerService(
         checkResumeAndNotify()
         log.info("[Scheduler] Application ready, preloading resume and sending startup notification...")
 
-        runBlocking {
+        // Запускаем предзагрузку резюме асинхронно
+        schedulerScope.launch {
             try {
                 resumeService.preloadResume()
             } catch (e: Exception) {
@@ -61,8 +75,58 @@ class VacancySchedulerService(
     }
 
     /**
+     * Периодически проверяет и восстанавливает вакансии со статусом SKIPPED,
+     * которые были пропущены из-за Circuit Breaker OPEN.
+     * Запускается каждые 5 минут, когда Circuit Breaker закрыт.
+     * Обработка выполняется асинхронно, не блокируя поток.
+     */
+    @Scheduled(cron = "\${app.schedule.skipped-retry:0 */5 * * * *}")
+    fun retrySkippedVacancies() {
+        if (dryRun) {
+            log.debug("[Scheduler] Dry-run mode enabled, skipping skipped vacancies retry")
+            return
+        }
+
+        val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
+        if (circuitBreakerState == "OPEN") {
+            log.debug("[Scheduler] Circuit Breaker is still OPEN, skipping retry of skipped vacancies")
+            return
+        }
+
+        log.info("[Scheduler] Circuit Breaker is $circuitBreakerState, checking for skipped vacancies to retry...")
+
+        // Запускаем обработку асинхронно, не блокируя поток
+        schedulerScope.launch {
+            try {
+                val skippedVacancies = vacancyService.getSkippedVacanciesForRetry(limit = 10)
+                if (skippedVacancies.isEmpty()) {
+                    log.debug("[Scheduler] No skipped vacancies to retry")
+                    return@launch
+                }
+
+                log.info("[Scheduler] Found ${skippedVacancies.size} skipped vacancies to retry, resetting status to NEW...")
+
+                // Сбрасываем статус на NEW для повторной обработки
+                skippedVacancies.forEach { vacancy ->
+                    try {
+                        vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.NEW))
+                        log.debug("[Scheduler] Reset vacancy ${vacancy.id} status from SKIPPED to NEW for retry")
+                    } catch (e: Exception) {
+                        log.error("[Scheduler] Failed to reset status for vacancy ${vacancy.id}: ${e.message}", e)
+                    }
+                }
+
+                log.info("[Scheduler] Reset ${skippedVacancies.size} vacancies to NEW status, they will be processed in the next cycle")
+            } catch (e: Exception) {
+                log.error("[Scheduler] Error retrying skipped vacancies: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
      * Периодически проверяет новые вакансии, анализирует их и отправляет релевантные в Telegram.
      * Запускается по расписанию из application.yml (app.schedule.vacancy-check).
+     * Обработка выполняется асинхронно, не блокируя поток - команды Telegram будут работать даже во время анализа.
      */
     @Scheduled(cron = "\${app.schedule.vacancy-check:0 */15 * * * *}")
     fun checkNewVacancies() {
@@ -74,7 +138,8 @@ class VacancySchedulerService(
         val cycleStartTime = System.currentTimeMillis()
         logCycleStart()
 
-        runBlocking {
+        // Запускаем анализ асинхронно, не блокируя поток
+        schedulerScope.launch {
             try {
                 val fetchResult = vacancyFetchService.fetchAndSaveNewVacancies()
                 sendStatusUpdate(VacancyService.FetchResult(fetchResult.vacancies, fetchResult.searchKeywords))
@@ -82,7 +147,7 @@ class VacancySchedulerService(
                 val vacanciesToAnalyze = getVacanciesForAnalysis()
                 if (vacanciesToAnalyze.isEmpty()) {
                     log.debug("[Scheduler] No vacancies to analyze, cycle completed")
-                    return@runBlocking
+                    return@launch
                 }
 
                 val analysisResults = analyzeVacancies(vacanciesToAnalyze)
@@ -203,6 +268,14 @@ class VacancySchedulerService(
     private suspend fun processVacancy(vacancy: Vacancy): VacancyAnalysis? {
         log.debug("🔄 [Scheduler] Processing vacancy: ${vacancy.id} - '${vacancy.name}'")
         return try {
+            // Проверяем состояние Circuit Breaker перед анализом (до semaphore, чтобы не блокировать поток)
+            val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
+            if (circuitBreakerState == "OPEN") {
+                log.warn("⚠️ [Scheduler] Circuit Breaker is OPEN, skipping vacancy ${vacancy.id} for retry later")
+                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
+                return null
+            }
+
             // Используем semaphore для ограничения параллельных запросов к LLM
             analysisSemaphore.withPermit {
                 val analysis = vacancyAnalysisService.analyzeVacancy(vacancy)
@@ -226,21 +299,26 @@ class VacancySchedulerService(
                 analysis
             }
         } catch (e: OllamaException) {
-            log.error("❌ [Scheduler] Ollama error analyzing vacancy ${vacancy.id}: ${e.message}", e)
-            // Помечаем как FAILED (dead letter queue), если это критическая ошибка после всех retry
-            // Если это временная ошибка (Circuit Breaker OPEN), помечаем как SKIPPED для повторной попытки позже
-            val status = if (e.message?.contains("Circuit Breaker is OPEN") == true) {
-                log.warn("⚠️ [Scheduler] Circuit Breaker is OPEN, marking vacancy ${vacancy.id} as SKIPPED for retry later")
-                VacancyStatus.SKIPPED
-            } else {
-                log.error("❌ [Scheduler] Critical error after retries, marking vacancy ${vacancy.id} as FAILED (dead letter queue)")
-                VacancyStatus.FAILED
-            }
-            try {
-                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(status))
-                if (status == VacancyStatus.FAILED) {
-                    metricsService.incrementVacanciesFailed()
+            // Если это ошибка Circuit Breaker OPEN, мы уже обработали её выше (до semaphore)
+            // Здесь обрабатываем только другие ошибки Ollama
+            if (e.message?.contains("Circuit Breaker is OPEN") == true) {
+                // Это не должно произойти, так как мы проверяем Circuit Breaker до анализа
+                // Но на всякий случай обрабатываем
+                log.warn("⚠️ [Scheduler] Circuit Breaker is OPEN (caught in exception handler), marking vacancy ${vacancy.id} as SKIPPED")
+                try {
+                    vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
+                } catch (updateError: Exception) {
+                    log.error("❌ [Scheduler] Failed to update status for vacancy ${vacancy.id} after Circuit Breaker error", updateError)
                 }
+                return null
+            }
+
+            log.error("❌ [Scheduler] Ollama error analyzing vacancy ${vacancy.id}: ${e.message}", e)
+            // Критическая ошибка после всех retry - помечаем как FAILED
+            log.error("❌ [Scheduler] Critical error after retries, marking vacancy ${vacancy.id} as FAILED (dead letter queue)")
+            try {
+                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
+                metricsService.incrementVacanciesFailed()
             } catch (updateError: Exception) {
                 log.error("❌ [Scheduler] Failed to update status for vacancy ${vacancy.id} after error", updateError)
             }
@@ -272,7 +350,8 @@ class VacancySchedulerService(
      * Проверяет наличие резюме и отправляет уведомление, если его нет
      */
     private fun checkResumeAndNotify() {
-        runBlocking {
+        // Запускаем проверку асинхронно
+        schedulerScope.launch {
             try {
                 val hasResume = resumeService.hasActiveResume()
                 if (!hasResume) {
@@ -298,5 +377,14 @@ class VacancySchedulerService(
                 log.error("❌ [Scheduler] Error checking resume: ${e.message}", e)
             }
         }
+    }
+
+    /**
+     * Корректное завершение работы при остановке приложения
+     */
+    @PreDestroy
+    fun shutdown() {
+        log.info("[Scheduler] Shutting down scheduler service...")
+        schedulerScope.coroutineContext.cancel()
     }
 }

@@ -166,7 +166,7 @@ class VacancyService(
      */
     fun getSkippedVacanciesForRetry(limit: Int = 10): List<Vacancy> {
         return vacancyRepository.findSkippedVacanciesForRetry(
-            org.springframework.data.domain.PageRequest.of(0, limit)
+            org.springframework.data.domain.PageRequest.of(0, limit),
         )
     }
 
@@ -222,7 +222,7 @@ class VacancyService(
      */
     fun getNotSentToTelegramVacancies(): List<Vacancy> {
         return vacancyRepository.findByStatusInAndSentToTelegramAtIsNull(
-            listOf(VacancyStatus.ANALYZED, VacancyStatus.SENT_TO_USER)
+            listOf(VacancyStatus.ANALYZED, VacancyStatus.SENT_TO_USER),
         )
     }
 
