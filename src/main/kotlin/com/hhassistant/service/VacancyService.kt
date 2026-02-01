@@ -157,6 +157,18 @@ class VacancyService(
     }
 
     /**
+     * Получает список вакансий со статусом QUEUED для обработки.
+     * Используется для обработки вакансий, которые были добавлены в очередь, но еще не обработаны.
+     *
+     * @param limit Максимальное количество вакансий для возврата (по умолчанию 50)
+     * @return Список вакансий со статусом QUEUED
+     */
+    fun getQueuedVacanciesForProcessing(limit: Int = 50): List<Vacancy> {
+        return vacancyRepository.findByStatus(VacancyStatus.QUEUED)
+            .take(limit)
+    }
+
+    /**
      * Получает список вакансий со статусом SKIPPED для повторной обработки.
      * Используется для восстановления вакансий, которые были пропущены из-за Circuit Breaker OPEN.
      * Фильтрация выполняется на стороне БД через SQL запрос.

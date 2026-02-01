@@ -36,61 +36,58 @@ data class VacancyAnalysis(
     val matchedSkills: String?, // JSON array или comma-separated
 
     @Column(name = "suggested_cover_letter", columnDefinition = "TEXT")
-    val suggestedCoverLetter: String?,
+    @Deprecated("Cover letter generation is no longer used", ReplaceWith("null"))
+    val suggestedCoverLetter: String? = null,
 
     @Enumerated(EnumType.STRING)
     @Column(name = "cover_letter_generation_status", length = 20, nullable = false)
+    @Deprecated("Cover letter generation is no longer used", ReplaceWith("CoverLetterGenerationStatus.NOT_ATTEMPTED"))
     val coverLetterGenerationStatus: CoverLetterGenerationStatus = CoverLetterGenerationStatus.NOT_ATTEMPTED,
 
     @Column(name = "cover_letter_attempts", nullable = false)
+    @Deprecated("Cover letter generation is no longer used", ReplaceWith("0"))
     val coverLetterAttempts: Int = 0,
 
     @Column(name = "cover_letter_last_attempt_at")
+    @Deprecated("Cover letter generation is no longer used", ReplaceWith("null"))
     val coverLetterLastAttemptAt: LocalDateTime? = null,
 ) {
     /**
      * Rich Domain Model: бизнес-логика внутри entity
-     * Проверяет, успешно ли сгенерировано сопроводительное письмо
+     * @deprecated Cover letter generation is no longer used
      */
-    fun hasCoverLetter(): Boolean = suggestedCoverLetter != null &&
-        coverLetterGenerationStatus == CoverLetterGenerationStatus.SUCCESS
+    @Deprecated("Cover letter generation is no longer used", ReplaceWith("false"))
+    fun hasCoverLetter(): Boolean = false
 
     /**
-     * Проверяет, можно ли повторить генерацию письма
+     * @deprecated Cover letter generation is no longer used
      */
-    fun canRetryCoverLetter(): Boolean =
-        coverLetterGenerationStatus == CoverLetterGenerationStatus.RETRY_QUEUED ||
-            coverLetterGenerationStatus == CoverLetterGenerationStatus.FAILED
+    @Deprecated("Cover letter generation is no longer used", ReplaceWith("false"))
+    fun canRetryCoverLetter(): Boolean = false
 
     /**
-     * Проверяет, была ли генерация письма завершена (успешно или неудачно)
+     * @deprecated Cover letter generation is no longer used
      */
-    fun isCoverLetterGenerationComplete(): Boolean =
-        coverLetterGenerationStatus == CoverLetterGenerationStatus.SUCCESS ||
-            coverLetterGenerationStatus == CoverLetterGenerationStatus.FAILED
+    @Deprecated("Cover letter generation is no longer used", ReplaceWith("true"))
+    fun isCoverLetterGenerationComplete(): Boolean = true
 
     /**
-     * Создает копию анализа с обновленным письмом
+     * @deprecated Cover letter generation is no longer used
      */
-    fun withCoverLetter(coverLetter: String): VacancyAnalysis = copy(
-        suggestedCoverLetter = coverLetter,
-        coverLetterGenerationStatus = CoverLetterGenerationStatus.SUCCESS,
-        coverLetterAttempts = 0,
-        coverLetterLastAttemptAt = null,
-    )
+    @Deprecated("Cover letter generation is no longer used")
+    @Suppress("UNUSED_PARAMETER")
+    fun withCoverLetter(coverLetter: String): VacancyAnalysis = this
 
     /**
-     * Создает копию анализа с обновленным статусом генерации письма
+     * @deprecated Cover letter generation is no longer used
      */
+    @Deprecated("Cover letter generation is no longer used")
+    @Suppress("UNUSED_PARAMETER", "DEPRECATION")
     fun withCoverLetterStatus(
         status: CoverLetterGenerationStatus,
         attempts: Int = coverLetterAttempts,
         lastAttemptAt: LocalDateTime? = LocalDateTime.now(),
-    ): VacancyAnalysis = copy(
-        coverLetterGenerationStatus = status,
-        coverLetterAttempts = attempts,
-        coverLetterLastAttemptAt = lastAttemptAt,
-    )
+    ): VacancyAnalysis = this
 }
 
 enum class CoverLetterGenerationStatus {

@@ -32,6 +32,7 @@ class VacancyFetchService(
     private val formattingConfig: com.hhassistant.config.FormattingConfig,
     private val eventPublisher: ApplicationEventPublisher,
     private val metricsService: com.hhassistant.metrics.MetricsService,
+    private val vacancyProcessingQueueService: VacancyProcessingQueueService,
     @Value("\${app.max-vacancies-per-cycle:50}") private val maxVacanciesPerCycle: Int,
     @Qualifier("vacancyIdsCache") private val vacancyIdsCache: com.github.benmanes.caffeine.cache.Cache<String, Set<String>>,
 ) {
@@ -118,13 +119,18 @@ class VacancyFetchService(
             }
         }
 
-        // Save all new vacancies to database
+        // Save all new vacancies to database with QUEUED status and add to processing queue
         if (allNewVacancies.isNotEmpty()) {
-            log.debug("[VacancyFetch] Saving ${allNewVacancies.size} new vacancies to database...")
+            log.debug("[VacancyFetch] Saving ${allNewVacancies.size} new vacancies to database with QUEUED status...")
             val savedVacancies = allNewVacancies.map { vacancyRepository.save(it) }
-            log.info("[VacancyFetch] Saved ${savedVacancies.size} vacancies to database")
+            log.info("[VacancyFetch] Saved ${savedVacancies.size} vacancies to database with QUEUED status")
 
             metricsService.incrementVacanciesFetched(allNewVacancies.size)
+
+            // Add vacancies to processing queue
+            val vacancyIds = savedVacancies.map { it.id }
+            val enqueuedCount = vacancyProcessingQueueService.enqueueBatch(vacancyIds)
+            log.info("[VacancyFetch] Added $enqueuedCount vacancies to processing queue (${vacancyIds.size - enqueuedCount} skipped as duplicates)")
 
             // Publish event for each group of vacancies by keywords
             val vacanciesByKeywords = allNewVacancies.groupBy {
@@ -188,15 +194,15 @@ class VacancyFetchService(
         val vacancyDtos = hhVacancyClient.searchVacancies(config)
 
         // Filter out vacancies requiring more than 6 years of experience
+        // Используем оптимизированный метод для быстрой проверки
         val filteredDtos = vacancyDtos.filter { vacancyDto ->
-            val experienceId = vacancyDto.experience?.id?.lowercase()
-            val experienceName = vacancyDto.experience?.name?.lowercase() ?: ""
+            val experienceStr = vacancyDto.getExperienceYearsString() ?: ""
 
             // Exclude "moreThan6" experience level
-            val isMoreThan6Years = experienceId == "morethan6" ||
-                experienceName.contains("более 6") ||
-                experienceName.contains("свыше 6") ||
-                experienceName.contains("more than 6")
+            val isMoreThan6Years = experienceStr.contains("morethan6") ||
+                experienceStr.contains("более 6") ||
+                experienceStr.contains("свыше 6") ||
+                experienceStr.contains("more than 6")
 
             if (isMoreThan6Years) {
                 log.trace("[VacancyFetch] Excluding vacancy ${vacancyDto.id} - experience: ${vacancyDto.experience?.name} (more than 6 years)")
@@ -208,7 +214,7 @@ class VacancyFetchService(
         val newVacancies = filteredDtos
             .map { it.toEntity(formattingConfig) }
             .filter { it.id !in existingVacancyIds }
-            .map { it.copy(status = com.hhassistant.domain.entity.VacancyStatus.NEW) }
+            .map { it.copy(status = com.hhassistant.domain.entity.VacancyStatus.QUEUED) }
 
         val excludedCount = vacancyDtos.size - filteredDtos.size
         if (excludedCount > 0) {

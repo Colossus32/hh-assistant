@@ -40,6 +40,14 @@ data class VacancyDto(
         return experience?.name
     }
 
+    /**
+     * Возвращает строку с годами опыта для быстрой фильтрации
+     * Оптимизированная версия для проверки опыта без парсинга
+     */
+    fun getExperienceYearsString(): String? {
+        return experience?.name?.lowercase() ?: experience?.id?.lowercase()
+    }
+
     fun toPublishedAt(): LocalDateTime? {
         return publishedAt?.let {
             try {

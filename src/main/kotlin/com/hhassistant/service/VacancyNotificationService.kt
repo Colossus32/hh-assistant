@@ -72,7 +72,7 @@ class VacancyNotificationService(
      * @return true if message was successfully sent, false if Telegram is disabled or not configured
      * @throws TelegramException if sending failed (rate limit, invalid chat, etc.)
      */
-    private suspend fun sendVacancyToTelegram(
+    suspend fun sendVacancyToTelegram(
         vacancy: Vacancy,
         analysis: VacancyAnalysis,
     ): Boolean {
@@ -151,20 +151,6 @@ class VacancyNotificationService(
         sb.appendLine("<b>💡 Обоснование:</b>")
         sb.appendLine(escapeHtml(analysis.reasoning))
         sb.appendLine()
-
-        if (analysis.hasCoverLetter() && analysis.suggestedCoverLetter != null) {
-            sb.appendLine("<b>💌 Сопроводительное письмо:</b>")
-            sb.appendLine()
-            // Ограничиваем длину письма для Telegram (максимум 1000 символов)
-            val coverLetter = analysis.suggestedCoverLetter
-            val truncatedLetter = if (coverLetter.length > 1000) {
-                coverLetter.take(1000) + "..."
-            } else {
-                coverLetter
-            }
-            sb.appendLine(escapeHtml(truncatedLetter))
-            sb.appendLine()
-        }
 
         // Добавляем команду для пометки вакансии как неинтересной
         sb.appendLine("━━━━━━━━━━━━━━━━━━━━")

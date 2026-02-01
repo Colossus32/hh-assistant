@@ -34,6 +34,8 @@ class VacancySchedulerService(
     private val notificationService: NotificationService,
     private val resumeService: ResumeService,
     private val metricsService: com.hhassistant.metrics.MetricsService,
+    private val skillExtractionService: SkillExtractionService,
+    private val vacancyProcessingQueueService: VacancyProcessingQueueService,
     @Value("\${app.dry-run:false}") private val dryRun: Boolean,
     @Value("\${app.analysis.max-concurrent-requests:3}") private val maxConcurrentRequests: Int,
 ) {
@@ -144,18 +146,76 @@ class VacancySchedulerService(
                 val fetchResult = vacancyFetchService.fetchAndSaveNewVacancies()
                 sendStatusUpdate(VacancyService.FetchResult(fetchResult.vacancies, fetchResult.searchKeywords))
 
-                val vacanciesToAnalyze = getVacanciesForAnalysis()
-                if (vacanciesToAnalyze.isEmpty()) {
-                    log.debug("[Scheduler] No vacancies to analyze, cycle completed")
-                    return@launch
-                }
-
-                val analysisResults = analyzeVacancies(vacanciesToAnalyze)
-                logCycleSummary(cycleStartTime, fetchResult.vacancies.size, analysisResults)
+                // Вакансии теперь обрабатываются через очередь, поэтому не нужно анализировать здесь
+                // Обработка происходит в VacancyProcessingQueueService
+                log.info("[Scheduler] Vacancies are being processed by VacancyProcessingQueueService")
+                logCycleSummary(cycleStartTime, fetchResult.vacancies.size, emptyList())
             } catch (e: com.hhassistant.exception.HHAPIException.UnauthorizedException) {
                 handleUnauthorizedError(e)
             } catch (e: Exception) {
                 handleGeneralError(e)
+            }
+        }
+    }
+
+    /**
+     * Периодически обрабатывает QUEUED вакансии из БД, добавляя их в очередь обработки.
+     * Запускается по расписанию из application.yml (app.schedule.process-queued-vacancies).
+     * Обработка выполняется асинхронно, не блокируя поток - команды Telegram будут работать даже во время обработки.
+     */
+    @Scheduled(cron = "\${app.schedule.process-queued-vacancies:0 */10 * * * *}")
+    fun processQueuedVacancies() {
+        if (dryRun) {
+            log.debug("[Scheduler] Dry-run mode enabled, skipping queued vacancies processing")
+            return
+        }
+
+        log.info("[Scheduler] Processing QUEUED vacancies from database...")
+
+        // Запускаем обработку асинхронно, не блокируя поток
+        schedulerScope.launch {
+            try {
+                val queuedVacancies = vacancyService.getQueuedVacanciesForProcessing(limit = 50)
+                if (queuedVacancies.isEmpty()) {
+                    log.debug("[Scheduler] No QUEUED vacancies found in database")
+                    return@launch
+                }
+
+                log.info("[Scheduler] Found ${queuedVacancies.size} QUEUED vacancies, adding to processing queue...")
+                val vacancyIds = queuedVacancies.map { it.id }
+                val enqueuedCount = vacancyProcessingQueueService.enqueueBatch(vacancyIds)
+                log.info("[Scheduler] Added $enqueuedCount QUEUED vacancies to processing queue (${vacancyIds.size - enqueuedCount} skipped as duplicates)")
+            } catch (e: Exception) {
+                log.error("[Scheduler] Error processing QUEUED vacancies: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Периодически извлекает навыки из релевантных вакансий, которые еще не имеют навыков.
+     * Запускается по расписанию из application.yml (app.schedule.extract-relevant-skills).
+     * Обработка выполняется асинхронно, не блокируя поток.
+     */
+    @Scheduled(cron = "\${app.schedule.extract-relevant-skills:0 0 3 * * *}")
+    fun extractSkillsForRelevantVacancies() {
+        if (dryRun) {
+            log.debug("[Scheduler] Dry-run mode enabled, skipping skill extraction for relevant vacancies")
+            return
+        }
+
+        log.info("[Scheduler] Starting skill extraction for relevant vacancies without skills...")
+
+        // Запускаем извлечение асинхронно, не блокируя поток
+        schedulerScope.launch {
+            try {
+                val processedCount = skillExtractionService.extractSkillsForRelevantVacancies()
+                if (processedCount > 0) {
+                    log.info("[Scheduler] ✅ Extracted skills from $processedCount relevant vacancies")
+                } else {
+                    log.info("[Scheduler] ℹ️ No relevant vacancies without skills found")
+                }
+            } catch (e: Exception) {
+                log.error("[Scheduler] ❌ Error extracting skills for relevant vacancies: ${e.message}", e)
             }
         }
     }
@@ -220,17 +280,19 @@ class VacancySchedulerService(
         newVacanciesCount: Int,
         analysisResults: List<VacancyAnalysis?>,
     ) {
-        val analyzedCount = analysisResults.count { it != null }
-        val relevantCount = analysisResults.count { it?.isRelevant == true }
-        val sentToTelegramCount = analysisResults.count { it?.isRelevant == true }
         val cycleDuration = System.currentTimeMillis() - cycleStartTime
 
         log.info("[Scheduler] ========================================")
         log.info("[Scheduler] Cycle Summary:")
         log.info("[Scheduler]   - New vacancies fetched: $newVacanciesCount")
-        log.info("[Scheduler]   - Vacancies analyzed: $analyzedCount")
-        log.info("[Scheduler]   - Relevant vacancies: $relevantCount")
-        log.info("[Scheduler]   - Sent to Telegram: $sentToTelegramCount")
+        if (analysisResults.isNotEmpty()) {
+            val analyzedCount = analysisResults.count { it != null }
+            val relevantCount = analysisResults.count { it?.isRelevant == true }
+            log.info("[Scheduler]   - Vacancies analyzed: $analyzedCount")
+            log.info("[Scheduler]   - Relevant vacancies: $relevantCount")
+        } else {
+            log.info("[Scheduler]   - Vacancies are being processed by VacancyProcessingQueueService")
+        }
         log.info("[Scheduler]   - Total cycle time: ${cycleDuration}ms")
         log.info("[Scheduler] ========================================")
     }
@@ -285,10 +347,9 @@ class VacancySchedulerService(
                 vacancyStatusService.updateVacancyStatus(vacancy.withStatus(newStatus))
                 log.debug("📝 [Scheduler] Updated vacancy ${vacancy.id} status to: $newStatus")
 
-                // Обработка релевантных вакансий теперь происходит через события:
-                // - VacancyAnalyzedEvent публикуется в VacancyAnalysisService
-                // - CoverLetterQueueService обрабатывает очередь и публикует VacancyReadyForTelegramEvent
-                // - VacancyNotificationService слушает VacancyReadyForTelegramEvent и отправляет в Telegram
+                // Обработка релевантных вакансий теперь происходит через VacancyProcessingQueueService:
+                // - Анализ вакансии на соответствие резюме
+                // - Если релевантна - отправка в Telegram и добавление в очередь навыков
                 if (analysis.isRelevant) {
                     log.info("📱 [Scheduler] Vacancy ${vacancy.id} is relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%)")
                     log.info("ℹ️ [Scheduler] Vacancy will be processed by event-driven pipeline (cover letter queue -> notification service)")

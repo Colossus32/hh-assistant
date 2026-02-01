@@ -35,6 +35,8 @@ app:
   schedule:
     vacancy-check: "0 */10 * * * *"  # Every 10 minutes
     skipped-retry: "0 */5 * * * *"  # Every 5 minutes - retry skipped vacancies when Circuit Breaker recovers
+    extract-relevant-skills: "0 0 3 * * *"  # Every day at 3:00 AM - extract skills for relevant vacancies without skills
+    process-queued-vacancies: "0 */10 * * * *"  # Every 10 minutes - process QUEUED vacancies from database
   max-vacancies-per-cycle: 2000  # Максимальное количество вакансий за цикл (ограничение HH.ru API: 2000)
   cleanup:
     enabled: true  # Включить автоматическую очистку несуществующих вакансий
@@ -56,6 +58,15 @@ app:
     # area: ${APP_SEARCH_AREA:}  # Например: "Москва"
     # min-salary: ${APP_SEARCH_MIN_SALARY:}  # Например: 150000
     # experience: ${APP_SEARCH_EXPERIENCE:}  # Например: "От 3 лет"
+  vacancy-processing:
+    queue:
+      enabled: true  # Enable/disable vacancy processing queue (high priority - analysis)
+      max-concurrent: 3  # Maximum concurrent vacancy analysis operations
+      batch-size: 10  # Number of vacancies to process per batch
+  skill-extraction:
+    queue:
+      enabled: true  # Enable/disable skill extraction queue (low priority)
+      max-concurrent: 2  # Maximum concurrent skill extraction operations
   analysis:
     min-relevance-score: 0.6  # Minimum score to consider vacancy relevant
     max-concurrent-requests: 3  # Maximum concurrent requests to LLM for analysis

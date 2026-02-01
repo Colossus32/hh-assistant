@@ -30,12 +30,9 @@ class VacancyAnalysisService(
     private val repository: VacancyAnalysisRepository,
     private val objectMapper: ObjectMapper,
     private val promptConfig: PromptConfig,
-    private val coverLetterQueueService: CoverLetterQueueService,
     private val eventPublisher: ApplicationEventPublisher,
     private val vacancyContentValidator: VacancyContentValidator,
     private val metricsService: com.hhassistant.metrics.MetricsService,
-    private val skillExtractionService: SkillExtractionService,
-    private val hhVacancyClient: HHVacancyClient,
     private val analysisTimeService: AnalysisTimeService,
     @Qualifier("ollamaCircuitBreaker") private val ollamaCircuitBreaker: CircuitBreaker,
     @Qualifier("ollamaRetry") private val ollamaRetry: Retry,
@@ -161,35 +158,15 @@ class VacancyAnalysisService(
 
         log.info("📊 [Ollama] Analysis result for '${vacancy.name}': isRelevant=${validatedResult.isRelevant}, relevanceScore=${String.format("%.2f", validatedResult.relevanceScore * 100)}%, matchedSkills=${validatedResult.matchedSkills.size}")
 
-        // Для релевантных вакансий НЕ генерируем письмо сразу при анализе
-        // Вместо этого добавляем в очередь генерации писем
-        // Это позволяет обрабатывать генерацию асинхронно и контролировать количество попыток
-        val coverLetter = if (validatedResult.isRelevant) {
-            log.info("✍️ [Ollama] Relevant vacancy ${vacancy.id} will be processed by cover letter queue (score: ${String.format("%.2f", validatedResult.relevanceScore * 100)}%)")
-            // НЕ генерируем письмо здесь - очередь сама это сделает
-            null
-        } else {
-            log.debug("ℹ️ [Ollama] Skipping cover letter generation (vacancy is not relevant, score: ${String.format("%.2f", validatedResult.relevanceScore * 100)}%)")
-            null
-        }
-
-        // Сохраняем результат
+        // Сохраняем результат (без генерации письма)
         val analysis = VacancyAnalysis(
             vacancyId = vacancy.id,
             isRelevant = validatedResult.isRelevant,
             relevanceScore = validatedResult.relevanceScore,
             reasoning = validatedResult.reasoning,
             matchedSkills = objectMapper.writeValueAsString(validatedResult.matchedSkills),
-            suggestedCoverLetter = coverLetter, // Всегда null, так как письмо генерируется в очереди
-            coverLetterGenerationStatus = if (validatedResult.isRelevant) {
-                // Если вакансия релевантна, добавляем в очередь генерации писем
-                CoverLetterGenerationStatus.RETRY_QUEUED
-            } else {
-                // Если вакансия не релевантна, письмо не нужно - помечаем как NOT_ATTEMPTED
-                CoverLetterGenerationStatus.NOT_ATTEMPTED
-            },
-            // Для релевантных вакансий без письма - добавляем в очередь (attempts = 0, так как еще не пытались)
-            // Для нерелевантных - attempts = 0 (письмо не нужно)
+            suggestedCoverLetter = null, // Письмо больше не генерируется
+            coverLetterGenerationStatus = CoverLetterGenerationStatus.NOT_ATTEMPTED,
             coverLetterAttempts = 0,
             coverLetterLastAttemptAt = null,
         )
@@ -208,31 +185,8 @@ class VacancyAnalysisService(
         // Публикуем событие анализа вакансии
         eventPublisher.publishEvent(VacancyAnalyzedEvent(this, vacancy, savedAnalysis))
 
-        // Извлекаем и сохраняем навыки из вакансии
-        try {
-            // Получаем key_skills из API (если доступны)
-            val keySkills = try {
-                val vacancyDto = hhVacancyClient.getVacancyDetails(vacancy.id)
-                vacancyDto.keySkills
-            } catch (e: Exception) {
-                log.debug("⚠️ [SkillExtraction] Could not fetch key_skills from API for vacancy ${vacancy.id}: ${e.message}")
-                null
-            }
-
-            // Извлекаем и сохраняем навыки
-            skillExtractionService.extractAndSaveSkills(vacancy, keySkills)
-        } catch (e: Exception) {
-            log.error("❌ [SkillExtraction] Failed to extract skills for vacancy ${vacancy.id}: ${e.message}", e)
-            // Не прерываем основной пайплайн анализа из-за ошибки извлечения навыков
-        }
-
-        // Если вакансия релевантна, но письмо не сгенерировано - добавляем в очередь
-        if (savedAnalysis.isRelevant && !savedAnalysis.hasCoverLetter() && savedAnalysis.coverLetterGenerationStatus == CoverLetterGenerationStatus.RETRY_QUEUED) {
-            // Добавляем в очередь генерации писем (будет обработано асинхронно)
-            if (savedAnalysis.id != null) {
-                coverLetterQueueService.enqueue(savedAnalysis.id, savedAnalysis.vacancyId, savedAnalysis.coverLetterAttempts + 1)
-            }
-        }
+        // Извлечение навыков теперь происходит в SkillExtractionQueueService (низкий приоритет)
+        // Это позволяет сначала обработать все вакансии на соответствие резюме, а потом извлекать навыки
 
         return savedAnalysis
     }

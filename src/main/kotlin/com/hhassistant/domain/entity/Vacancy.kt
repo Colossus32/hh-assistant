@@ -45,6 +45,9 @@ data class Vacancy(
     @Column(name = "sent_to_telegram_at")
     val sentToTelegramAt: LocalDateTime? = null,
 
+    @Column(name = "skills_extracted_at")
+    val skillsExtractedAt: LocalDateTime? = null,
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20, nullable = false)
     val status: VacancyStatus = VacancyStatus.NEW,
@@ -76,6 +79,11 @@ data class Vacancy(
     fun canBeProcessed(): Boolean = status != VacancyStatus.NOT_INTERESTED
 
     /**
+     * Проверяет, находится ли вакансия в очереди на обработку
+     */
+    fun isQueued(): Boolean = status == VacancyStatus.QUEUED
+
+    /**
      * Создает копию вакансии с новым статусом (immutability)
      */
     fun withStatus(newStatus: VacancyStatus): Vacancy = copy(status = newStatus)
@@ -87,10 +95,23 @@ data class Vacancy(
         status = VacancyStatus.SENT_TO_USER,
         sentToTelegramAt = sentAt,
     )
+
+    /**
+     * Проверяет, были ли извлечены навыки для вакансии
+     */
+    fun hasSkillsExtracted(): Boolean = skillsExtractedAt != null
+
+    /**
+     * Создает копию вакансии с отметкой времени извлечения навыков
+     */
+    fun withSkillsExtractedAt(extractedAt: LocalDateTime): Vacancy = copy(
+        skillsExtractedAt = extractedAt,
+    )
 }
 
 enum class VacancyStatus {
     NEW, // Новая вакансия
+    QUEUED, // В очереди на обработку (добавлена в очередь, но еще не обработана)
     ANALYZED, // Проанализирована LLM
     SENT_TO_USER, // Отправлена в Telegram
     SKIPPED, // Не релевантна
