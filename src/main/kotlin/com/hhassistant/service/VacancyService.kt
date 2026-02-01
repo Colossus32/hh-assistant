@@ -157,6 +157,20 @@ class VacancyService(
     }
 
     /**
+     * Получает список вакансий со статусом SKIPPED для повторной обработки.
+     * Используется для восстановления вакансий, которые были пропущены из-за Circuit Breaker OPEN.
+     * Фильтрация выполняется на стороне БД через SQL запрос.
+     *
+     * @param limit Максимальное количество вакансий для возврата
+     * @return Список вакансий со статусом SKIPPED (исключая NOT_INTERESTED)
+     */
+    fun getSkippedVacanciesForRetry(limit: Int = 10): List<Vacancy> {
+        return vacancyRepository.findSkippedVacanciesForRetry(
+            org.springframework.data.domain.PageRequest.of(0, limit)
+        )
+    }
+
+    /**
      * Получает список вакансий, которые еще не были просмотрены пользователем.
      * Включает вакансии со статусами: NEW, ANALYZED, SENT_TO_USER
      * Исключает: SKIPPED, APPLIED, NOT_INTERESTED
@@ -410,5 +424,52 @@ class VacancyService(
         // Кэш списков вакансий будет автоматически обновлен через TTL (30 секунд)
         // Но можно явно инвалидировать через CacheManager, если нужно
         log.debug("🔄 [VacancyService] Vacancy list cache will be refreshed on next request (TTL: 30s)")
+    }
+
+    /**
+     * Получает статистику по вакансиям для команды /stats
+     *
+     * @return Статистика с количеством обработанных, в очереди и приблизительным временем
+     */
+    data class VacancyStatistics(
+        val processedCount: Int,
+        val queueCount: Int,
+        val averageAnalysisTimeMs: Double?,
+        val estimatedTimeMs: Long?,
+    )
+
+    /**
+     * Получает статистику по вакансиям
+     *
+     * @param averageAnalysisTimeMs Среднее время обработки одной вакансии в миллисекундах
+     * @return Статистика по вакансиям
+     */
+    fun getVacancyStatistics(averageAnalysisTimeMs: Double?): VacancyStatistics {
+        // Подсчитываем обработанные вакансии (ANALYZED, SENT_TO_USER, SKIPPED, APPLIED, FAILED)
+        val processedStatuses = listOf(
+            VacancyStatus.ANALYZED,
+            VacancyStatus.SENT_TO_USER,
+            VacancyStatus.SKIPPED,
+            VacancyStatus.APPLIED,
+            VacancyStatus.FAILED,
+        )
+        val processedCount = vacancyRepository.findByStatusIn(processedStatuses).size
+
+        // Подсчитываем вакансии в очереди на обработку (NEW)
+        val queueCount = vacancyRepository.findByStatus(VacancyStatus.NEW).size
+
+        // Вычисляем приблизительное время обработки оставшихся вакансий
+        val estimatedTimeMs = if (averageAnalysisTimeMs != null && queueCount > 0) {
+            (averageAnalysisTimeMs * queueCount).toLong()
+        } else {
+            null
+        }
+
+        return VacancyStatistics(
+            processedCount = processedCount,
+            queueCount = queueCount,
+            averageAnalysisTimeMs = averageAnalysisTimeMs,
+            estimatedTimeMs = estimatedTimeMs,
+        )
     }
 }
