@@ -24,9 +24,15 @@ class LoggingAspect {
     private val slowMethodThreshold = 100L
 
     /**
-     * Pointcut for all public methods in services
+     * Pointcut to exclude pollUpdates method from TelegramPollingService
      */
-    @Pointcut("execution(public * com.hhassistant.service..*(..))")
+    @Pointcut("execution(* com.hhassistant.service.TelegramPollingService.pollUpdates(..))")
+    fun pollUpdatesMethod() {}
+
+    /**
+     * Pointcut for all public methods in services, excluding pollUpdates
+     */
+    @Pointcut("execution(public * com.hhassistant.service..*(..)) && !pollUpdatesMethod()")
     fun serviceMethods() {}
 
     /**
@@ -46,6 +52,12 @@ class LoggingAspect {
         val signature = joinPoint.signature as MethodSignature
         val className = signature.declaringType.simpleName
         val methodName = signature.name
+
+        // Skip logging for pollUpdates method to reduce noise
+        if (className == "TelegramPollingService" && methodName == "pollUpdates") {
+            return joinPoint.proceed()
+        }
+
         val args = joinPoint.args
 
         // Log method entry only at trace level to reduce noise
