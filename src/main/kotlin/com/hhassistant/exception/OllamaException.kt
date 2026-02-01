@@ -26,3 +26,7 @@ sealed class OllamaException(message: String, cause: Throwable?) : RuntimeExcept
 }
 
 
+
+
+
+

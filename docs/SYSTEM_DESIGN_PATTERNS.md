@@ -762,3 +762,7 @@ Client ──► API Gateway ──► Validate Token ──► Microservice
 **Следующий шаг:** [Паттерны масштабирования](./SYSTEM_DESIGN_SCALING.md)
 
 
+
+
+
+

@@ -59,3 +59,7 @@ data class VacancySkill(
     }
 }
 
+
+
+
+

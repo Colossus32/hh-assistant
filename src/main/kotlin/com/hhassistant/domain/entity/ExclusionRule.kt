@@ -2,6 +2,8 @@ package com.hhassistant.domain.entity
 
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
 import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
@@ -25,6 +27,7 @@ data class ExclusionRule(
     @Column(name = "text", nullable = false, length = 500)
     val text: String,
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "type", nullable = false, length = 20)
     val type: ExclusionRuleType,
 

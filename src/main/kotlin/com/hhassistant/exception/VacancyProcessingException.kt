@@ -10,3 +10,7 @@ class VacancyProcessingException(
 ) : RuntimeException(message, cause)
 
 
+
+
+
+

@@ -74,3 +74,7 @@ data class Skill(
     }
 }
 
+
+
+
+

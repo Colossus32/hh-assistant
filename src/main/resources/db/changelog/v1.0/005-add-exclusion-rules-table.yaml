@@ -84,3 +84,7 @@ databaseChangeLog:
               ON CONFLICT (text, type) DO NOTHING;
             rollback: DELETE FROM exclusion_rules WHERE type = 'PHRASE';
 
+
+
+
+

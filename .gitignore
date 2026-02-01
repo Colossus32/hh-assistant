@@ -30,12 +30,10 @@ resumes/*.pdf
 # Interview preparation
 interview-prep/
 
-
-
-
-
-
-
+# Scripts with secrets
+scripts/set-webhook.ps1
+scripts/*-webhook*.ps1
+scripts/*-token*.ps1
 
 
 

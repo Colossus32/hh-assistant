@@ -57,3 +57,7 @@ interface VacancySkillRepository : JpaRepository<VacancySkill, Long> {
     fun countDistinctVacancies(): Long
 }
 
+
+
+
+
