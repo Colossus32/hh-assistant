@@ -50,7 +50,7 @@ fun VacancyDto.toEntity(formattingConfig: FormattingConfig): Vacancy {
         log.debug("🔗 [VacancyDto] Both url and alternateUrl are null/empty for vacancy ${this.id}, using fallback URL: $fallbackUrl")
         fallbackUrl
     }
-    
+
     log.debug("🔗 [VacancyDto] Final browser URL for vacancy ${this.id}: $browserUrl")
 
     return Vacancy(

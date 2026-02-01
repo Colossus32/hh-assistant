@@ -1,7 +1,1 @@
 rootProject.name = "hh-assistant"
-
-
-
-
-
-

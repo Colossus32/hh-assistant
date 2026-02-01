@@ -88,4 +88,3 @@ data class GetUpdatesResponse(
     val errorCode: Int? = null,
     val description: String? = null,
 )
-

@@ -11,7 +11,7 @@ import java.time.LocalDateTime
 
 /**
  * Связь между вакансией и навыком (many-to-many).
- * 
+ *
  * Хранит информацию о том, какие навыки были извлечены из конкретной вакансии.
  * Позволяет:
  * - Отслеживать, из какой вакансии был извлечен навык
@@ -58,8 +58,3 @@ data class VacancySkill(
         return extractedAt.isAfter(cutoffDate)
     }
 }
-
-
-
-
-

@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository
 
 /**
  * Репозиторий для работы со связями вакансий и навыков.
- * 
+ *
  * Предоставляет методы для:
  * - Поиска всех навыков для конкретной вакансии
  * - Поиска всех вакансий с конкретным навыком
@@ -17,7 +17,7 @@ import org.springframework.stereotype.Repository
 interface VacancySkillRepository : JpaRepository<VacancySkill, Long> {
     /**
      * Находит все навыки для конкретной вакансии
-     * 
+     *
      * @param vacancyId ID вакансии
      * @return Список связей вакансия-навык
      */
@@ -25,7 +25,7 @@ interface VacancySkillRepository : JpaRepository<VacancySkill, Long> {
 
     /**
      * Находит все вакансии, в которых встречается конкретный навык
-     * 
+     *
      * @param skillId ID навыка
      * @return Список связей вакансия-навык
      */
@@ -56,8 +56,3 @@ interface VacancySkillRepository : JpaRepository<VacancySkill, Long> {
     @Query("SELECT COUNT(DISTINCT vs.vacancyId) FROM VacancySkill vs")
     fun countDistinctVacancies(): Long
 }
-
-
-
-
-

@@ -10,4 +10,3 @@ interface ExclusionRuleRepository : JpaRepository<ExclusionRule, Long> {
     fun findByTextAndType(text: String, type: ExclusionRule.ExclusionRuleType): ExclusionRule?
     fun existsByTextAndType(text: String, type: ExclusionRule.ExclusionRuleType): Boolean
 }
-

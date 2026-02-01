@@ -1,10 +1,8 @@
 package com.hhassistant.client.hh.dto
 
-import com.fasterxml.jackson.annotation.JsonProperty
-
 /**
  * DTO для ключевого навыка из API HH.ru.
- * 
+ *
  * Структура навыка в ответе API:
  * {
  *   "name": "Kotlin",
@@ -16,14 +14,9 @@ data class KeySkillDto(
      * Название навыка
      */
     val name: String,
-    
+
     /**
      * ID навыка (если есть в API)
      */
     val id: String? = null,
 )
-
-
-
-
-

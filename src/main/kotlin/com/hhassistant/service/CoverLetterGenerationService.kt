@@ -89,9 +89,3 @@ class CoverLetterGenerationService(
             .replace("{summary}", summary)
     }
 }
-
-
-
-
-
-

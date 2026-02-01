@@ -8,7 +8,7 @@ import java.util.Optional
 
 /**
  * Репозиторий для работы с навыками.
- * 
+ *
  * Предоставляет методы для:
  * - Поиска навыков по названию (оригинальному и нормализованному)
  * - Получения топ навыков по популярности
@@ -29,7 +29,7 @@ interface SkillRepository : JpaRepository<Skill, Long> {
 
     /**
      * Получает топ навыков по количеству встречаемости (по убыванию)
-     * 
+     *
      * @return Список навыков, отсортированный по occurrenceCount (от большего к меньшему)
      * Используйте Pageable для ограничения количества результатов
      */
@@ -38,7 +38,7 @@ interface SkillRepository : JpaRepository<Skill, Long> {
 
     /**
      * Находит все навыки, которые встречаются не менее указанного количества раз
-     * 
+     *
      * @param minCount Минимальное количество встречаемости
      * @return Список навыков, отсортированный по occurrenceCount (от большего к меньшему)
      */
@@ -58,4 +58,3 @@ interface SkillRepository : JpaRepository<Skill, Long> {
     @Query("SELECT COALESCE(SUM(s.occurrenceCount), 0) FROM Skill s")
     fun sumAllOccurrences(): Long
 }
-

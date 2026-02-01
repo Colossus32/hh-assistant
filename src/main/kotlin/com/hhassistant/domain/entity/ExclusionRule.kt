@@ -17,7 +17,7 @@ import java.time.LocalDateTime
 @Entity
 @Table(
     name = "exclusion_rules",
-    uniqueConstraints = [UniqueConstraint(columnNames = ["text", "type"])]
+    uniqueConstraints = [UniqueConstraint(columnNames = ["text", "type"])],
 )
 data class ExclusionRule(
     @Id
@@ -41,8 +41,7 @@ data class ExclusionRule(
     var updatedAt: LocalDateTime = LocalDateTime.now(),
 ) {
     enum class ExclusionRuleType {
-        KEYWORD,  // Single word to search for
-        PHRASE    // Phrase to search for as whole
+        KEYWORD, // Single word to search for
+        PHRASE, // Phrase to search for as whole
     }
 }
-

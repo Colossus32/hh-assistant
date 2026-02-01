@@ -52,7 +52,8 @@ class EventLoggingAspect(
             }
             is VacancyAnalyzedEvent,
             is CoverLetterGeneratedEvent,
-            is CoverLetterGenerationFailedEvent -> {
+            is CoverLetterGenerationFailedEvent,
+            -> {
                 log.debug("[EventBus] Published ${event.javaClass.simpleName} by $publisherName | vacancy: ${(event as? VacancyAnalyzedEvent)?.vacancy?.id ?: (event as? CoverLetterGeneratedEvent)?.vacancy?.id ?: (event as? CoverLetterGenerationFailedEvent)?.vacancy?.id}")
             }
             else -> {
@@ -83,7 +84,8 @@ class EventLoggingAspect(
             is VacancyAnalyzedEvent,
             is CoverLetterGeneratedEvent,
             is CoverLetterGenerationFailedEvent,
-            is VacancyStatusChangedEvent -> {
+            is VacancyStatusChangedEvent,
+            -> {
                 log.debug("[EventBus] Received ${event.javaClass.simpleName} by $listenerName.$methodName()")
             }
             else -> {
