@@ -135,9 +135,12 @@ class HHVacancyClient(
 
                 log.trace("[HH.ru API] Page $currentPage: ${pageResponse.items.size} vacancies (total so far: ${allVacancies.size})")
 
-                // Небольшая задержка между запросами для избежания rate limit
+                // Адаптивная задержка между запросами на основе доступных токенов rate limit
                 if (hasMorePages) {
-                    kotlinx.coroutines.delay(100)
+                    val adaptiveDelay = calculateAdaptiveDelay()
+                    if (adaptiveDelay > 0) {
+                        delay(adaptiveDelay)
+                    }
                 }
             } catch (e: HHAPIException.RateLimitException) {
                 log.warn("[HH.ru API] Rate limit exceeded on page $currentPage, stopping pagination")
@@ -163,6 +166,40 @@ class HHVacancyClient(
         }
 
         return allVacancies
+    }
+
+    /**
+     * Вычисляет адаптивную задержку между запросами на основе доступных токенов rate limit.
+     * 
+     * Логика:
+     * - Если токенов нет (0) - ждем 500ms (половина секунды для пополнения при 2 req/s)
+     * - Если мало токенов (1-2) - небольшая задержка 100ms
+     * - Если достаточно токенов (3+) - минимальная задержка 10ms
+     * 
+     * Это позволяет оптимизировать скорость загрузки, не превышая rate limit.
+     * 
+     * @return Задержка в миллисекундах
+     */
+    private fun calculateAdaptiveDelay(): Long {
+        val availableTokens = rateLimitService.getAvailableTokens()
+        
+        return when {
+            availableTokens == 0L -> {
+                // Нет токенов - ждем пополнения (500ms = половина секунды для 2 req/s)
+                log.trace("[HH.ru API] No tokens available, using delay 500ms")
+                500
+            }
+            availableTokens <= 2 -> {
+                // Мало токенов - небольшая задержка для безопасности
+                log.trace("[HH.ru API] Low tokens ($availableTokens), using delay 100ms")
+                100
+            }
+            else -> {
+                // Достаточно токенов - минимальная задержка
+                log.trace("[HH.ru API] Sufficient tokens ($availableTokens), using delay 10ms")
+                10
+            }
+        }
     }
 
     /**
@@ -214,8 +251,7 @@ class HHVacancyClient(
     @Loggable
     suspend fun getVacancyDetails(id: String): VacancyDto {
         // Check cache before API request
-        @Suppress("UNCHECKED_CAST")
-        (vacancyDetailsCache.getIfPresent(id) as VacancyDto?)?.let { cached ->
+        vacancyDetailsCache.getIfPresent(id)?.let { cached ->
             log.trace("[HH.ru API] Using cached vacancy details for ID: $id")
             return cached
         }
