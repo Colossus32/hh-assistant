@@ -99,17 +99,29 @@ class SkillExtractionService(
         }
 
         // Шаг 5: Создание связей VacancySkill
+        val extractedAt = java.time.LocalDateTime.now()
+        var skillsLinked = 0
         savedSkills.forEach { skill ->
             val skillId = skill.id ?: return@forEach
             if (!vacancySkillRepository.existsByVacancyIdAndSkillId(vacancy.id, skillId)) {
                 val vacancySkill = VacancySkill(
                     vacancyId = vacancy.id,
                     skillId = skillId,
-                    extractedAt = java.time.LocalDateTime.now(),
+                    extractedAt = extractedAt,
                 )
                 vacancySkillRepository.save(vacancySkill)
+                skillsLinked++
                 log.debug("💾 [SkillExtraction] Created VacancySkill link: vacancy=${vacancy.id}, skill=$skillId (${skill.name})")
             }
+        }
+
+        // Шаг 6: Обновляем вакансию, устанавливая skills_extracted_at только если были сохранены навыки
+        if (skillsLinked > 0) {
+            val updatedVacancy = vacancy.withSkillsExtractedAt(extractedAt)
+            vacancyRepository.save(updatedVacancy)
+            log.debug("💾 [SkillExtraction] Updated vacancy ${vacancy.id} with skills_extracted_at=$extractedAt")
+        } else {
+            log.warn("⚠️ [SkillExtraction] No skills were linked for vacancy ${vacancy.id}, not setting skills_extracted_at")
         }
 
         log.info("✅ [SkillExtraction] Successfully extracted and saved ${savedSkills.size} skills for vacancy ${vacancy.id}")
@@ -244,18 +256,31 @@ class SkillExtractionService(
 
     /**
      * Проверяет, есть ли навыки для вакансии.
+     * Использует поле skills_extracted_at для быстрой проверки.
      */
     fun hasSkillsForVacancy(vacancyId: String): Boolean {
-        return vacancySkillRepository.findByVacancyId(vacancyId).isNotEmpty()
+        return vacancyRepository.findById(vacancyId)
+            .map { it.hasSkillsExtracted() }
+            .orElse(false)
     }
 
     /**
      * Получает список вакансий, для которых еще не извлечены навыки.
+     * Использует оптимизированный запрос к БД вместо проверки каждой вакансии отдельно.
      */
     fun getVacanciesWithoutSkills(allVacancies: List<Vacancy>): List<Vacancy> {
-        return allVacancies.filter { vacancy ->
-            !hasSkillsForVacancy(vacancy.id)
-        }
+        // Используем оптимизированный запрос к БД вместо фильтрации в памяти
+        return vacancyRepository.findVacanciesWithoutSkills()
+    }
+
+    /**
+     * Получает список релевантных вакансий без навыков.
+     * Использует оптимизированный запрос к БД для поиска релевантных вакансий.
+     *
+     * @return Список релевантных вакансий без навыков
+     */
+    fun getRelevantVacanciesWithoutSkills(): List<Vacancy> {
+        return vacancyRepository.findRelevantVacanciesWithoutSkills()
     }
 
     /**
@@ -272,8 +297,8 @@ class SkillExtractionService(
 
         for (vacancy in vacancies) {
             try {
-                // Пропускаем, если навыки уже есть
-                if (hasSkillsForVacancy(vacancy.id)) {
+                // Дополнительная проверка на случай, если навыки были извлечены между получением списка и обработкой
+                if (vacancy.hasSkillsExtracted()) {
                     log.debug("⏭️ [SkillExtraction] Vacancy ${vacancy.id} already has skills, skipping")
                     continue
                 }
@@ -312,6 +337,26 @@ class SkillExtractionService(
 
         log.info("✅ [SkillExtraction] Completed: processed $processedCount, errors $errorCount out of ${vacancies.size} vacancies")
         return processedCount
+    }
+
+    /**
+     * Извлекает навыки из релевантных вакансий, которые еще не имеют навыков.
+     * Используется для заполнения навыков в релевантных вакансиях, которые были проанализированы,
+     * но по какой-то причине не получили навыки (например, ошибка при извлечении или старые вакансии).
+     *
+     * @return Количество обработанных вакансий
+     */
+    suspend fun extractSkillsForRelevantVacancies(): Int {
+        log.info("🔍 [SkillExtraction] Starting skill extraction for relevant vacancies without skills")
+        val relevantVacancies = getRelevantVacanciesWithoutSkills()
+        log.info("📊 [SkillExtraction] Found ${relevantVacancies.size} relevant vacancies without skills")
+
+        if (relevantVacancies.isEmpty()) {
+            log.info("ℹ️ [SkillExtraction] No relevant vacancies without skills found")
+            return 0
+        }
+
+        return extractSkillsForAllVacancies(relevantVacancies)
     }
 
     /**
