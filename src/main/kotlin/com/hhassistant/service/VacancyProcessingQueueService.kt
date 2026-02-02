@@ -1,5 +1,6 @@
 package com.hhassistant.service
 
+import com.hhassistant.aspect.Loggable
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.exception.OllamaException
@@ -70,7 +71,7 @@ class VacancyProcessingQueueService(
     private val queueScope = CoroutineScope(
         Dispatchers.Default + SupervisorJob() + CoroutineExceptionHandler { _, exception ->
             log.error("❌ [VacancyProcessingQueue] Unhandled exception in queue coroutine: ${exception.message}", exception)
-        }
+        },
     )
 
     // Семафор для ограничения параллелизма
@@ -136,6 +137,7 @@ class VacancyProcessingQueueService(
      * @param checkDuplicate Проверять ли на дубликаты (по умолчанию true)
      * @return true если вакансия добавлена, false если уже обрабатывается или была обработана
      */
+    @Loggable
     fun enqueue(vacancyId: String, checkDuplicate: Boolean = true): Boolean {
         if (!queueEnabled) {
             log.debug("ℹ️ [VacancyProcessingQueue] Queue is disabled, skipping enqueue")
@@ -208,6 +210,7 @@ class VacancyProcessingQueueService(
     /**
      * Добавляет несколько вакансий в очередь
      */
+    @Loggable
     fun enqueueBatch(vacancyIds: List<String>): Int {
         var addedCount = 0
         for (vacancyId in vacancyIds) {
@@ -326,7 +329,6 @@ class VacancyProcessingQueueService(
             }
 
             log.info("✅ [VacancyProcessingQueue] Completed processing pipeline for vacancy ${vacancy.id} (isRelevant: ${analysis.isRelevant})")
-
         } catch (e: OllamaException) {
             log.error("❌ [VacancyProcessingQueue] Ollama error processing vacancy ${vacancy.id}: ${e.message}", e)
             // Помечаем как FAILED для критических ошибок

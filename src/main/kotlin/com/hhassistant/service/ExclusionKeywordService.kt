@@ -153,4 +153,3 @@ class ExclusionKeywordService(
      */
     fun getKeywordsCount(): Int = exclusionKeywords.size
 }
-

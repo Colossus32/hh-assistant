@@ -5,7 +5,6 @@ import com.hhassistant.config.AppConstants
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.dto.ApiResponse
 import com.hhassistant.dto.VacancyListResponse
-import com.hhassistant.service.SkillStatistics
 import com.hhassistant.web.TopSkillsResponse
 import kotlinx.coroutines.reactor.awaitSingle
 import mu.KotlinLogging

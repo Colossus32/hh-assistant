@@ -2,7 +2,7 @@ package com.hhassistant.service
 
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.hhassistant.client.hh.HHVacancyClient
+import com.hhassistant.aspect.Loggable
 import com.hhassistant.client.ollama.OllamaClient
 import com.hhassistant.client.ollama.dto.ChatMessage
 import com.hhassistant.config.AppConstants
@@ -56,6 +56,7 @@ class VacancyAnalysisService(
      * @return Результат анализа с оценкой релевантности и обоснованием
      * @throws OllamaException если не удалось связаться с LLM или получить ответ
      */
+    @Loggable
     suspend fun analyzeVacancy(vacancy: Vacancy): VacancyAnalysis {
         // Проверяем, не анализировалась ли вакансия ранее
         repository.findByVacancyId(vacancy.id)?.let {

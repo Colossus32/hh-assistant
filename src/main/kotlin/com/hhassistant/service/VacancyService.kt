@@ -1,6 +1,7 @@
 package com.hhassistant.service
 
 import com.github.benmanes.caffeine.cache.Cache
+import com.hhassistant.aspect.Loggable
 import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.client.hh.dto.toEntity
 import com.hhassistant.config.AppConstants
@@ -62,6 +63,7 @@ class VacancyService(
      *
      * @return Результат загрузки с вакансиями и ключевыми словами
      */
+    @Loggable
     suspend fun fetchAndSaveNewVacancies(): FetchResult {
         log.info("🚀 [VacancyService] Starting to fetch new vacancies from HH.ru API")
 

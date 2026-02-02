@@ -1,5 +1,6 @@
 package com.hhassistant.service
 
+import com.hhassistant.aspect.Loggable
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.event.VacancyStatusChangedEvent
@@ -24,6 +25,7 @@ class VacancyStatusService(
     /**
      * Обновляет статус вакансии и публикует событие
      */
+    @Loggable
     @CacheEvict(value = ["vacancyList", "vacancyDetails"], allEntries = true)
     fun updateVacancyStatus(updatedVacancy: Vacancy) {
         try {
@@ -67,4 +69,3 @@ class VacancyStatusService(
         }
     }
 }
-

@@ -46,7 +46,7 @@ class VacancySchedulerService(
     private val schedulerScope = CoroutineScope(
         Dispatchers.Default + SupervisorJob() + CoroutineExceptionHandler { _, exception ->
             log.error("❌ [Scheduler] Unhandled exception in scheduler coroutine: ${exception.message}", exception)
-        }
+        },
     )
 
     /**

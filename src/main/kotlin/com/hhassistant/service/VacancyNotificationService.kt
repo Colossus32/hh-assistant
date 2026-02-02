@@ -1,5 +1,6 @@
 package com.hhassistant.service
 
+import com.hhassistant.aspect.Loggable
 import com.hhassistant.client.telegram.TelegramClient
 import com.hhassistant.config.AppConstants
 import com.hhassistant.domain.entity.Vacancy
@@ -72,6 +73,7 @@ class VacancyNotificationService(
      * @return true if message was successfully sent, false if Telegram is disabled or not configured
      * @throws TelegramException if sending failed (rate limit, invalid chat, etc.)
      */
+    @Loggable
     suspend fun sendVacancyToTelegram(
         vacancy: Vacancy,
         analysis: VacancyAnalysis,

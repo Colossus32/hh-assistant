@@ -1,7 +1,6 @@
 package com.hhassistant.service
 
 import com.hhassistant.domain.entity.Vacancy
-import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.exception.HHAPIException
 import jakarta.annotation.PreDestroy
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -60,7 +59,7 @@ class SkillExtractionQueueService(
     private val queueScope = CoroutineScope(
         Dispatchers.Default + SupervisorJob() + CoroutineExceptionHandler { _, exception ->
             log.error("❌ [SkillExtractionQueue] Unhandled exception in queue coroutine: ${exception.message}", exception)
-        }
+        },
     )
 
     // Семафор для ограничения параллелизма

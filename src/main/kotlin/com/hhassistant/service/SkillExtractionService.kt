@@ -1,6 +1,7 @@
 package com.hhassistant.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.hhassistant.aspect.Loggable
 import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.client.hh.dto.KeySkillDto
 import com.hhassistant.client.ollama.OllamaClient
@@ -55,6 +56,7 @@ class SkillExtractionService(
      * @param keySkillsFromApi Навыки из API HH.ru (если есть)
      * @return Список извлеченных и сохраненных навыков
      */
+    @Loggable
     @Transactional
     suspend fun extractAndSaveSkills(
         vacancy: Vacancy,

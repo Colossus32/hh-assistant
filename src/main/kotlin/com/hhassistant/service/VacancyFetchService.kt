@@ -1,5 +1,6 @@
 package com.hhassistant.service
 
+import com.hhassistant.aspect.Loggable
 import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.client.hh.dto.toEntity
 import com.hhassistant.config.VacancyServiceConfig
@@ -66,6 +67,7 @@ class VacancyFetchService(
      *
      * @return Результат загрузки с вакансиями и ключевыми словами
      */
+    @Loggable
     suspend fun fetchAndSaveNewVacancies(): FetchResult {
         val startTime = System.currentTimeMillis()
         log.info("[VacancyFetch] Starting to fetch new vacancies from HH.ru API")

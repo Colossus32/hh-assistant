@@ -99,4 +99,3 @@ class TelegramAuthorizationService(
         return "User ID: ${user.id}, Username: ${user.username ?: "N/A"}"
     }
 }
-
