@@ -19,5 +19,3 @@ data class VacancyListItemDto(
     val url: String,
     val isViewed: Boolean? = null,
 )
-
-

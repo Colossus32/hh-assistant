@@ -58,4 +58,3 @@ data class VacancySkill(
         return extractedAt.isAfter(cutoffDate)
     }
 }
-
