@@ -98,16 +98,9 @@ INSERT INTO search_configs (keywords, min_salary, area, experience, is_active)
 VALUES ('Java Developer', 200000, 'Санкт-Петербург', 'От 5 лет', true);
 ```
 
-### 2. Убедитесь, что dry-run выключен
+### 2. Настройте поиск вакансий
 
-В `application.yml` или `.env`:
-
-```yaml
-app:
-  dry-run: false
-```
-
-Или не используйте профиль `dry-run` при запуске.
+Настройте поиск через БД (см. ниже) или через `application.yml`.
 
 ### 3. Приложение будет автоматически:
 
@@ -210,8 +203,7 @@ ORDER BY va.relevance_score DESC;
 **Проверьте:**
 1. Токен валиден (health check показывает UP)
 2. Есть активные конфигурации поиска
-3. `dry-run: false`
-4. Логи на наличие ошибок
+3. Логи на наличие ошибок
 
 ## API Endpoints
 

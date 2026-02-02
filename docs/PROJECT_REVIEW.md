@@ -56,7 +56,6 @@
 5. **Конфигурация**
    - Все magic values вынесены в `application.yml`
    - Поддержка environment variables
-   - Dry-run режим для тестирования
 
 ### ⚠️ Области для улучшения:
 
