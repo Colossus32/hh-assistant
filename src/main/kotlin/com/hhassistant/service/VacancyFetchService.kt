@@ -33,6 +33,7 @@ class VacancyFetchService(
     private val eventPublisher: ApplicationEventPublisher,
     private val metricsService: com.hhassistant.metrics.MetricsService,
     private val vacancyProcessingQueueService: VacancyProcessingQueueService,
+    private val exclusionKeywordService: ExclusionKeywordService,
     @Value("\${app.max-vacancies-per-cycle:50}") private val maxVacanciesPerCycle: Int,
     @Qualifier("vacancyIdsCache") private val vacancyIdsCache: com.github.benmanes.caffeine.cache.Cache<String, Set<String>>,
 ) {
@@ -211,16 +212,28 @@ class VacancyFetchService(
             !isMoreThan6Years
         }
 
-        val newVacancies = filteredDtos
+        // Первичная валидация: фильтруем вакансии с запрещенными словами в названии
+        val validatedDtos = filteredDtos.filter { vacancyDto ->
+            val containsExclusionKeyword = exclusionKeywordService.containsExclusionKeyword(vacancyDto.name)
+            if (containsExclusionKeyword) {
+                log.trace("[VacancyFetch] Excluding vacancy ${vacancyDto.id} - contains exclusion keyword in name: '${vacancyDto.name}'")
+            }
+            !containsExclusionKeyword
+        }
+
+        val newVacancies = validatedDtos
             .map { it.toEntity(formattingConfig) }
             .filter { it.id !in existingVacancyIds }
             .map { it.copy(status = com.hhassistant.domain.entity.VacancyStatus.QUEUED) }
 
-        val excludedCount = vacancyDtos.size - filteredDtos.size
-        if (excludedCount > 0) {
-            log.debug("[VacancyFetch] Excluded $excludedCount vacancies with more than 6 years experience requirement")
+        val excludedByExperience = vacancyDtos.size - filteredDtos.size
+        val excludedByKeywords = filteredDtos.size - validatedDtos.size
+        val totalExcluded = excludedByExperience + excludedByKeywords
+
+        if (totalExcluded > 0) {
+            log.debug("[VacancyFetch] Excluded $excludedByExperience vacancies (experience > 6 years), $excludedByKeywords vacancies (exclusion keywords), total excluded: $totalExcluded")
         }
-        log.debug("[VacancyFetch] Found ${vacancyDtos.size} total vacancies, excluded $excludedCount (more than 6 years), ${newVacancies.size} new (not in DB)")
+        log.debug("[VacancyFetch] Found ${vacancyDtos.size} total vacancies, excluded $totalExcluded, ${newVacancies.size} new (not in DB)")
 
         return newVacancies
     }
