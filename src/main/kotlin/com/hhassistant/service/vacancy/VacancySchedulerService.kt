@@ -19,12 +19,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import mu.KotlinLogging
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
 import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
+import com.hhassistant.service.monitoring.OllamaMonitoringService
 import com.hhassistant.service.notification.NotificationService
 import com.hhassistant.service.resume.ResumeService
 import com.hhassistant.service.skill.SkillExtractionService
@@ -43,6 +45,7 @@ class VacancySchedulerService(
     private val vacancyProcessingQueueService: VacancyProcessingQueueService,
     private val skillExtractionQueueService: SkillExtractionQueueService,
     private val vacancyRepository: com.hhassistant.repository.VacancyRepository,
+    @Autowired(required = false) private val ollamaMonitoringService: OllamaMonitoringService?,
     @Value("\${app.analysis.max-concurrent-requests:3}") private val maxConcurrentRequests: Int,
 ) {
     private val log = KotlinLogging.logger {}
@@ -92,18 +95,18 @@ class VacancySchedulerService(
             return
         }
 
-        log.info("[Scheduler] Circuit Breaker is $circuitBreakerState, checking for skipped vacancies to retry...")
+        log.info("[Scheduler] Circuit Breaker is $circuitBreakerState, checking for skipped vacancies to retry (retry window: 48 hours)...")
 
         // Запускаем обработку асинхронно, не блокируя поток
         schedulerScope.launch {
             try {
-                val skippedVacancies = vacancyService.getSkippedVacanciesForRetry(limit = 10)
+                val skippedVacancies = vacancyService.getSkippedVacanciesForRetry(limit = 10, retryWindowHours = 48)
                 if (skippedVacancies.isEmpty()) {
-                    log.debug("[Scheduler] No skipped vacancies to retry")
+                    log.debug("[Scheduler] No skipped vacancies to retry (within 48 hour window)")
                     return@launch
                 }
 
-                log.info("[Scheduler] Found ${skippedVacancies.size} skipped vacancies to retry, resetting status to NEW...")
+                log.info("[Scheduler] Found ${skippedVacancies.size} skipped vacancies to retry (within 48 hour window), resetting status to NEW...")
 
                 // Сбрасываем статус на NEW для повторной обработки
                 skippedVacancies.forEach { vacancy ->
@@ -204,45 +207,67 @@ class VacancySchedulerService(
     }
 
     /**
-     * Recovery механизм: если очередь обработки новых вакансий пуста,
+     * Recovery механизм: если очередь обработки новых вакансий пуста и Ollama не занята,
      * обрабатывает по одной вакансии из БД для извлечения навыков.
+     * Новые вакансии всегда имеют приоритет - если они приходят, recovery уступает им место.
      * Запускается по расписанию из application.yml (app.schedule.recovery-skill-extraction).
      * Обработка выполняется асинхронно, не блокируя поток.
      */
     @Scheduled(cron = "\${app.schedule.recovery-skill-extraction:0 */5 * * * *}")
     fun recoverySkillExtraction() {
+        log.debug("[Scheduler] Recovery skill extraction scheduled task triggered")
+        
+        // Подсчитываем количество вакансий без навыков для логирования (всегда, даже если recovery пропускается)
+        val allVacanciesWithoutSkills = vacancyRepository.findVacanciesWithoutSkills()
+        val totalCount = allVacanciesWithoutSkills.size
+        val relevantCount = vacancyRepository.findRelevantVacanciesWithoutSkills().size
+        
         // Запускаем обработку асинхронно, не блокируя поток
         schedulerScope.launch {
             try {
-                // Проверяем, пуста ли очередь обработки новых вакансий
-                if (!vacancyProcessingQueueService.isQueueEmpty()) {
-                    log.debug("[Scheduler] Vacancy processing queue is not empty, skipping recovery skill extraction")
+                // Проверяем состояние Circuit Breaker перед запуском recovery
+                val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
+                if (circuitBreakerState == "OPEN") {
+                    log.info("[Scheduler] Recovery skill extraction skipped: Circuit Breaker is OPEN (total without skills: $totalCount, relevant: $relevantCount)")
                     return@launch
                 }
 
-                log.debug("[Scheduler] Vacancy processing queue is empty, starting recovery skill extraction...")
+                // Проверяем, пуста ли очередь обработки новых вакансий (приоритет новым вакансиям)
+                if (!vacancyProcessingQueueService.isQueueEmpty()) {
+                    log.info("[Scheduler] Recovery skill extraction skipped: Vacancy processing queue is not empty (new vacancies have priority) (total without skills: $totalCount, relevant: $relevantCount)")
+                    return@launch
+                }
 
-                // Получаем одну вакансию без навыков из БД
+                // Проверяем, не занята ли Ollama обработкой новых вакансий
+                val activeOllamaRequests = ollamaMonitoringService?.getActiveRequestsCount() ?: 0
+                if (activeOllamaRequests > 0) {
+                    log.info("[Scheduler] Recovery skill extraction skipped: Ollama is busy ($activeOllamaRequests active request(s)) (new vacancies have priority) (total without skills: $totalCount, relevant: $relevantCount)")
+                    return@launch
+                }
+
+                log.info("[Scheduler] Starting recovery skill extraction (Circuit Breaker: $circuitBreakerState, queue empty: true, Ollama idle: true, total without skills: $totalCount, relevant: $relevantCount)")
+
+                // Получаем одну вакансию без навыков из БД (приоритет релевантным)
                 val pageable = PageRequest.of(0, 1)
                 val vacanciesWithoutSkills = vacancyRepository.findOneVacancyWithoutSkills(pageable)
 
                 if (vacanciesWithoutSkills.isEmpty()) {
-                    log.debug("[Scheduler] No vacancies without skills found for recovery")
+                    log.info("[Scheduler] No vacancies without skills found for recovery")
                     return@launch
                 }
 
                 val vacancy = vacanciesWithoutSkills.first()
-                log.info("[Scheduler]  Recovery: Found vacancy ${vacancy.id} without skills, adding to skill extraction queue")
+                log.info("[Scheduler] Recovery: Found vacancy ${vacancy.id} without skills, adding to skill extraction queue (remaining: ${totalCount - 1})")
 
                 // Добавляем вакансию в очередь извлечения навыков
                 val enqueued = skillExtractionQueueService.enqueue(vacancy.id)
                 if (enqueued) {
-                    log.info("[Scheduler]  Recovery: Added vacancy ${vacancy.id} to skill extraction queue")
+                    log.info("[Scheduler] Recovery: Added vacancy ${vacancy.id} to skill extraction queue")
                 } else {
-                    log.debug("[Scheduler]  Recovery: Vacancy ${vacancy.id} was not enqueued (already processing or has skills)")
+                    log.info("[Scheduler] Recovery: Vacancy ${vacancy.id} was not enqueued (already processing or has skills)")
                 }
             } catch (e: Exception) {
-                log.error("[Scheduler]  Error in recovery skill extraction: ${e.message}", e)
+                log.error("[Scheduler] Error in recovery skill extraction: ${e.message}", e)
             }
         }
     }

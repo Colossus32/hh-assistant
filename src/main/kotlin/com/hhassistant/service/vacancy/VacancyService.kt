@@ -177,13 +177,18 @@ class VacancyService(
      * Получает список вакансий со статусом SKIPPED для повторной обработки.
      * Используется для восстановления вакансий, которые были пропущены из-за Circuit Breaker OPEN.
      * Фильтрация выполняется на стороне БД через SQL запрос.
+     * Ограничивает retry только вакансиями, которые были получены недавно (за последние 48 часов),
+     * чтобы избежать бесконечного цикла retry для старых вакансий.
      *
      * @param limit Максимальное количество вакансий для возврата
-     * @return Список вакансий со статусом SKIPPED (исключая NOT_INTERESTED)
+     * @param retryWindowHours Окно времени для retry в часах (по умолчанию 48 часов)
+     * @return Список вакансий со статусом SKIPPED (исключая NOT_INTERESTED и старые вакансии)
      */
-    fun getSkippedVacanciesForRetry(limit: Int = 10): List<Vacancy> {
+    fun getSkippedVacanciesForRetry(limit: Int = 10, retryWindowHours: Int = 48): List<Vacancy> {
+        val cutoffTime = java.time.LocalDateTime.now().minusHours(retryWindowHours.toLong())
         return vacancyRepository.findSkippedVacanciesForRetry(
             org.springframework.data.domain.PageRequest.of(0, limit),
+            cutoffTime,
         )
     }
 

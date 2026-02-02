@@ -240,6 +240,7 @@ class LogAnalysisService(
                     ChatMessage(role = "system", content = systemPrompt),
                     ChatMessage(role = "user", content = userPrompt),
                 ),
+                taskType = com.hhassistant.service.monitoring.OllamaTaskType.LOG_ANALYSIS,
             )
         } catch (e: Exception) {
             log.error(" [LogAnalysis] Error creating summary for batch $batchNumber: ${e.message}", e)
@@ -303,6 +304,7 @@ class LogAnalysisService(
                     ChatMessage(role = "system", content = systemPrompt),
                     ChatMessage(role = "user", content = userPrompt),
                 ),
+                taskType = com.hhassistant.service.monitoring.OllamaTaskType.LOG_ANALYSIS,
             )
         } catch (e: Exception) {
             log.error(" [LogAnalysis] Error analyzing summaries: ${e.message}", e)
@@ -380,6 +382,7 @@ class LogAnalysisService(
                     ChatMessage(role = "system", content = systemPrompt),
                     ChatMessage(role = "user", content = userPrompt),
                 ),
+                taskType = com.hhassistant.service.monitoring.OllamaTaskType.LOG_ANALYSIS,
             )
         } catch (e: Exception) {
             log.error(" [LogAnalysis] Error analyzing batch $batchNumber: ${e.message}", e)
@@ -420,6 +423,7 @@ class LogAnalysisService(
                     ChatMessage(role = "system", content = systemPrompt),
                     ChatMessage(role = "user", content = userPrompt),
                 ),
+                taskType = com.hhassistant.service.monitoring.OllamaTaskType.LOG_ANALYSIS,
             )
         } catch (e: Exception) {
             log.error(" [LogAnalysis] Error combining batch analyses: ${e.message}", e)

@@ -7,6 +7,7 @@ import com.hhassistant.client.ollama.dto.OllamaChatResponse
 import com.hhassistant.client.ollama.dto.OllamaGenerateRequest
 import com.hhassistant.client.ollama.dto.OllamaGenerateResponse
 import com.hhassistant.service.monitoring.OllamaMonitoringService
+import com.hhassistant.service.monitoring.OllamaTaskType
 import kotlinx.coroutines.reactor.awaitSingle
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
@@ -31,7 +32,17 @@ class OllamaClient(
         systemPrompt: String? = null,
         temperature: Double? = null,
     ): String {
-        ollamaMonitoringService?.incrementActiveRequests()
+        return generate(prompt, systemPrompt, temperature, OllamaTaskType.OTHER)
+    }
+
+    @Loggable
+    suspend fun generate(
+        prompt: String,
+        systemPrompt: String? = null,
+        temperature: Double? = null,
+        taskType: OllamaTaskType,
+    ): String {
+        ollamaMonitoringService?.incrementActiveRequests(taskType)
         try {
             val request = OllamaGenerateRequest(
                 model = model,
@@ -50,7 +61,7 @@ class OllamaClient(
 
             return response.response
         } finally {
-            ollamaMonitoringService?.decrementActiveRequests()
+            ollamaMonitoringService?.decrementActiveRequests(taskType)
         }
     }
 
@@ -59,7 +70,16 @@ class OllamaClient(
         messages: List<ChatMessage>,
         temperature: Double? = null,
     ): String {
-        ollamaMonitoringService?.incrementActiveRequests()
+        return chat(messages, temperature, OllamaTaskType.OTHER)
+    }
+
+    @Loggable
+    suspend fun chat(
+        messages: List<ChatMessage>,
+        temperature: Double? = null,
+        taskType: OllamaTaskType,
+    ): String {
+        ollamaMonitoringService?.incrementActiveRequests(taskType)
         try {
             val request = OllamaChatRequest(
                 model = model,
@@ -76,7 +96,7 @@ class OllamaClient(
                 .awaitSingle()
             return response.message.content
         } finally {
-            ollamaMonitoringService?.decrementActiveRequests()
+            ollamaMonitoringService?.decrementActiveRequests(taskType)
         }
     }
 
@@ -85,6 +105,6 @@ class OllamaClient(
      */
     @Loggable
     suspend fun chatForAnalysis(messages: List<ChatMessage>): String {
-        return chat(messages, temperature = analysisTemperature)
+        return chat(messages, temperature = analysisTemperature, taskType = OllamaTaskType.VACANCY_ANALYSIS)
     }
 }

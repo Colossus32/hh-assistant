@@ -14,8 +14,19 @@ import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.annotation.Lazy
 import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import jakarta.annotation.PreDestroy
+
+/**
+ * Тип задачи для Ollama
+ */
+enum class OllamaTaskType {
+    VACANCY_ANALYSIS,  // Анализ новой вакансии
+    SKILL_EXTRACTION,  // Извлечение навыков (recovery)
+    LOG_ANALYSIS,      // Анализ логов
+    OTHER              // Другие задачи
+}
 
 /**
  * Сервис для мониторинга статуса Ollama
@@ -32,6 +43,9 @@ class OllamaMonitoringService(
     // Счетчик активных запросов к Ollama
     private val activeRequests = AtomicInteger(0)
     
+    // Отслеживание активных задач по типам
+    private val activeTasksByType = ConcurrentHashMap<OllamaTaskType, AtomicInteger>()
+    
     // Scope для корутин мониторинга
     private val supervisorJob = SupervisorJob()
     private val monitoringScope = CoroutineScope(
@@ -41,17 +55,33 @@ class OllamaMonitoringService(
     private var monitoringJob: Job? = null
 
     /**
-     * Увеличивает счетчик активных запросов
+     * Увеличивает счетчик активных запросов (для обратной совместимости)
      */
     fun incrementActiveRequests() {
-        activeRequests.incrementAndGet()
+        incrementActiveRequests(OllamaTaskType.OTHER)
     }
 
     /**
-     * Уменьшает счетчик активных запросов
+     * Уменьшает счетчик активных запросов (для обратной совместимости)
      */
     fun decrementActiveRequests() {
+        decrementActiveRequests(OllamaTaskType.OTHER)
+    }
+
+    /**
+     * Увеличивает счетчик активных запросов для указанного типа задачи
+     */
+    fun incrementActiveRequests(taskType: OllamaTaskType) {
+        activeRequests.incrementAndGet()
+        activeTasksByType.computeIfAbsent(taskType) { AtomicInteger(0) }.incrementAndGet()
+    }
+
+    /**
+     * Уменьшает счетчик активных запросов для указанного типа задачи
+     */
+    fun decrementActiveRequests(taskType: OllamaTaskType) {
         activeRequests.decrementAndGet()
+        activeTasksByType[taskType]?.decrementAndGet()
     }
 
     /**
@@ -59,6 +89,13 @@ class OllamaMonitoringService(
      */
     fun getActiveRequestsCount(): Int {
         return activeRequests.get()
+    }
+
+    /**
+     * Получает количество активных задач по типам
+     */
+    fun getActiveTasksByType(): Map<OllamaTaskType, Int> {
+        return activeTasksByType.mapValues { it.value.get() }.filter { it.value > 0 }
     }
 
     /**
@@ -92,9 +129,24 @@ class OllamaMonitoringService(
     private fun logOllamaStatus() {
         val activeCount = activeRequests.get()
         val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
+        val tasksByType = getActiveTasksByType()
         
         val status = when {
-            activeCount > 0 -> "ACTIVE ($activeCount request(s) in progress)"
+            activeCount > 0 -> {
+                val tasksDescription = if (tasksByType.isNotEmpty()) {
+                    tasksByType.entries.joinToString(", ") { (type, count) ->
+                        when (type) {
+                            OllamaTaskType.VACANCY_ANALYSIS -> "vacancy analysis: $count"
+                            OllamaTaskType.SKILL_EXTRACTION -> "skill extraction: $count"
+                            OllamaTaskType.LOG_ANALYSIS -> "log analysis: $count"
+                            OllamaTaskType.OTHER -> "other: $count"
+                        }
+                    }
+                } else {
+                    "$activeCount request(s)"
+                }
+                "ACTIVE ($tasksDescription)"
+            }
             circuitBreakerState == "OPEN" -> "UNAVAILABLE (Circuit Breaker OPEN)"
             else -> "IDLE (no active requests)"
         }

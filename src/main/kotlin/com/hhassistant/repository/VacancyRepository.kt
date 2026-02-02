@@ -33,12 +33,21 @@ interface VacancyRepository : JpaRepository<Vacancy, String> {
      * Получает список вакансий со статусом SKIPPED для повторной обработки.
      * Выполняется на стороне БД с лимитом через Pageable.
      * Статус SKIPPED автоматически исключает NOT_INTERESTED (разные статусы).
+     * Ограничивает retry только вакансиями, которые были получены недавно (за последние 48 часов),
+     * чтобы избежать бесконечного цикла retry для старых вакансий.
      *
      * @param pageable Пагинация для ограничения количества результатов
      * @return Список вакансий со статусом SKIPPED, отсортированных по fetchedAt
      */
-    @Query("SELECT v FROM Vacancy v WHERE v.status = 'SKIPPED' ORDER BY v.fetchedAt ASC")
-    fun findSkippedVacanciesForRetry(pageable: Pageable): List<Vacancy>
+    @Query(
+        """
+        SELECT v FROM Vacancy v 
+        WHERE v.status = 'SKIPPED' 
+        AND v.fetchedAt >= :cutoffTime
+        ORDER BY v.fetchedAt ASC
+    """,
+    )
+    fun findSkippedVacanciesForRetry(pageable: Pageable, cutoffTime: java.time.LocalDateTime): List<Vacancy>
 
     /**
      * Получает список вакансий, для которых еще не извлечены навыки.

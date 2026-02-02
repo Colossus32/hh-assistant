@@ -164,6 +164,7 @@ class SkillExtractionService(
                                 content = prompt,
                             ),
                         ),
+                        taskType = com.hhassistant.service.monitoring.OllamaTaskType.SKILL_EXTRACTION,
                     )
                 }
             }

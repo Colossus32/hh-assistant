@@ -15,6 +15,7 @@ import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.bodyToMono
 import com.hhassistant.service.skill.SkillExtractionService
 import com.hhassistant.service.skill.SkillStatistics
+import com.hhassistant.service.skill.SkillStatisticsService
 import com.hhassistant.service.vacancy.VacancyService
 import com.hhassistant.service.exclusion.ExclusionRuleService
 import com.hhassistant.service.exclusion.ExclusionKeywordService
@@ -29,6 +30,7 @@ class TelegramCommandHandler(
     private val telegramClient: TelegramClient,
     @Qualifier("internalApiWebClient") private val webClient: WebClient,
     private val skillExtractionService: SkillExtractionService,
+    private val skillStatisticsService: SkillStatisticsService,
     private val vacancyService: VacancyService,
     private val exclusionRuleService: ExclusionRuleService,
     private val exclusionKeywordService: ExclusionKeywordService,
@@ -66,6 +68,8 @@ class TelegramCommandHandler(
                 text == "/vacancies" -> handleVacanciesCommand(chatId, text)
                 text.startsWith("/skills ") -> handleSkillsCommand(chatId, text)
                 text == "/skills" -> handleSkillsCommand(chatId, text)
+                text.startsWith("/skills_now ") -> handleSkillsNowCommand(chatId, text)
+                text == "/skills_now" -> handleSkillsNowCommand(chatId, text)
                 text == "/extract-relevant-skills" -> handleExtractRelevantSkillsCommand(chatId)
                 text.startsWith("/exclusion_add_keyword ") -> handleAddExclusionKeyword(chatId, text)
                 text.startsWith("/exclusion_add_phrase ") -> handleAddExclusionPhrase(chatId, text)
@@ -144,7 +148,8 @@ class TelegramCommandHandler(
             appendLine("   /stats - Статистика по вакансиям")
             appendLine("   /vacancies - Список непросмотренных вакансий")
             appendLine("   /vacancies_all - Список всех вакансий (включая просмотренные)")
-            appendLine("   /skills [N] - Топ навыков по популярности")
+            appendLine("   /skills [N] - Топ навыков (с обработкой вакансий)")
+            appendLine("   /skills_now [N] - Текущий топ навыков (без ожидания)")
             appendLine("   /help - Справка")
             appendLine()
             appendLine("💡 Используйте /help для подробной информации.")
@@ -377,6 +382,58 @@ class TelegramCommandHandler(
     }
 
     /**
+     * Обрабатывает команду /skills_now - показывает текущую статистику навыков без ожидания обработки
+     */
+    private fun handleSkillsNowCommand(chatId: String, text: String): String {
+        return try {
+            // Парсим параметр limit из команды (например, /skills_now 10)
+            val parts = text.split(" ", limit = 2)
+            val limit = if (parts.size > 1) {
+                parts[1].toIntOrNull()?.takeIf { it in 1..MAX_SKILLS_LIMIT } ?: DEFAULT_SKILLS_LIMIT
+            } else {
+                DEFAULT_SKILLS_LIMIT
+            }
+
+            log.info("📊 [TelegramCommand] Processing /skills_now command for chat $chatId with limit $limit")
+
+            // Получаем текущую статистику навыков напрямую из базы
+            val skillsStatistics = skillStatisticsService.getTopSkills(limit)
+            val totalSkillsCount = skillStatisticsService.getTotalSkillsCount()
+            val totalAnalyzedVacancies = skillStatisticsService.getTotalAnalyzedVacancies()
+
+            if (skillsStatistics.isEmpty()) {
+                buildString {
+                    appendLine("📊 <b>Текущая статистика навыков:</b>")
+                    appendLine()
+                    appendLine("📋 <b>Всего уникальных навыков:</b> $totalSkillsCount")
+                    appendLine("📈 <b>Проанализировано вакансий:</b> $totalAnalyzedVacancies")
+                    appendLine()
+                    appendLine("❌ <b>Нет данных для отображения топа навыков</b>")
+                    appendLine()
+                    appendLine("💡 <i>Навыки будут извлекаться при анализе вакансий.</i>")
+                    appendLine("Используйте /skills для извлечения навыков из необработанных вакансий.")
+                }
+            } else {
+                buildString {
+                    appendLine("📊 <b>Текущий топ навыков по популярности:</b>")
+                    appendLine()
+                    skillsStatistics.forEachIndexed { index, skill ->
+                        appendLine("${index + 1}. <b>${escapeHtml(skill.skillName)}</b> - ${String.format("%.1f", skill.frequencyPercentage)}% (${skill.occurrenceCount} вакансий)")
+                    }
+                    appendLine()
+                    appendLine("📋 <b>Всего уникальных навыков:</b> $totalSkillsCount")
+                    appendLine("📈 <b>Проанализировано вакансий:</b> $totalAnalyzedVacancies")
+                    appendLine()
+                    appendLine("💡 <i>Данные показаны на текущий момент без дополнительной обработки.</i>")
+                }
+            }
+        } catch (e: Exception) {
+            log.error("Error getting current skills statistics: ${e.message}", e)
+            "❌ Ошибка при получении текущей статистики навыков: ${e.message ?: "Неизвестная ошибка"}"
+        }
+    }
+
+    /**
      * Обрабатывает команду /extract-relevant-skills
      * Извлекает навыки из релевантных вакансий, которые еще не имеют навыков.
      */
@@ -444,6 +501,11 @@ class TelegramCommandHandler(
             appendLine()
             appendLine("<b>/skills [N]</b> - Показать топ навыков по популярности")
             appendLine("   Пример: /skills 10 (показать топ-10 навыков)")
+            appendLine("   ⚠️ Сначала обрабатывает все вакансии без навыков, может занять время")
+            appendLine()
+            appendLine("<b>/skills_now [N]</b> - Показать текущий топ навыков")
+            appendLine("   Пример: /skills_now 15 (показать топ-15 навыков)")
+            appendLine("   ⚡ Показывает данные сразу, без дополнительной обработки")
             appendLine()
             appendLine("<b>/extract-relevant-skills</b> - Извлечь навыки из релевантных вакансий без навыков")
             appendLine("   Находит релевантные вакансии, для которых еще не извлечены навыки, и извлекает их")
