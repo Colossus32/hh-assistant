@@ -5,7 +5,6 @@ import com.hhassistant.config.AppConstants
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.dto.ApiResponse
 import com.hhassistant.dto.VacancyListResponse
-import com.hhassistant.web.TopSkillsResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -18,7 +17,6 @@ import org.springframework.stereotype.Service
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.bodyToMono
 import com.hhassistant.service.skill.SkillExtractionService
-import com.hhassistant.service.skill.SkillStatistics
 import com.hhassistant.service.skill.SkillStatisticsService
 import com.hhassistant.service.vacancy.VacancyService
 import com.hhassistant.service.exclusion.ExclusionRuleService
@@ -82,9 +80,9 @@ class TelegramCommandHandler(
                 text.startsWith("/exclusion_add_phrase ") -> handleAddExclusionPhrase(chatId, text)
                 text.startsWith("/exclusion_remove_keyword ") -> handleRemoveExclusionKeyword(chatId, text)
                 text.startsWith("/exclusion_remove_phrase ") -> handleRemoveExclusionPhrase(chatId, text)
-                text == "/exclusion_list" -> handleListExclusions(chatId)
-                text.startsWith("/sent_status ") -> handleSentStatusCommand(chatId, text)
-                text == "/sent_status" -> handleSentStatusCommand(chatId, text)
+                text == "/exclusion_list" -> handleListExclusions()
+                text.startsWith("/sent_status ") -> handleSentStatusCommand(text)
+                text == "/sent_status" -> handleSentStatusCommand(text)
                 text == "/help" -> handleHelpCommand(chatId)
                 text.matches(Regex("/mark-applied-\\d+")) -> handleMarkAppliedCommand(chatId, text)
                 text.matches(Regex("/mark-not-interested-\\d+")) -> handleMarkNotInterestedCommand(chatId, text)
@@ -143,7 +141,7 @@ class TelegramCommandHandler(
     /**
      * Обрабатывает команду /start
      */
-    private fun handleStartCommand(chatId: String): String {
+    private fun handleStartCommand(_chatId: String): String {
         return buildString {
             appendLine("👋 <b>Добро пожаловать в HH Assistant!</b>")
             appendLine()
@@ -166,7 +164,7 @@ class TelegramCommandHandler(
     /**
      * Обрабатывает команду /status
      */
-    private fun handleStatusCommand(chatId: String): String {
+    private fun handleStatusCommand(_chatId: String): String {
         return buildString {
             appendLine("📊 <b>Статус системы:</b>")
             appendLine()
@@ -236,7 +234,7 @@ class TelegramCommandHandler(
     /**
      * Обрабатывает команду /vacancies
      */
-    private suspend fun handleVacanciesCommand(chatId: String, text: String): String {
+    private suspend fun handleVacanciesCommand(_chatId: String, _text: String): String {
         return try {
             val url = "$apiBaseUrl/api/vacancies/unviewed"
             val response = webClient.get()
@@ -278,7 +276,7 @@ class TelegramCommandHandler(
     /**
      * Обрабатывает команду /vacancies_all - показывает все вакансии (включая просмотренные)
      */
-    private suspend fun handleAllVacanciesCommand(chatId: String): String {
+    private suspend fun handleAllVacanciesCommand(_chatId: String): String {
         return try {
             val url = "$apiBaseUrl/api/vacancies/all"
             val response = webClient.get()
@@ -576,7 +574,7 @@ class TelegramCommandHandler(
     /**
      * Обрабатывает команду /mark-applied-{id}
      */
-    private suspend fun handleMarkAppliedCommand(chatId: String, text: String): String {
+    private suspend fun handleMarkAppliedCommand(_chatId: String, text: String): String {
         val vacancyId = text.removePrefix("/mark-applied-")
         if (!validateVacancyId(vacancyId)) {
             return "❌ Неверный формат ID вакансии"
@@ -610,7 +608,7 @@ class TelegramCommandHandler(
     /**
      * Обрабатывает команду /mark-not-interested-{id}
      */
-    private suspend fun handleMarkNotInterestedCommand(chatId: String, text: String): String {
+    private suspend fun handleMarkNotInterestedCommand(_chatId: String, text: String): String {
         val vacancyId = text.removePrefix("/mark-not-interested-")
         if (!validateVacancyId(vacancyId)) {
             return "❌ Неверный формат ID вакансии"
@@ -645,7 +643,7 @@ class TelegramCommandHandler(
      * Обрабатывает команды добавления/удаления exclusion правил
      */
     private fun handleExclusionCommand(
-        chatId: String,
+        _chatId: String,
         text: String,
         commandPrefix: String,
         isAdd: Boolean,
@@ -728,7 +726,7 @@ class TelegramCommandHandler(
     /**
      * Обрабатывает команду /exclusion_list
      */
-    private fun handleListExclusions(chatId: String): String {
+    private fun handleListExclusions(): String {
         return try {
             val keywords = exclusionKeywordService.getAllKeywords().sorted()
             val rules = exclusionRuleService.listAll()
@@ -762,7 +760,7 @@ class TelegramCommandHandler(
      * Обрабатывает команду /sent_status [vacancy_id]
      * Показывает статус отправки вакансии в Telegram
      */
-    private suspend fun handleSentStatusCommand(chatId: String, text: String): String {
+    private suspend fun handleSentStatusCommand(text: String): String {
         val parts = text.split(" ", limit = 2)
         if (parts.size < 2 || parts[1].isBlank()) {
             return try {
