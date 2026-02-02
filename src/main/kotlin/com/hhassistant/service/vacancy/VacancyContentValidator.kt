@@ -1,9 +1,10 @@
-package com.hhassistant.service
+package com.hhassistant.service.vacancy
 
 import com.hhassistant.domain.entity.Vacancy
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
+import com.hhassistant.service.exclusion.ExclusionRuleService
 
 /**
  * Validator for vacancy content by exclusion keywords/phrases

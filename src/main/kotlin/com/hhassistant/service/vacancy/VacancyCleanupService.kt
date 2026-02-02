@@ -1,4 +1,4 @@
-package com.hhassistant.service
+package com.hhassistant.service.vacancy
 
 import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.exception.HHAPIException

@@ -1,4 +1,4 @@
-package com.hhassistant.service
+package com.hhassistant.service.vacancy
 
 import com.hhassistant.config.AppConstants
 import com.hhassistant.domain.entity.Vacancy
@@ -22,8 +22,13 @@ import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
+import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
+import com.hhassistant.service.notification.NotificationService
+import com.hhassistant.service.resume.ResumeService
+import com.hhassistant.service.skill.SkillExtractionService
+import com.hhassistant.service.skill.SkillExtractionQueueService
 
 @Service
 class VacancySchedulerService(
@@ -36,6 +41,8 @@ class VacancySchedulerService(
     private val metricsService: com.hhassistant.metrics.MetricsService,
     private val skillExtractionService: SkillExtractionService,
     private val vacancyProcessingQueueService: VacancyProcessingQueueService,
+    private val skillExtractionQueueService: SkillExtractionQueueService,
+    private val vacancyRepository: com.hhassistant.repository.VacancyRepository,
     @Value("\${app.dry-run:false}") private val dryRun: Boolean,
     @Value("\${app.analysis.max-concurrent-requests:3}") private val maxConcurrentRequests: Int,
 ) {
@@ -216,6 +223,55 @@ class VacancySchedulerService(
                 }
             } catch (e: Exception) {
                 log.error("[Scheduler] ❌ Error extracting skills for relevant vacancies: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Recovery механизм: если очередь обработки новых вакансий пуста,
+     * обрабатывает по одной вакансии из БД для извлечения навыков.
+     * Запускается по расписанию из application.yml (app.schedule.recovery-skill-extraction).
+     * Обработка выполняется асинхронно, не блокируя поток.
+     */
+    @Scheduled(cron = "\${app.schedule.recovery-skill-extraction:0 */5 * * * *}")
+    fun recoverySkillExtraction() {
+        if (dryRun) {
+            log.debug("[Scheduler] Dry-run mode enabled, skipping recovery skill extraction")
+            return
+        }
+
+        // Запускаем обработку асинхронно, не блокируя поток
+        schedulerScope.launch {
+            try {
+                // Проверяем, пуста ли очередь обработки новых вакансий
+                if (!vacancyProcessingQueueService.isQueueEmpty()) {
+                    log.debug("[Scheduler] Vacancy processing queue is not empty, skipping recovery skill extraction")
+                    return@launch
+                }
+
+                log.debug("[Scheduler] Vacancy processing queue is empty, starting recovery skill extraction...")
+
+                // Получаем одну вакансию без навыков из БД
+                val pageable = PageRequest.of(0, 1)
+                val vacanciesWithoutSkills = vacancyRepository.findOneVacancyWithoutSkills(pageable)
+
+                if (vacanciesWithoutSkills.isEmpty()) {
+                    log.debug("[Scheduler] No vacancies without skills found for recovery")
+                    return@launch
+                }
+
+                val vacancy = vacanciesWithoutSkills.first()
+                log.info("[Scheduler] 🔄 Recovery: Found vacancy ${vacancy.id} without skills, adding to skill extraction queue")
+
+                // Добавляем вакансию в очередь извлечения навыков
+                val enqueued = skillExtractionQueueService.enqueue(vacancy.id)
+                if (enqueued) {
+                    log.info("[Scheduler] ✅ Recovery: Added vacancy ${vacancy.id} to skill extraction queue")
+                } else {
+                    log.debug("[Scheduler] ⏭️ Recovery: Vacancy ${vacancy.id} was not enqueued (already processing or has skills)")
+                }
+            } catch (e: Exception) {
+                log.error("[Scheduler] ❌ Error in recovery skill extraction: ${e.message}", e)
             }
         }
     }

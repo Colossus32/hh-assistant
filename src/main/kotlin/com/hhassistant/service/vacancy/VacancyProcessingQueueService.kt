@@ -1,4 +1,4 @@
-package com.hhassistant.service
+package com.hhassistant.service.vacancy
 
 import com.hhassistant.aspect.Loggable
 import com.hhassistant.domain.entity.Vacancy
@@ -361,6 +361,16 @@ class VacancyProcessingQueueService(
      * Получает размер очереди
      */
     fun getQueueSize(): Int = queue.size
+
+    /**
+     * Проверяет, пуста ли очередь обработки новых вакансий.
+     * Очередь считается пустой, если в ней нет элементов и нет обрабатываемых вакансий.
+     *
+     * @return true если очередь пуста, false если есть вакансии в очереди или обрабатываются
+     */
+    fun isQueueEmpty(): Boolean {
+        return queue.isEmpty() && processingVacancies.isEmpty()
+    }
 
     /**
      * Очищает очередь (для тестирования)
