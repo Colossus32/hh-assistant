@@ -3,6 +3,7 @@ package com.hhassistant.service.vacancy
 import com.hhassistant.aspect.Loggable
 import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.client.hh.dto.toEntity
+import com.hhassistant.client.hh.dto.requiresMoreThan6YearsExperience
 import com.hhassistant.config.VacancyServiceConfig
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.domain.entity.Vacancy
@@ -143,7 +144,8 @@ class VacancyFetchService(
             // Add vacancies to processing queue
             val vacancyIds = savedVacancies.map { it.id }
             val enqueuedCount = vacancyProcessingQueueService.enqueueBatch(vacancyIds)
-            log.info("[VacancyFetch] Added $enqueuedCount vacancies to processing queue (${vacancyIds.size - enqueuedCount} skipped as duplicates)")
+            val skippedCount = vacancyIds.size - enqueuedCount
+            log.info("[VacancyFetch] Added $enqueuedCount vacancies to processing queue ($skippedCount skipped as duplicates)")
 
             // Publish event for each group of vacancies by keywords
             val vacanciesByKeywords = allNewVacancies.groupBy {
@@ -206,40 +208,36 @@ class VacancyFetchService(
 
         val vacancyDtos = hhVacancyClient.searchVacancies(config)
 
-        // Filter out vacancies requiring more than 6 years of experience
-        // Используем оптимизированный метод для быстрой проверки
-        val filteredDtos = vacancyDtos.filter { vacancyDto ->
-            val experienceStr = vacancyDto.getExperienceYearsString() ?: ""
+        // Оптимизированная обработка: объединяем все фильтры в один проход с использованием Sequence
+        // Это избегает создания промежуточных коллекций и улучшает производительность
+        var excludedByExperience = 0
+        var excludedByKeywords = 0
 
-            // Exclude "moreThan6" experience level
-            val isMoreThan6Years = experienceStr.contains("morethan6") ||
-                experienceStr.contains("более 6") ||
-                experienceStr.contains("свыше 6") ||
-                experienceStr.contains("more than 6")
+        val newVacancies = vacancyDtos
+            .asSequence()
+            .mapNotNull { vacancyDto ->
+                // Фильтр 1: Проверка опыта работы (более 6 лет)
+                if (vacancyDto.requiresMoreThan6YearsExperience()) {
+                    excludedByExperience++
+                    log.trace("[VacancyFetch] Excluding vacancy ${vacancyDto.id} - experience: ${vacancyDto.experience?.name} (more than 6 years)")
+                    return@mapNotNull null
+                }
 
-            if (isMoreThan6Years) {
-                log.trace("[VacancyFetch] Excluding vacancy ${vacancyDto.id} - experience: ${vacancyDto.experience?.name} (more than 6 years)")
+                // Фильтр 2: Проверка запрещенных ключевых слов
+                val containsExclusionKeyword = exclusionKeywordService.containsExclusionKeyword(vacancyDto.name)
+                if (containsExclusionKeyword) {
+                    excludedByKeywords++
+                    log.trace("[VacancyFetch] Excluding vacancy ${vacancyDto.id} - contains exclusion keyword in name: '${vacancyDto.name}'")
+                    return@mapNotNull null
+                }
+
+                vacancyDto
             }
-
-            !isMoreThan6Years
-        }
-
-        // Первичная валидация: фильтруем вакансии с запрещенными словами в названии
-        val validatedDtos = filteredDtos.filter { vacancyDto ->
-            val containsExclusionKeyword = exclusionKeywordService.containsExclusionKeyword(vacancyDto.name)
-            if (containsExclusionKeyword) {
-                log.trace("[VacancyFetch] Excluding vacancy ${vacancyDto.id} - contains exclusion keyword in name: '${vacancyDto.name}'")
-            }
-            !containsExclusionKeyword
-        }
-
-        val newVacancies = validatedDtos
             .map { it.toEntity(formattingConfig) }
             .filter { it.id !in existingVacancyIds }
             .map { it.copy(status = com.hhassistant.domain.entity.VacancyStatus.QUEUED) }
+            .toList() // Преобразуем Sequence в List только в конце
 
-        val excludedByExperience = vacancyDtos.size - filteredDtos.size
-        val excludedByKeywords = filteredDtos.size - validatedDtos.size
         val totalExcluded = excludedByExperience + excludedByKeywords
 
         if (totalExcluded > 0) {
