@@ -387,4 +387,3 @@ skillStatisticsService.updateSkillStatistics(vacancy.id, extractedSkills)
 3. `src/test/kotlin/com/hhassistant/web/SkillStatisticsControllerTest.kt`
 4. `src/test/kotlin/com/hhassistant/repository/SkillRepositoryTest.kt`
 5. `src/test/kotlin/com/hhassistant/service/TelegramCommandHandlerTest.kt` - обновить для команды /skills
-

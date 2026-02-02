@@ -13,11 +13,3 @@ scrape_configs:
         labels:
           application: 'hh-assistant'
           service: 'backend'
-
-
-
-
-
-
-
-

@@ -199,4 +199,3 @@ http://localhost:8080/actuator/health
 - Официальная документация: https://api.hh.ru/openapi/redoc#tag/OAuth
 - Раздел для разработчиков: https://dev.hh.ru
 - Поддержка HH.ru: https://hh.ru/feedback
-

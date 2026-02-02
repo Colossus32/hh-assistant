@@ -164,4 +164,3 @@ vacancyService.updateVacancyStatus(vacancy, newStatus)
 **Осталось (опционально):**
 - Можно добавить больше методов в domain entities по мере необходимости
 - Можно продолжить рефакторинг других сервисов по аналогии
-

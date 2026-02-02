@@ -302,4 +302,3 @@ fun handleHHAPIException(ex: HHAPIException): ResponseEntity<ErrorResponse> {
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - Архитектура системы
 - [FUTURE_IMPROVEMENTS.md](./FUTURE_IMPROVEMENTS.md) - Дополнительные улучшения
 - [CODE_QUALITY_ANALYSIS.md](./CODE_QUALITY_ANALYSIS.md) - Анализ качества кода
-

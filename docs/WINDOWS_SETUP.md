@@ -586,4 +586,3 @@ Clear-Content logs/hh-assistant.log
 2. Проверьте health checks: `http://localhost:8080/actuator/health`
 3. Убедитесь, что все сервисы запущены (PostgreSQL, Ollama)
 4. Проверьте переменные окружения в `.env`
-
