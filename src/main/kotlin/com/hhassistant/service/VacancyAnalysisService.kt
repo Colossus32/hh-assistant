@@ -34,6 +34,7 @@ class VacancyAnalysisService(
     private val vacancyContentValidator: VacancyContentValidator,
     private val metricsService: com.hhassistant.metrics.MetricsService,
     private val analysisTimeService: AnalysisTimeService,
+    private val skillExtractionService: SkillExtractionService,
     @Qualifier("ollamaCircuitBreaker") private val ollamaCircuitBreaker: CircuitBreaker,
     @Qualifier("ollamaRetry") private val ollamaRetry: Retry,
     @Value("\${app.analysis.min-relevance-score:0.6}") private val minRelevanceScore: Double,
@@ -151,28 +152,45 @@ class VacancyAnalysisService(
 
         // Парсим ответ
         val analysisResult = parseAnalysisResponse(analysisResponse, vacancy.id)
-        log.debug("📊 [Ollama] Parsed analysis result: isRelevant=${analysisResult.isRelevant}, score=${analysisResult.relevanceScore}")
+        val extractedSkills = analysisResult.extractSkills()
+        log.debug("📊 [Ollama] Parsed analysis result: skills=${extractedSkills.size}, relevanceScore=${analysisResult.relevanceScore}")
 
         // Валидируем результат анализа
         val validatedResult = validateAnalysisResult(analysisResult)
 
-        log.info("📊 [Ollama] Analysis result for '${vacancy.name}': isRelevant=${validatedResult.isRelevant}, relevanceScore=${String.format("%.2f", validatedResult.relevanceScore * 100)}%, matchedSkills=${validatedResult.matchedSkills.size}")
+        // Определяем релевантность на основе relevance_score
+        val isRelevant = validatedResult.isRelevantResult(minRelevanceScore)
+        val validatedSkills = validatedResult.extractSkills()
+        log.info("📊 [Ollama] Analysis result for '${vacancy.name}': isRelevant=$isRelevant, relevanceScore=${String.format("%.2f", validatedResult.relevanceScore * 100)}%, skills=${validatedSkills.size}")
 
-        // Сохраняем результат (без генерации письма)
+        // Сохраняем результат
         val analysis = VacancyAnalysis(
             vacancyId = vacancy.id,
-            isRelevant = validatedResult.isRelevant,
+            isRelevant = isRelevant,
             relevanceScore = validatedResult.relevanceScore,
-            reasoning = validatedResult.reasoning,
-            matchedSkills = objectMapper.writeValueAsString(validatedResult.matchedSkills),
-            suggestedCoverLetter = null, // Письмо больше не генерируется
+            reasoning = validatedResult.reasoning ?: "Процент совпадения: ${String.format("%.1f", validatedResult.relevanceScore * 100)}%",
+            matchedSkills = objectMapper.writeValueAsString(validatedSkills),
+            suggestedCoverLetter = null,
             coverLetterGenerationStatus = CoverLetterGenerationStatus.NOT_ATTEMPTED,
             coverLetterAttempts = 0,
             coverLetterLastAttemptAt = null,
         )
 
         val savedAnalysis = repository.save(analysis)
-        log.info("💾 [Ollama] ✅ Saved analysis to database for vacancy ${vacancy.id} (isRelevant=${savedAnalysis.isRelevant}, score=${String.format("%.2f", savedAnalysis.relevanceScore * 100)}%)")
+        log.info("💾 [Ollama] ✅ Saved analysis to database for vacancy ${vacancy.id} (isRelevant=$isRelevant, score=${String.format("%.2f", savedAnalysis.relevanceScore * 100)}%)")
+
+        // Сохраняем навыки в БД, если вакансия релевантна (relevance_score >= minRelevanceScore)
+        if (isRelevant && validatedSkills.isNotEmpty()) {
+            try {
+                saveSkillsFromAnalysis(vacancy, validatedSkills)
+                log.info("💾 [Ollama] ✅ Saved ${validatedSkills.size} skills to database for vacancy ${vacancy.id}")
+            } catch (e: Exception) {
+                log.error("❌ [Ollama] Failed to save skills for vacancy ${vacancy.id}: ${e.message}", e)
+                // Не прерываем обработку из-за ошибки сохранения навыков
+            }
+        } else {
+            log.debug("⏭️ [Ollama] Skipping skill extraction for vacancy ${vacancy.id} (isRelevant=$isRelevant, skills=${validatedSkills.size})")
+        }
 
         // Обновляем метрики
         metricsService.incrementVacanciesAnalyzed()
@@ -184,9 +202,6 @@ class VacancyAnalysisService(
 
         // Публикуем событие анализа вакансии
         eventPublisher.publishEvent(VacancyAnalyzedEvent(this, vacancy, savedAnalysis))
-
-        // Извлечение навыков теперь происходит в SkillExtractionQueueService (низкий приоритет)
-        // Это позволяет сначала обработать все вакансии на соответствие резюме, а потом извлекать навыки
 
         return savedAnalysis
     }
@@ -461,19 +476,74 @@ class VacancyAnalysisService(
         require(result.relevanceScore in AppConstants.Validation.RELEVANCE_SCORE_MIN..AppConstants.Validation.RELEVANCE_SCORE_MAX) {
             "Relevance score must be between ${AppConstants.Validation.RELEVANCE_SCORE_MIN} and ${AppConstants.Validation.RELEVANCE_SCORE_MAX}, got: ${result.relevanceScore}"
         }
-        return result
+
+        // Получаем навыки из нового или старого формата
+        val allSkills = result.extractSkills()
+
+        // Валидируем навыки: минимум 3, максимум 20
+        val validatedSkills = allSkills
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(20)
+
+        if (validatedSkills.size < 3 && allSkills.isNotEmpty()) {
+            log.warn("⚠️ [Ollama] Only ${validatedSkills.size} valid skills extracted (minimum 3 expected)")
+        }
+
+        // Возвращаем результат с нормализованными навыками в поле skills
+        return result.copy(
+            skills = validatedSkills,
+            matchedSkills = null, // Очищаем старое поле
+        )
     }
 
     /**
-     * Результат анализа вакансии (используется внутри сервиса и в CoverLetterQueueService)
+     * Сохраняет навыки из анализа LLM в БД.
+     * Использует SkillExtractionService для нормализации и сохранения.
+     */
+    private suspend fun saveSkillsFromAnalysis(vacancy: Vacancy, skills: List<String>) {
+        if (skills.isEmpty()) {
+            log.debug("⏭️ [Ollama] No skills to save for vacancy ${vacancy.id}")
+            return
+        }
+
+        // Преобразуем список строк в KeySkillDto для использования существующего сервиса
+        val keySkills = skills.map { skillName ->
+            com.hhassistant.client.hh.dto.KeySkillDto(name = skillName)
+        }
+
+        // Используем существующий сервис для сохранения навыков
+        skillExtractionService.extractAndSaveSkills(vacancy, keySkills)
+    }
+
+    /**
+     * Результат анализа вакансии (оптимизированный формат)
+     * Содержит только навыки из вакансии и процент совпадения
+     * Поддерживает оба формата: новый (skills) и старый (matched_skills)
      */
     data class AnalysisResult(
-        @com.fasterxml.jackson.annotation.JsonProperty("is_relevant")
-        val isRelevant: Boolean,
+        @com.fasterxml.jackson.annotation.JsonProperty("skills")
+        val skills: List<String>? = null,
+        @com.fasterxml.jackson.annotation.JsonProperty("matched_skills")
+        val matchedSkills: List<String>? = null,
         @com.fasterxml.jackson.annotation.JsonProperty("relevance_score")
         val relevanceScore: Double,
-        val reasoning: String,
-        @com.fasterxml.jackson.annotation.JsonProperty("matched_skills")
-        val matchedSkills: List<String>,
-    )
+        @com.fasterxml.jackson.annotation.JsonProperty("is_relevant")
+        val isRelevant: Boolean? = null,
+        val reasoning: String? = null,
+    ) {
+        /**
+         * Извлекает список навыков (из нового или старого формата)
+         */
+        fun extractSkills(): List<String> {
+            return skills ?: matchedSkills ?: emptyList()
+        }
+
+        /**
+         * Определяет, является ли вакансия релевантной на основе relevance_score или is_relevant
+         */
+        fun isRelevantResult(minScore: Double = 0.6): Boolean {
+            return isRelevant ?: (relevanceScore >= minScore)
+        }
+    }
 }
