@@ -56,4 +56,3 @@ interface VacancySkillRepository : JpaRepository<VacancySkill, Long> {
     @Query("SELECT COUNT(DISTINCT vs.vacancyId) FROM VacancySkill vs")
     fun countDistinctVacancies(): Long
 }
-

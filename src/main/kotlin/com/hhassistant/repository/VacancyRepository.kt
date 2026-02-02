@@ -55,13 +55,15 @@ interface VacancyRepository : JpaRepository<Vacancy, String> {
      *
      * @return Список релевантных вакансий без извлеченных навыков
      */
-    @Query("""
+    @Query(
+        """
         SELECT v FROM Vacancy v
         INNER JOIN VacancyAnalysis va ON v.id = va.vacancyId
         WHERE va.isRelevant = true
         AND v.skillsExtractedAt IS NULL
         ORDER BY va.relevanceScore DESC, va.analyzedAt DESC
-    """)
+    """,
+    )
     fun findRelevantVacanciesWithoutSkills(): List<Vacancy>
 
     override fun existsById(id: String): Boolean
