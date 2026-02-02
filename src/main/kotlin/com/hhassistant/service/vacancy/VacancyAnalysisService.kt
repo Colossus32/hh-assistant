@@ -70,18 +70,21 @@ class VacancyAnalysisService(
         // Проверяем состояние Circuit Breaker перед анализом
         val circuitBreakerState = ollamaCircuitBreaker.state
         if (circuitBreakerState.name == "OPEN") {
-            log.warn("⚠️ [Ollama] Circuit Breaker is OPEN, skipping analysis for vacancy ${vacancy.id}")
+            log.warn("[Ollama] Circuit Breaker is OPEN, skipping analysis for vacancy ${vacancy.id}")
             throw OllamaException.ConnectionException(
                 "Ollama service is temporarily unavailable (Circuit Breaker is OPEN). Please try again later.",
             )
         }
 
-        log.info("🤖 [Ollama] Starting analysis for vacancy: ${vacancy.id} - '${vacancy.name}' (${vacancy.employer})")
+        log.info("[Ollama] Starting analysis for vacancy: ${vacancy.id} - '${vacancy.name}' (${vacancy.employer})")
 
-        // Проверяем вакансию на запрещенные слова/фразы ДО анализа через LLM
+        // Проверяем вакансию на запрещенные слова/фразы и навыки из резюме ДО анализа через LLM
+        // VacancyContentValidator выполняет все предварительные проверки:
+        // 1. Exclusion keywords/phrases
+        // 2. Resume skills matching (если включено)
         val contentValidation = vacancyContentValidator.validate(vacancy)
         if (!contentValidation.isValid) {
-            log.info("🚫 [Ollama] Vacancy ${vacancy.id} rejected by content validator: ${contentValidation.rejectionReason}")
+            log.info("[Ollama] Vacancy ${vacancy.id} rejected by content validator: ${contentValidation.rejectionReason}")
 
             // Обновляем метрики
             metricsService.incrementVacanciesRejectedByValidator()
@@ -105,23 +108,24 @@ class VacancyAnalysisService(
             return savedAnalysis
         }
 
-        // Загружаем резюме
+        // Загружаем резюме для формирования промпта
         val resume = resumeService.loadResume()
         val resumeStructure = resumeService.getResumeStructure(resume)
-        log.debug("📄 [Ollama] Loaded resume for analysis (skills: ${resumeStructure?.skills?.size ?: 0})")
+        log.debug("[Ollama] Loaded resume for analysis (skills: ${resumeStructure?.skills?.size ?: 0})")
 
         // Формируем промпт для анализа
         val analysisPrompt = buildAnalysisPrompt(vacancy, resume, resumeStructure)
-        log.debug("📝 [Ollama] Analysis prompt prepared (length: ${analysisPrompt.length} chars)")
+        log.debug("[Ollama] Analysis prompt prepared (length: ${analysisPrompt.length} chars)")
 
         // Анализируем через LLM с использованием Circuit Breaker и Retry
-        log.info("🔄 [Ollama] Sending analysis request to Ollama...")
+        log.info("[Ollama] Sending analysis request to Ollama...")
         val analysisStartTime = System.currentTimeMillis()
         val analysisResponse = try {
             // Используем Circuit Breaker и Retry для защиты от сбоев
+            // Используем chatForAnalysis для более детерминированных ответов (lower temperature)
             ollamaRetry.executeSuspendFunction {
                 ollamaCircuitBreaker.executeSuspendFunction {
-                    ollamaClient.chat(
+                    ollamaClient.chatForAnalysis(
                         listOf(
                             ChatMessage(
                                 role = "system",
@@ -136,13 +140,13 @@ class VacancyAnalysisService(
                 }
             }
         } catch (e: io.github.resilience4j.circuitbreaker.CallNotPermittedException) {
-            log.error("❌ [Ollama] Circuit Breaker is OPEN for vacancy ${vacancy.id}: ${e.message}")
+            log.error("[Ollama] Circuit Breaker is OPEN for vacancy ${vacancy.id}: ${e.message}")
             throw OllamaException.ConnectionException(
                 "Ollama service is temporarily unavailable (Circuit Breaker is OPEN). Please try again later.",
                 e,
             )
         } catch (e: Exception) {
-            log.error("❌ [Ollama] Failed to analyze vacancy ${vacancy.id} via Ollama after retries: ${e.message}", e)
+            log.error("[Ollama] Failed to analyze vacancy ${vacancy.id} via Ollama after retries: ${e.message}", e)
             throw OllamaException.ConnectionException(
                 "Failed to connect to Ollama service for vacancy analysis after retries: ${e.message}",
                 e,
@@ -152,12 +156,12 @@ class VacancyAnalysisService(
         metricsService.recordVacancyAnalysisTime(analysisDuration)
         // Обновляем среднее время обработки
         analysisTimeService.updateAverageTime(analysisDuration)
-        log.info("✅ [Ollama] Received analysis response from Ollama (took ${analysisDuration}ms, response length: ${analysisResponse.length} chars)")
+        log.info("[Ollama] Received analysis response from Ollama (took ${analysisDuration}ms, response length: ${analysisResponse.length} chars)")
 
         // Парсим ответ
         val analysisResult = parseAnalysisResponse(analysisResponse, vacancy.id)
         val extractedSkills = analysisResult.extractSkills()
-        log.debug("📊 [Ollama] Parsed analysis result: skills=${extractedSkills.size}, relevanceScore=${analysisResult.relevanceScore}")
+        log.debug("[Ollama] Parsed analysis result: skills=${extractedSkills.size}, relevanceScore=${analysisResult.relevanceScore}")
 
         // Валидируем результат анализа
         val validatedResult = validateAnalysisResult(analysisResult)
@@ -165,7 +169,7 @@ class VacancyAnalysisService(
         // Определяем релевантность на основе relevance_score
         val isRelevant = validatedResult.isRelevantResult(minRelevanceScore)
         val validatedSkills = validatedResult.extractSkills()
-        log.info("📊 [Ollama] Analysis result for '${vacancy.name}': isRelevant=$isRelevant, relevanceScore=${String.format("%.2f", validatedResult.relevanceScore * 100)}%, skills=${validatedSkills.size}")
+        log.info("[Ollama] Analysis result for '${vacancy.name}': isRelevant=$isRelevant, relevanceScore=${String.format("%.2f", validatedResult.relevanceScore * 100)}%, skills=${validatedSkills.size}")
 
         // Сохраняем результат
         val analysis = VacancyAnalysis(
@@ -181,19 +185,19 @@ class VacancyAnalysisService(
         )
 
         val savedAnalysis = repository.save(analysis)
-        log.info("💾 [Ollama] ✅ Saved analysis to database for vacancy ${vacancy.id} (isRelevant=$isRelevant, score=${String.format("%.2f", savedAnalysis.relevanceScore * 100)}%)")
+        log.info("[Ollama] Saved analysis to database for vacancy ${vacancy.id} (isRelevant=$isRelevant, score=${String.format("%.2f", savedAnalysis.relevanceScore * 100)}%)")
 
         // Сохраняем навыки в БД, если вакансия релевантна (relevance_score >= minRelevanceScore)
         if (isRelevant && validatedSkills.isNotEmpty()) {
             try {
                 saveSkillsFromAnalysis(vacancy, validatedSkills)
-                log.info("💾 [Ollama] ✅ Saved ${validatedSkills.size} skills to database for vacancy ${vacancy.id}")
+                log.info("[Ollama] Saved ${validatedSkills.size} skills to database for vacancy ${vacancy.id}")
             } catch (e: Exception) {
-                log.error("❌ [Ollama] Failed to save skills for vacancy ${vacancy.id}: ${e.message}", e)
+                log.error("[Ollama] Failed to save skills for vacancy ${vacancy.id}: ${e.message}", e)
                 // Не прерываем обработку из-за ошибки сохранения навыков
             }
         } else {
-            log.debug("⏭️ [Ollama] Skipping skill extraction for vacancy ${vacancy.id} (isRelevant=$isRelevant, skills=${validatedSkills.size})")
+            log.debug("[Ollama] Skipping skill extraction for vacancy ${vacancy.id} (isRelevant=$isRelevant, skills=${validatedSkills.size})")
         }
 
         // Обновляем метрики
@@ -219,32 +223,35 @@ class VacancyAnalysisService(
         resume: com.hhassistant.domain.entity.Resume,
         resumeStructure: com.hhassistant.domain.model.ResumeStructure?,
     ): String {
-        // Формируем содержимое резюме
+        // Формируем содержимое резюме - используем только структурированные данные для оптимизации
         val resumeContent = if (resumeStructure != null) {
             buildString {
                 appendLine("Навыки: ${resumeStructure.skills.joinToString(", ")}")
                 resumeStructure.desiredPosition?.let {
-                    appendLine("Желаемая позиция: $it")
+                    appendLine("Позиция: $it")
                 }
                 resumeStructure.desiredSalary?.let {
-                    appendLine("Желаемая зарплата: от $it руб")
+                    appendLine("Зарплата: от $it руб")
                 }
-                resumeStructure.summary?.let {
+                // Ограничиваем summary до 200 символов для оптимизации
+                resumeStructure.summary?.take(200)?.let {
                     appendLine("О себе: $it")
                 }
             }
         } else {
-            "Полный текст резюме:\n${resume.rawText}"
+            // Если нет структурированных данных, используем первые 500 символов
+            "Резюме:\n${resume.rawText.take(500)}"
         }
 
-        // Заменяем переменные в шаблоне
+        // Ограничиваем описание вакансии до 1000 символов для оптимизации
+        val description = (vacancy.description ?: "Описание отсутствует").take(1000)
+
+        // Заменяем переменные в шаблоне (убраны employer и area для оптимизации)
         return promptConfig.analysisTemplate
             .replace("{vacancyName}", vacancy.name)
-            .replace("{employer}", vacancy.employer)
             .replace("{salary}", vacancy.salary ?: "Не указана")
-            .replace("{area}", vacancy.area)
             .replace("{experience}", vacancy.experience ?: "Не указан")
-            .replace("{description}", vacancy.description ?: "Описание отсутствует")
+            .replace("{description}", description)
             .replace("{resumeContent}", resumeContent)
     }
 
@@ -491,7 +498,7 @@ class VacancyAnalysisService(
             .take(20)
 
         if (validatedSkills.size < 3 && allSkills.isNotEmpty()) {
-            log.warn("⚠️ [Ollama] Only ${validatedSkills.size} valid skills extracted (minimum 3 expected)")
+            log.warn("[Ollama] Only ${validatedSkills.size} valid skills extracted (minimum 3 expected)")
         }
 
         // Возвращаем результат с нормализованными навыками в поле skills
@@ -507,7 +514,7 @@ class VacancyAnalysisService(
      */
     private suspend fun saveSkillsFromAnalysis(vacancy: Vacancy, skills: List<String>) {
         if (skills.isEmpty()) {
-            log.debug("⏭️ [Ollama] No skills to save for vacancy ${vacancy.id}")
+            log.debug("[Ollama] No skills to save for vacancy ${vacancy.id}")
             return
         }
 

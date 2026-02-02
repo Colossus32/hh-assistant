@@ -6,9 +6,12 @@ import com.hhassistant.client.ollama.dto.OllamaChatRequest
 import com.hhassistant.client.ollama.dto.OllamaChatResponse
 import com.hhassistant.client.ollama.dto.OllamaGenerateRequest
 import com.hhassistant.client.ollama.dto.OllamaGenerateResponse
+import com.hhassistant.service.monitoring.OllamaMonitoringService
 import kotlinx.coroutines.reactor.awaitSingle
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.context.annotation.Lazy
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.bodyToMono
@@ -17,47 +20,71 @@ import org.springframework.web.reactive.function.client.bodyToMono
 class OllamaClient(
     @Qualifier("ollamaWebClient") private val webClient: WebClient,
     @Value("\${ollama.model}") private val model: String,
-    @Value("\${ollama.temperature}") private val temperature: Double,
+    @Value("\${ollama.temperature}") private val defaultTemperature: Double,
+    @Value("\${ollama.analysis.temperature:\${ollama.temperature}}") private val analysisTemperature: Double,
+    @Autowired(required = false) @Lazy private val ollamaMonitoringService: OllamaMonitoringService?,
 ) {
 
     @Loggable
     suspend fun generate(
         prompt: String,
         systemPrompt: String? = null,
+        temperature: Double? = null,
     ): String {
-        val request = OllamaGenerateRequest(
-            model = model,
-            prompt = prompt,
-            system = systemPrompt,
-            temperature = temperature,
-            stream = false,
-        )
+        ollamaMonitoringService?.incrementActiveRequests()
+        try {
+            val request = OllamaGenerateRequest(
+                model = model,
+                prompt = prompt,
+                system = systemPrompt,
+                temperature = temperature ?: defaultTemperature,
+                stream = false,
+            )
 
-        val response = webClient.post()
-            .uri("/api/generate")
-            .bodyValue(request)
-            .retrieve()
-            .bodyToMono<OllamaGenerateResponse>()
-            .awaitSingle()
+            val response = webClient.post()
+                .uri("/api/generate")
+                .bodyValue(request)
+                .retrieve()
+                .bodyToMono<OllamaGenerateResponse>()
+                .awaitSingle()
 
-        return response.response
+            return response.response
+        } finally {
+            ollamaMonitoringService?.decrementActiveRequests()
+        }
     }
 
     @Loggable
-    suspend fun chat(messages: List<ChatMessage>): String {
-        val request = OllamaChatRequest(
-            model = model,
-            messages = messages,
-            temperature = temperature,
-            stream = false,
-        )
+    suspend fun chat(
+        messages: List<ChatMessage>,
+        temperature: Double? = null,
+    ): String {
+        ollamaMonitoringService?.incrementActiveRequests()
+        try {
+            val request = OllamaChatRequest(
+                model = model,
+                messages = messages,
+                temperature = temperature ?: defaultTemperature,
+                stream = false,
+            )
 
-        val response = webClient.post()
-            .uri("/api/chat")
-            .bodyValue(request)
-            .retrieve()
-            .bodyToMono<OllamaChatResponse>()
-            .awaitSingle()
-        return response.message.content
+            val response = webClient.post()
+                .uri("/api/chat")
+                .bodyValue(request)
+                .retrieve()
+                .bodyToMono<OllamaChatResponse>()
+                .awaitSingle()
+            return response.message.content
+        } finally {
+            ollamaMonitoringService?.decrementActiveRequests()
+        }
+    }
+
+    /**
+     * Выполняет chat запрос с temperature для анализа вакансий (более детерминированный)
+     */
+    @Loggable
+    suspend fun chatForAnalysis(messages: List<ChatMessage>): String {
+        return chat(messages, temperature = analysisTemperature)
     }
 }

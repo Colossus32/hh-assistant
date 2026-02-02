@@ -47,11 +47,11 @@ class LogAnalysisService(
     @Scheduled(cron = "\${app.log-analysis.cron:0 0 9 * * *}")
     fun analyzeLogsAndSendReport() {
         if (!enabled) {
-            log.debug("📊 [LogAnalysis] Log analysis is disabled, skipping")
+            log.debug(" [LogAnalysis] Log analysis is disabled, skipping")
             return
         }
 
-        log.info("📊 [LogAnalysis] Starting daily log analysis...")
+        log.info(" [LogAnalysis] Starting daily log analysis...")
 
         runBlocking {
             try {
@@ -63,7 +63,7 @@ class LogAnalysisService(
                     return@runBlocking
                 }
 
-                log.info("📋 [LogAnalysis] Read ${logLines.size} log lines for analysis")
+                log.info(" [LogAnalysis] Read ${logLines.size} log lines for analysis")
 
                 // Анализируем логи с помощью Ollama
                 val analysisResult = analyzeLogsWithOllama(logLines)
@@ -71,9 +71,9 @@ class LogAnalysisService(
                 // Отправляем отчет в Telegram
                 sendAnalysisReport(analysisResult)
 
-                log.info("✅ [LogAnalysis] Log analysis completed and report sent")
+                log.info(" [LogAnalysis] Log analysis completed and report sent")
             } catch (e: Exception) {
-                log.error("❌ [LogAnalysis] Error during log analysis: ${e.message}", e)
+                log.error(" [LogAnalysis] Error during log analysis: ${e.message}", e)
             }
         }
     }
@@ -85,7 +85,7 @@ class LogAnalysisService(
         val logFile = File(logFilePath)
 
         if (!logFile.exists()) {
-            log.warn("⚠️ [LogAnalysis] Log file not found: ${logFile.absolutePath}")
+            log.warn(" [LogAnalysis] Log file not found: ${logFile.absolutePath}")
             return emptyList()
         }
 
@@ -110,7 +110,7 @@ class LogAnalysisService(
                 }
             }
         } catch (e: Exception) {
-            log.error("❌ [LogAnalysis] Error reading log file: ${e.message}", e)
+            log.error(" [LogAnalysis] Error reading log file: ${e.message}", e)
             return emptyList()
         }
 
@@ -136,11 +136,11 @@ class LogAnalysisService(
      * Анализирует логи с помощью Ollama с батчингом и саммаризацией
      */
     private suspend fun analyzeLogsWithOllama(logLines: List<String>): LogAnalysisResult {
-        log.info("🤖 [LogAnalysis] Analyzing ${logLines.size} log lines with Ollama (batch size: $batchSize, max batches: $maxBatches)...")
+        log.info(" [LogAnalysis] Analyzing ${logLines.size} log lines with Ollama (batch size: $batchSize, max batches: $maxBatches)...")
 
         // Разбиваем логи на батчи
         val batches = logLines.chunked(batchSize).take(maxBatches)
-        log.info("📦 [LogAnalysis] Split logs into ${batches.size} batch(es)")
+        log.info(" [LogAnalysis] Split logs into ${batches.size} batch(es)")
 
         if (batches.isEmpty()) {
             return LogAnalysisResult(
@@ -166,7 +166,7 @@ class LogAnalysisService(
      * 2. Анализирует саммари вместе с деталями из проблемных батчей
      */
     private suspend fun analyzeWithSummarization(batches: List<List<String>>): LogAnalysisResult {
-        log.info("📊 [LogAnalysis] Using summarization strategy: ${batches.size} batches")
+        log.info(" [LogAnalysis] Using summarization strategy: ${batches.size} batches")
 
         val batchSummaries = mutableListOf<String>()
         val problematicBatches = mutableListOf<Pair<Int, List<String>>>()
@@ -174,7 +174,7 @@ class LogAnalysisService(
         // Шаг 1: Создаем саммари каждого батча
         for ((index, batch) in batches.withIndex()) {
             try {
-                log.info("📝 [LogAnalysis] Creating summary for batch ${index + 1}/${batches.size} (${batch.size} lines)...")
+                log.info(" [LogAnalysis] Creating summary for batch ${index + 1}/${batches.size} (${batch.size} lines)...")
 
                 val summary = createBatchSummary(batch, index + 1, batches.size)
                 batchSummaries.add("=== Батч ${index + 1} ===\n$summary")
@@ -186,16 +186,16 @@ class LogAnalysisService(
                     summary.contains("failed", ignoreCase = true)
                 ) {
                     problematicBatches.add(index + 1 to batch)
-                    log.info("⚠️ [LogAnalysis] Batch ${index + 1} contains errors, will include details in final analysis")
+                    log.info(" [LogAnalysis] Batch ${index + 1} contains errors, will include details in final analysis")
                 }
             } catch (e: Exception) {
-                log.error("❌ [LogAnalysis] Error creating summary for batch ${index + 1}: ${e.message}", e)
+                log.error(" [LogAnalysis] Error creating summary for batch ${index + 1}: ${e.message}", e)
                 batchSummaries.add("=== Батч ${index + 1} ===\nОшибка при создании саммари: ${e.message}")
             }
         }
 
         // Шаг 2: Анализируем саммари вместе с деталями из проблемных батчей
-        log.info("🔍 [LogAnalysis] Analyzing ${batchSummaries.size} summaries and ${problematicBatches.size} problematic batch details...")
+        log.info(" [LogAnalysis] Analyzing ${batchSummaries.size} summaries and ${problematicBatches.size} problematic batch details...")
 
         val finalAnalysis = analyzeSummariesWithDetails(batchSummaries, problematicBatches)
 
@@ -242,7 +242,7 @@ class LogAnalysisService(
                 ),
             )
         } catch (e: Exception) {
-            log.error("❌ [LogAnalysis] Error creating summary for batch $batchNumber: ${e.message}", e)
+            log.error(" [LogAnalysis] Error creating summary for batch $batchNumber: ${e.message}", e)
             "Ошибка при создании саммари: ${e.message}"
         }
     }
@@ -305,7 +305,7 @@ class LogAnalysisService(
                 ),
             )
         } catch (e: Exception) {
-            log.error("❌ [LogAnalysis] Error analyzing summaries: ${e.message}", e)
+            log.error(" [LogAnalysis] Error analyzing summaries: ${e.message}", e)
             throw e
         }
     }
@@ -315,18 +315,18 @@ class LogAnalysisService(
      * Используется когда батчей мало или summary-first отключен
      */
     private suspend fun analyzeBatchesSequentially(batches: List<List<String>>): LogAnalysisResult {
-        log.info("📊 [LogAnalysis] Using sequential analysis strategy: ${batches.size} batches")
+        log.info(" [LogAnalysis] Using sequential analysis strategy: ${batches.size} batches")
 
         val batchAnalyses = mutableListOf<String>()
 
         for ((index, batch) in batches.withIndex()) {
             try {
-                log.info("🔍 [LogAnalysis] Analyzing batch ${index + 1}/${batches.size} (${batch.size} lines)...")
+                log.info(" [LogAnalysis] Analyzing batch ${index + 1}/${batches.size} (${batch.size} lines)...")
 
                 val batchAnalysis = analyzeSingleBatch(batch, index + 1, batches.size)
                 batchAnalyses.add("=== Анализ батча ${index + 1} ===\n$batchAnalysis")
             } catch (e: Exception) {
-                log.error("❌ [LogAnalysis] Error analyzing batch ${index + 1}: ${e.message}", e)
+                log.error(" [LogAnalysis] Error analyzing batch ${index + 1}: ${e.message}", e)
                 batchAnalyses.add("=== Анализ батча ${index + 1} ===\nОшибка: ${e.message}")
             }
         }
@@ -382,7 +382,7 @@ class LogAnalysisService(
                 ),
             )
         } catch (e: Exception) {
-            log.error("❌ [LogAnalysis] Error analyzing batch $batchNumber: ${e.message}", e)
+            log.error(" [LogAnalysis] Error analyzing batch $batchNumber: ${e.message}", e)
             "Ошибка при анализе: ${e.message}"
         }
     }
@@ -422,7 +422,7 @@ class LogAnalysisService(
                 ),
             )
         } catch (e: Exception) {
-            log.error("❌ [LogAnalysis] Error combining batch analyses: ${e.message}", e)
+            log.error(" [LogAnalysis] Error combining batch analyses: ${e.message}", e)
             combinedText // Возвращаем просто объединенный текст, если не удалось обработать
         }
     }
@@ -453,12 +453,12 @@ class LogAnalysisService(
         try {
             val sent = telegramClient.sendMessage(message)
             if (sent) {
-                log.info("✅ [LogAnalysis] Analysis report sent to Telegram")
+                log.info(" [LogAnalysis] Analysis report sent to Telegram")
             } else {
-                log.warn("⚠️ [LogAnalysis] Failed to send analysis report (Telegram returned false)")
+                log.warn(" [LogAnalysis] Failed to send analysis report (Telegram returned false)")
             }
         } catch (e: Exception) {
-            log.error("❌ [LogAnalysis] Error sending analysis report: ${e.message}", e)
+            log.error(" [LogAnalysis] Error sending analysis report: ${e.message}", e)
         }
     }
 }

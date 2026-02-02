@@ -51,7 +51,7 @@ class VacancySchedulerService(
     // CoroutineScope для асинхронной обработки анализа вакансий
     private val schedulerScope = CoroutineScope(
         Dispatchers.Default + SupervisorJob() + CoroutineExceptionHandler { _, exception ->
-            log.error("❌ [Scheduler] Unhandled exception in scheduler coroutine: ${exception.message}", exception)
+            log.error(" [Scheduler] Unhandled exception in scheduler coroutine: ${exception.message}", exception)
         },
     )
 
@@ -193,12 +193,12 @@ class VacancySchedulerService(
             try {
                 val processedCount = skillExtractionService.extractSkillsForRelevantVacancies()
                 if (processedCount > 0) {
-                    log.info("[Scheduler] ✅ Extracted skills from $processedCount relevant vacancies")
+                    log.info("[Scheduler]  Extracted skills from $processedCount relevant vacancies")
                 } else {
                     log.info("[Scheduler] ℹ️ No relevant vacancies without skills found")
                 }
             } catch (e: Exception) {
-                log.error("[Scheduler] ❌ Error extracting skills for relevant vacancies: ${e.message}", e)
+                log.error("[Scheduler]  Error extracting skills for relevant vacancies: ${e.message}", e)
             }
         }
     }
@@ -232,17 +232,17 @@ class VacancySchedulerService(
                 }
 
                 val vacancy = vacanciesWithoutSkills.first()
-                log.info("[Scheduler] 🔄 Recovery: Found vacancy ${vacancy.id} without skills, adding to skill extraction queue")
+                log.info("[Scheduler]  Recovery: Found vacancy ${vacancy.id} without skills, adding to skill extraction queue")
 
                 // Добавляем вакансию в очередь извлечения навыков
                 val enqueued = skillExtractionQueueService.enqueue(vacancy.id)
                 if (enqueued) {
-                    log.info("[Scheduler] ✅ Recovery: Added vacancy ${vacancy.id} to skill extraction queue")
+                    log.info("[Scheduler]  Recovery: Added vacancy ${vacancy.id} to skill extraction queue")
                 } else {
-                    log.debug("[Scheduler] ⏭️ Recovery: Vacancy ${vacancy.id} was not enqueued (already processing or has skills)")
+                    log.debug("[Scheduler]  Recovery: Vacancy ${vacancy.id} was not enqueued (already processing or has skills)")
                 }
             } catch (e: Exception) {
-                log.error("[Scheduler] ❌ Error in recovery skill extraction: ${e.message}", e)
+                log.error("[Scheduler]  Error in recovery skill extraction: ${e.message}", e)
             }
         }
     }
@@ -251,9 +251,9 @@ class VacancySchedulerService(
      * Загружает новые вакансии из HH.ru API
      */
     private suspend fun fetchNewVacancies(): VacancyService.FetchResult {
-        log.info("📥 [Scheduler] Step 1: Fetching new vacancies from HH.ru API...")
+        log.info(" [Scheduler] Step 1: Fetching new vacancies from HH.ru API...")
         val fetchResult = vacancyService.fetchAndSaveNewVacancies()
-        log.info("✅ [Scheduler] Step 1 completed: Fetched ${fetchResult.vacancies.size} new vacancies from HH.ru")
+        log.info(" [Scheduler] Step 1 completed: Fetched ${fetchResult.vacancies.size} new vacancies from HH.ru")
         return fetchResult
     }
 
@@ -270,9 +270,9 @@ class VacancySchedulerService(
      */
     private fun buildStatusMessage(fetchResult: VacancyService.FetchResult): String {
         return when {
-            fetchResult.vacancies.isNotEmpty() -> "✅ UP (found ${fetchResult.vacancies.size} vacancies)"
-            fetchResult.searchKeywords.isNotEmpty() -> "✅ UP (request completed, no new vacancies found)"
-            else -> "⚠️ Check completed, but no vacancies found"
+            fetchResult.vacancies.isNotEmpty() -> " UP (found ${fetchResult.vacancies.size} vacancies)"
+            fetchResult.searchKeywords.isNotEmpty() -> " UP (request completed, no new vacancies found)"
+            else -> " Check completed, but no vacancies found"
         }
     }
 
@@ -331,7 +331,7 @@ class VacancySchedulerService(
                 "Token may be invalid, expired, or lacks required permissions.",
         )
         notificationService.sendStatusUpdate(
-            "❌ ERROR: Token invalid or insufficient permissions",
+            " ERROR: Token invalid or insufficient permissions",
             emptyList(),
             0,
         )
@@ -340,7 +340,7 @@ class VacancySchedulerService(
     private fun handleGeneralError(e: Exception) {
         log.error("[Scheduler] Error during scheduled vacancy check: ${e.message}", e)
         notificationService.sendStatusUpdate(
-            "❌ ERROR: ${e.message?.take(AppConstants.TextLimits.ERROR_MESSAGE_MAX_LENGTH) ?: "Unknown error"}",
+            " ERROR: ${e.message?.take(AppConstants.TextLimits.ERROR_MESSAGE_MAX_LENGTH) ?: "Unknown error"}",
             emptyList(),
             0,
         )
@@ -355,12 +355,12 @@ class VacancySchedulerService(
      * @return Результат анализа или null, если обработка не удалась
      */
     private suspend fun processVacancy(vacancy: Vacancy): VacancyAnalysis? {
-        log.debug("🔄 [Scheduler] Processing vacancy: ${vacancy.id} - '${vacancy.name}'")
+        log.debug(" [Scheduler] Processing vacancy: ${vacancy.id} - '${vacancy.name}'")
         return try {
             // Проверяем состояние Circuit Breaker перед анализом (до semaphore, чтобы не блокировать поток)
             val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
             if (circuitBreakerState == "OPEN") {
-                log.warn("⚠️ [Scheduler] Circuit Breaker is OPEN, skipping vacancy ${vacancy.id} for retry later")
+                log.warn(" [Scheduler] Circuit Breaker is OPEN, skipping vacancy ${vacancy.id} for retry later")
                 vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
                 return null
             }
@@ -372,13 +372,13 @@ class VacancySchedulerService(
                 // Обновляем статус вакансии через VacancyStatusService (публикует VacancyStatusChangedEvent)
                 val newStatus = if (analysis.isRelevant) VacancyStatus.ANALYZED else VacancyStatus.SKIPPED
                 vacancyStatusService.updateVacancyStatus(vacancy.withStatus(newStatus))
-                log.debug("📝 [Scheduler] Updated vacancy ${vacancy.id} status to: $newStatus")
+                log.debug(" [Scheduler] Updated vacancy ${vacancy.id} status to: $newStatus")
 
                 // Обработка релевантных вакансий теперь происходит через VacancyProcessingQueueService:
                 // - Анализ вакансии на соответствие резюме
                 // - Если релевантна - отправка в Telegram и добавление в очередь навыков
                 if (analysis.isRelevant) {
-                    log.info("📱 [Scheduler] Vacancy ${vacancy.id} is relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%)")
+                    log.info(" [Scheduler] Vacancy ${vacancy.id} is relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%)")
                     log.info("ℹ️ [Scheduler] Vacancy will be processed by event-driven pipeline (notification service -> skill extraction queue)")
                 } else {
                     log.debug("ℹ️ [Scheduler] Vacancy ${vacancy.id} is not relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%), skipping")
@@ -392,43 +392,43 @@ class VacancySchedulerService(
             if (e.message?.contains("Circuit Breaker is OPEN") == true) {
                 // Это не должно произойти, так как мы проверяем Circuit Breaker до анализа
                 // Но на всякий случай обрабатываем
-                log.warn("⚠️ [Scheduler] Circuit Breaker is OPEN (caught in exception handler), marking vacancy ${vacancy.id} as SKIPPED")
+                log.warn(" [Scheduler] Circuit Breaker is OPEN (caught in exception handler), marking vacancy ${vacancy.id} as SKIPPED")
                 try {
                     vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
                 } catch (updateError: Exception) {
-                    log.error("❌ [Scheduler] Failed to update status for vacancy ${vacancy.id} after Circuit Breaker error", updateError)
+                    log.error(" [Scheduler] Failed to update status for vacancy ${vacancy.id} after Circuit Breaker error", updateError)
                 }
                 return null
             }
 
-            log.error("❌ [Scheduler] Ollama error analyzing vacancy ${vacancy.id}: ${e.message}", e)
+            log.error(" [Scheduler] Ollama error analyzing vacancy ${vacancy.id}: ${e.message}", e)
             // Критическая ошибка после всех retry - помечаем как FAILED
-            log.error("❌ [Scheduler] Critical error after retries, marking vacancy ${vacancy.id} as FAILED (dead letter queue)")
+            log.error(" [Scheduler] Critical error after retries, marking vacancy ${vacancy.id} as FAILED (dead letter queue)")
             try {
                 vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
                 metricsService.incrementVacanciesFailed()
             } catch (updateError: Exception) {
-                log.error("❌ [Scheduler] Failed to update status for vacancy ${vacancy.id} after error", updateError)
+                log.error(" [Scheduler] Failed to update status for vacancy ${vacancy.id} after error", updateError)
             }
             null
         } catch (e: VacancyProcessingException) {
-            log.error("❌ [Scheduler] Error processing vacancy ${vacancy.id}: ${e.message}", e)
+            log.error(" [Scheduler] Error processing vacancy ${vacancy.id}: ${e.message}", e)
             // Помечаем как FAILED для проблемных вакансий
             try {
                 vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
                 metricsService.incrementVacanciesFailed()
             } catch (updateError: Exception) {
-                log.error("❌ [Scheduler] Failed to update status for vacancy ${vacancy.id} after processing error", updateError)
+                log.error(" [Scheduler] Failed to update status for vacancy ${vacancy.id} after processing error", updateError)
             }
             null
         } catch (e: Exception) {
-            log.error("❌ [Scheduler] Unexpected error processing vacancy ${vacancy.id}: ${e.message}", e)
+            log.error(" [Scheduler] Unexpected error processing vacancy ${vacancy.id}: ${e.message}", e)
             // Помечаем как FAILED для неожиданных ошибок
             try {
                 vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
                 metricsService.incrementVacanciesFailed()
             } catch (updateError: Exception) {
-                log.error("❌ [Scheduler] Failed to update status for vacancy ${vacancy.id} after unexpected error", updateError)
+                log.error(" [Scheduler] Failed to update status for vacancy ${vacancy.id} after unexpected error", updateError)
             }
             null
         }
@@ -443,10 +443,10 @@ class VacancySchedulerService(
             try {
                 val hasResume = resumeService.hasActiveResume()
                 if (!hasResume) {
-                    log.warn("⚠️ [Scheduler] No active resume found. Sending notification to user.")
+                    log.warn(" [Scheduler] No active resume found. Sending notification to user.")
                     notificationService.sendMessage(
                         """
-                        ⚠️ <b>Резюме не найдено!</b>
+ <b>Резюме не найдено!</b>
                         
                         Для начала работы с HH Assistant необходимо загрузить резюме.
                         
@@ -459,10 +459,10 @@ class VacancySchedulerService(
                         """.trimIndent(),
                     )
                 } else {
-                    log.info("✅ [Scheduler] Active resume found, no notification needed")
+                    log.info(" [Scheduler] Active resume found, no notification needed")
                 }
             } catch (e: Exception) {
-                log.error("❌ [Scheduler] Error checking resume: ${e.message}", e)
+                log.error(" [Scheduler] Error checking resume: ${e.message}", e)
             }
         }
     }

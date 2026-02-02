@@ -70,7 +70,7 @@ class VacancyProcessingQueueService(
     // Scope для корутин
     private val queueScope = CoroutineScope(
         Dispatchers.Default + SupervisorJob() + CoroutineExceptionHandler { _, exception ->
-            log.error("❌ [VacancyProcessingQueue] Unhandled exception in queue coroutine: ${exception.message}", exception)
+            log.error(" [VacancyProcessingQueue] Unhandled exception in queue coroutine: ${exception.message}", exception)
         },
     )
 
@@ -103,7 +103,7 @@ class VacancyProcessingQueueService(
             return
         }
 
-        log.info("🔄 [VacancyProcessingQueue] Loading pending QUEUED vacancies into queue on startup...")
+        log.info(" [VacancyProcessingQueue] Loading pending QUEUED vacancies into queue on startup...")
 
         runBlocking {
             try {
@@ -113,19 +113,19 @@ class VacancyProcessingQueueService(
                     return@runBlocking
                 }
 
-                log.info("📋 [VacancyProcessingQueue] Found ${queuedVacancies.size} QUEUED vacancies on startup")
+                log.info(" [VacancyProcessingQueue] Found ${queuedVacancies.size} QUEUED vacancies on startup")
 
                 // Добавляем в очередь
                 for (vacancy in queuedVacancies) {
                     enqueue(vacancy.id, checkDuplicate = false) // При старте не проверяем дубликаты
                 }
 
-                log.info("✅ [VacancyProcessingQueue] Loaded ${queue.size} items into queue on startup")
+                log.info(" [VacancyProcessingQueue] Loaded ${queue.size} items into queue on startup")
 
                 // Запускаем обработку очереди
                 startQueueProcessing()
             } catch (e: Exception) {
-                log.error("❌ [VacancyProcessingQueue] Error loading pending vacancies on startup: ${e.message}", e)
+                log.error(" [VacancyProcessingQueue] Error loading pending vacancies on startup: ${e.message}", e)
             }
         }
     }
@@ -147,7 +147,7 @@ class VacancyProcessingQueueService(
         // Получаем вакансию из БД
         var vacancy = vacancyRepository.findById(vacancyId).orElse(null)
         if (vacancy == null) {
-            log.warn("⚠️ [VacancyProcessingQueue] Vacancy $vacancyId not found in database, skipping")
+            log.warn(" [VacancyProcessingQueue] Vacancy $vacancyId not found in database, skipping")
             return false
         }
 
@@ -155,7 +155,7 @@ class VacancyProcessingQueueService(
         if (checkDuplicate) {
             // Проверяем, не обрабатывается ли уже
             if (processingVacancies.containsKey(vacancyId)) {
-                log.debug("⏭️ [VacancyProcessingQueue] Vacancy $vacancyId is already being processed, skipping")
+                log.debug(" [VacancyProcessingQueue] Vacancy $vacancyId is already being processed, skipping")
                 return false
             }
 
@@ -168,7 +168,7 @@ class VacancyProcessingQueueService(
                     VacancyStatus.FAILED,
                 )
             ) {
-                log.debug("⏭️ [VacancyProcessingQueue] Vacancy $vacancyId already processed (status: ${vacancy.status}), skipping")
+                log.debug(" [VacancyProcessingQueue] Vacancy $vacancyId already processed (status: ${vacancy.status}), skipping")
                 return false
             }
 
@@ -177,7 +177,7 @@ class VacancyProcessingQueueService(
                 try {
                     vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.QUEUED))
                 } catch (e: Exception) {
-                    log.warn("⚠️ [VacancyProcessingQueue] Failed to update status for vacancy $vacancyId: ${e.message}")
+                    log.warn(" [VacancyProcessingQueue] Failed to update status for vacancy $vacancyId: ${e.message}")
                 }
             }
         }
@@ -197,7 +197,7 @@ class VacancyProcessingQueueService(
         // Обновляем метрику размера очереди
         metricsService.setQueueSize(queue.size)
 
-        log.info("📥 [VacancyProcessingQueue] Enqueued vacancy $vacancyId, queue size: ${queue.size}")
+        log.info(" [VacancyProcessingQueue] Enqueued vacancy $vacancyId, queue size: ${queue.size}")
 
         // Запускаем обработку, если еще не запущена
         if (!isRunning.get()) {
@@ -230,7 +230,7 @@ class VacancyProcessingQueueService(
             return
         }
 
-        log.info("🚀 [VacancyProcessingQueue] Starting queue processing...")
+        log.info(" [VacancyProcessingQueue] Starting queue processing...")
 
         queueScope.launch {
             try {
@@ -240,7 +240,7 @@ class VacancyProcessingQueueService(
                     }
                 }
             } catch (e: Exception) {
-                log.error("❌ [VacancyProcessingQueue] Error in queue processing: ${e.message}", e)
+                log.error(" [VacancyProcessingQueue] Error in queue processing: ${e.message}", e)
                 isRunning.set(false)
             }
         }
@@ -252,12 +252,12 @@ class VacancyProcessingQueueService(
     private suspend fun processQueueItem(item: QueueItem) {
         processingSemaphore.withPermit {
             try {
-                log.info("🔄 [VacancyProcessingQueue] Processing vacancy ${item.vacancyId}")
+                log.info(" [VacancyProcessingQueue] Processing vacancy ${item.vacancyId}")
 
                 // Получаем вакансию из БД
                 val vacancy = vacancyRepository.findById(item.vacancyId).orElse(null)
                 if (vacancy == null) {
-                    log.warn("⚠️ [VacancyProcessingQueue] Vacancy ${item.vacancyId} not found, skipping")
+                    log.warn(" [VacancyProcessingQueue] Vacancy ${item.vacancyId} not found, skipping")
                     processingVacancies.remove(item.vacancyId)
                     return@withPermit
                 }
@@ -279,7 +279,7 @@ class VacancyProcessingQueueService(
                 // Обновляем метрику размера очереди
                 metricsService.setQueueSize(queue.size)
             } catch (e: Exception) {
-                log.error("❌ [VacancyProcessingQueue] Error processing queue item ${item.vacancyId}: ${e.message}", e)
+                log.error(" [VacancyProcessingQueue] Error processing queue item ${item.vacancyId}: ${e.message}", e)
                 processingVacancies.remove(item.vacancyId)
                 queue.remove(item)
                 metricsService.setQueueSize(queue.size)
@@ -291,7 +291,7 @@ class VacancyProcessingQueueService(
      * Обрабатывает вакансию: анализ на соответствие резюме → если подходит, отправка в Telegram → добавление в очередь навыков
      */
     private suspend fun processVacancy(vacancy: Vacancy) {
-        log.info("📋 [VacancyProcessingQueue] Starting analysis pipeline for vacancy ${vacancy.id}")
+        log.info(" [VacancyProcessingQueue] Starting analysis pipeline for vacancy ${vacancy.id}")
 
         try {
             // Шаг 1: Анализ через Ollama на соответствие резюме
@@ -310,7 +310,7 @@ class VacancyProcessingQueueService(
             // Шаг 3: Если вакансия релевантна (relevance_score >= minRelevanceScore) - отправляем в Telegram
             // Навыки уже сохранены в БД при анализе, если вакансия релевантна
             if (analysis.isRelevant) {
-                log.info("✅ [VacancyProcessingQueue] Vacancy ${vacancy.id} is relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%)")
+                log.info(" [VacancyProcessingQueue] Vacancy ${vacancy.id} is relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%)")
 
                 // Отправляем в Telegram
                 try {
@@ -321,38 +321,38 @@ class VacancyProcessingQueueService(
                         log.info("📱 [VacancyProcessingQueue] Successfully sent vacancy ${vacancy.id} to Telegram")
                     }
                 } catch (e: Exception) {
-                    log.error("❌ [VacancyProcessingQueue] Failed to send vacancy ${vacancy.id} to Telegram: ${e.message}", e)
+                    log.error(" [VacancyProcessingQueue] Failed to send vacancy ${vacancy.id} to Telegram: ${e.message}", e)
                     // Продолжаем обработку даже если не удалось отправить
                 }
             } else {
                 log.debug("ℹ️ [VacancyProcessingQueue] Vacancy ${vacancy.id} is not relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%), skipping Telegram")
             }
 
-            log.info("✅ [VacancyProcessingQueue] Completed processing pipeline for vacancy ${vacancy.id} (isRelevant: ${analysis.isRelevant})")
+            log.info(" [VacancyProcessingQueue] Completed processing pipeline for vacancy ${vacancy.id} (isRelevant: ${analysis.isRelevant})")
         } catch (e: OllamaException) {
-            log.error("❌ [VacancyProcessingQueue] Ollama error processing vacancy ${vacancy.id}: ${e.message}", e)
+            log.error(" [VacancyProcessingQueue] Ollama error processing vacancy ${vacancy.id}: ${e.message}", e)
             // Помечаем как FAILED для критических ошибок
             try {
                 vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
                 metricsService.incrementVacanciesFailed()
             } catch (updateError: Exception) {
-                log.error("❌ [VacancyProcessingQueue] Failed to update status for vacancy ${vacancy.id} after error", updateError)
+                log.error(" [VacancyProcessingQueue] Failed to update status for vacancy ${vacancy.id} after error", updateError)
             }
         } catch (e: VacancyProcessingException) {
-            log.error("❌ [VacancyProcessingQueue] Error processing vacancy ${vacancy.id}: ${e.message}", e)
+            log.error(" [VacancyProcessingQueue] Error processing vacancy ${vacancy.id}: ${e.message}", e)
             try {
                 vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
                 metricsService.incrementVacanciesFailed()
             } catch (updateError: Exception) {
-                log.error("❌ [VacancyProcessingQueue] Failed to update status for vacancy ${vacancy.id} after processing error", updateError)
+                log.error(" [VacancyProcessingQueue] Failed to update status for vacancy ${vacancy.id} after processing error", updateError)
             }
         } catch (e: Exception) {
-            log.error("❌ [VacancyProcessingQueue] Unexpected error processing vacancy ${vacancy.id}: ${e.message}", e)
+            log.error(" [VacancyProcessingQueue] Unexpected error processing vacancy ${vacancy.id}: ${e.message}", e)
             try {
                 vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
                 metricsService.incrementVacanciesFailed()
             } catch (updateError: Exception) {
-                log.error("❌ [VacancyProcessingQueue] Failed to update status for vacancy ${vacancy.id} after unexpected error", updateError)
+                log.error(" [VacancyProcessingQueue] Failed to update status for vacancy ${vacancy.id} after unexpected error", updateError)
             }
         }
     }
@@ -378,12 +378,12 @@ class VacancyProcessingQueueService(
     fun clearQueue() {
         queue.clear()
         processingVacancies.clear()
-        log.info("🧹 [VacancyProcessingQueue] Queue cleared")
+        log.info(" [VacancyProcessingQueue] Queue cleared")
     }
 
     @PreDestroy
     fun shutdown() {
-        log.info("🛑 [VacancyProcessingQueue] Shutting down queue...")
+        log.info(" [VacancyProcessingQueue] Shutting down queue...")
         isRunning.set(false)
         queueScope.cancel()
         queueChannel.close()

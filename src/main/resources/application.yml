@@ -102,6 +102,8 @@ app:
       - "стажировка"
       - "internship"
     exclusion-case-sensitive: false  # Учитывать регистр при поиске (false = регистронезависимый поиск)
+    skill-matching:
+      enabled: true  # Включить предварительную проверку навыков из резюме (пропуск LLM если нет совпадений)
   log-analysis:
     enabled: true  # Enable daily log analysis with Ollama
     cron: "0 0 9 * * *"  # Cron expression for daily analysis (every day at 9:00 AM)
@@ -110,6 +112,9 @@ app:
     batch-size: 500  # Number of log lines per batch for analysis
     max-batches: 10  # Maximum number of batches to process (to avoid too long analysis)
     summary-first: true  # First create summaries of batches, then analyze summaries
+  ollama-monitoring:
+    enabled: true  # Enable Ollama status monitoring
+    interval-seconds: 5  # Interval between status checks (in seconds)
   prompts:
     # Системный промпт для анализа вакансий (максимально оптимизирован для скорости)
     # Требует только skills и relevance_score - без reasoning для ускорения

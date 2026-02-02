@@ -68,83 +68,83 @@ class VacancyService(
      */
     @Loggable
     suspend fun fetchAndSaveNewVacancies(): FetchResult {
-        log.info("🚀 [VacancyService] Starting to fetch new vacancies from HH.ru API")
+        log.info(" [VacancyService] Starting to fetch new vacancies from HH.ru API")
 
         // Получаем активные конфигурации поиска (приоритет: YAML rotation > YAML single > DB)
         val activeConfigs = getActiveSearchConfigs()
 
         if (activeConfigs.isEmpty()) {
-            log.warn("⚠️ [VacancyService] No active search configurations found")
-            log.warn("⚠️ [VacancyService] Configure search via DB (INSERT INTO search_configs) OR via application.yml (app.search.keywords-rotation)")
+            log.warn(" [VacancyService] No active search configurations found")
+            log.warn(" [VacancyService] Configure search via DB (INSERT INTO search_configs) OR via application.yml (app.search.keywords-rotation)")
             return FetchResult(emptyList(), emptyList())
         }
 
         val searchKeywords = activeConfigs.map { it.keywords }
-        log.info("📊 [VacancyService] Found ${activeConfigs.size} active search configuration(s)")
-        log.info("🔍 [VacancyService] Search keywords: ${searchKeywords.joinToString(", ") { "'$it'" }}")
+        log.info(" [VacancyService] Found ${activeConfigs.size} active search configuration(s)")
+        log.info(" [VacancyService] Search keywords: ${searchKeywords.joinToString(", ") { "'$it'" }}")
 
         val allNewVacancies = mutableListOf<Vacancy>()
 
         for (config in activeConfigs) {
             try {
                 val configId = config.id?.toString() ?: "YAML"
-                log.info("🔎 [VacancyService] Processing search config ID=$configId: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}")
+                log.info(" [VacancyService] Processing search config ID=$configId: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}")
                 val vacancies = fetchVacanciesForConfig(config)
                 allNewVacancies.addAll(vacancies)
-                log.info("✅ [VacancyService] Config ID=$configId ('${config.keywords}'): found ${vacancies.size} new vacancies")
+                log.info(" [VacancyService] Config ID=$configId ('${config.keywords}'): found ${vacancies.size} new vacancies")
 
                 if (allNewVacancies.size >= maxVacanciesPerCycle) {
-                    log.info("⏸️ [VacancyService] Reached max vacancies limit ($maxVacanciesPerCycle), stopping fetch")
+                    log.info(" [VacancyService] Reached max vacancies limit ($maxVacanciesPerCycle), stopping fetch")
                     break
                 }
             } catch (e: HHAPIException.UnauthorizedException) {
                 val configId = config.id?.toString() ?: "YAML"
-                log.error("🚨 [VacancyService] HH.ru API unauthorized/forbidden error for config $configId: ${e.message}", e)
-                log.error("🚨 [VacancyService] This usually means: token expired, invalid, or lacks required permissions")
+                log.error(" [VacancyService] HH.ru API unauthorized/forbidden error for config $configId: ${e.message}", e)
+                log.error(" [VacancyService] This usually means: token expired, invalid, or lacks required permissions")
 
                 // Пытаемся автоматически обновить токен через refresh token
-                log.info("🔄 [VacancyService] Attempting to refresh access token automatically...")
+                log.info(" [VacancyService] Attempting to refresh access token automatically...")
                 val refreshSuccess = tokenRefreshService.refreshTokenManually()
 
                 if (refreshSuccess) {
-                    log.info("✅ [VacancyService] Token refreshed successfully, retrying request...")
+                    log.info(" [VacancyService] Token refreshed successfully, retrying request...")
                     // Пробуем еще раз после обновления токена
                     try {
                         val vacancies = fetchVacanciesForConfig(config)
                         allNewVacancies.addAll(vacancies)
-                        log.info("✅ [VacancyService] Config ID=$configId ('${config.keywords}'): found ${vacancies.size} new vacancies after token refresh")
+                        log.info(" [VacancyService] Config ID=$configId ('${config.keywords}'): found ${vacancies.size} new vacancies after token refresh")
                         continue // Успешно, продолжаем с другими конфигурациями
                     } catch (retryException: Exception) {
-                        log.error("❌ [VacancyService] Request failed even after token refresh: ${retryException.message}", retryException)
+                        log.error(" [VacancyService] Request failed even after token refresh: ${retryException.message}", retryException)
                         // Пробрасываем исходное исключение
                         throw e
                     }
                 } else {
-                    log.warn("⚠️ [VacancyService] Token refresh failed or not available")
-                    log.warn("⚠️ [VacancyService] Please obtain a new token via OAuth: ${AppConstants.Urls.OAUTH_AUTHORIZE}")
+                    log.warn(" [VacancyService] Token refresh failed or not available")
+                    log.warn(" [VacancyService] Please obtain a new token via OAuth: ${AppConstants.Urls.OAUTH_AUTHORIZE}")
                     // Пробрасываем исключение дальше, чтобы оно обработалось в Scheduler
                     throw e
                 }
             } catch (e: HHAPIException.RateLimitException) {
                 val configId = config.id?.toString() ?: "YAML"
-                log.warn("⚠️ [VacancyService] Rate limit exceeded for config $configId, skipping: ${e.message}")
+                log.warn(" [VacancyService] Rate limit exceeded for config $configId, skipping: ${e.message}")
                 // Прерываем загрузку при rate limit, чтобы не усугубить ситуацию
                 break
             } catch (e: HHAPIException) {
                 val configId = config.id?.toString() ?: "YAML"
-                log.error("❌ [VacancyService] HH.ru API error fetching vacancies for config $configId: ${e.message}", e)
+                log.error(" [VacancyService] HH.ru API error fetching vacancies for config $configId: ${e.message}", e)
                 // Продолжаем с другими конфигурациями
             } catch (e: Exception) {
                 val configId = config.id?.toString() ?: "YAML"
-                log.error("❌ [VacancyService] Unexpected error fetching vacancies for config $configId: ${e.message}", e)
+                log.error(" [VacancyService] Unexpected error fetching vacancies for config $configId: ${e.message}", e)
                 // Продолжаем с другими конфигурациями
             }
         }
 
         val newVacancies = allNewVacancies.take(maxVacanciesPerCycle)
-        log.info("✅ [VacancyService] Total fetched and saved: ${newVacancies.size} new vacancies")
+        log.info(" [VacancyService] Total fetched and saved: ${newVacancies.size} new vacancies")
         if (newVacancies.isNotEmpty()) {
-            log.info("📝 [VacancyService] Sample vacancies: ${newVacancies.take(AppConstants.Indices.SAMPLE_VACANCIES_COUNT).joinToString(", ") { "${it.name} (${it.id})" }}")
+            log.info(" [VacancyService] Sample vacancies: ${newVacancies.take(AppConstants.Indices.SAMPLE_VACANCIES_COUNT).joinToString(", ") { "${it.name} (${it.id})" }}")
         }
 
         return FetchResult(newVacancies, searchKeywords)
@@ -282,7 +282,7 @@ class VacancyService(
         }
 
         val keyword = keywords[currentIndex]
-        log.debug("🔄 [VacancyService] Rotation: using keyword '$keyword' (index: $currentIndex/${keywords.size - 1})")
+        log.debug(" [VacancyService] Rotation: using keyword '$keyword' (index: $currentIndex/${keywords.size - 1})")
 
         return keyword
     }
@@ -301,19 +301,19 @@ class VacancyService(
             // Приоритет 1: Ротация ключевых слов из application.yml
             !keywordsRotation.isNullOrEmpty() -> {
                 val currentKeyword = getNextRotationKeyword(keywordsRotation)
-                log.info("📊 [VacancyService] Using keyword rotation from application.yml")
-                log.info("🔄 [VacancyService] Current rotation keyword: '$currentKeyword' (${keywordsRotation.size} keywords in rotation)")
+                log.info(" [VacancyService] Using keyword rotation from application.yml")
+                log.info(" [VacancyService] Current rotation keyword: '$currentKeyword' (${keywordsRotation.size} keywords in rotation)")
                 listOf(searchConfigFactory.createFromYamlConfig(currentKeyword, searchConfig))
             }
             // Приоритет 2: Одно ключевое слово из application.yml (обратная совместимость)
             !keywords.isNullOrBlank() -> {
-                log.info("📊 [VacancyService] Using single keyword from application.yml")
+                log.info(" [VacancyService] Using single keyword from application.yml")
                 listOf(searchConfigFactory.createFromYamlConfig(keywords, searchConfig))
             }
             // Приоритет 3: Конфигурации из БД (с кэшированием)
             else -> {
                 val dbConfigs = getActiveSearchConfigsFromDb()
-                log.info("📊 [VacancyService] Using search configurations from database (${dbConfigs.size} config(s))")
+                log.info(" [VacancyService] Using search configurations from database (${dbConfigs.size} config(s))")
                 dbConfigs
             }
         }
@@ -324,7 +324,7 @@ class VacancyService(
      */
     @Cacheable(value = ["searchConfigs"], key = "'active'")
     private fun getActiveSearchConfigsFromDb(): List<SearchConfig> {
-        log.debug("💾 [VacancyService] Loading active search configs from DB (cache miss)")
+        log.debug(" [VacancyService] Loading active search configs from DB (cache miss)")
         return searchConfigRepository.findByIsActiveTrue()
     }
 
@@ -333,7 +333,7 @@ class VacancyService(
      */
     @CacheEvict(value = ["searchConfigs"], allEntries = true)
     fun evictSearchConfigCache() {
-        log.debug("🔄 [VacancyService] Evicted search config cache")
+        log.debug(" [VacancyService] Evicted search config cache")
     }
 
     /**
@@ -342,11 +342,11 @@ class VacancyService(
     fun getAllVacancyIds(): Set<String> {
         val cacheKey = "all"
         vacancyIdsCache.getIfPresent(cacheKey)?.let { cached ->
-            log.debug("💾 [VacancyService] Using cached vacancy IDs (${cached.size} IDs)")
+            log.debug(" [VacancyService] Using cached vacancy IDs (${cached.size} IDs)")
             return cached
         }
 
-        log.debug("💾 [VacancyService] Loading vacancy IDs from DB (cache miss)")
+        log.debug(" [VacancyService] Loading vacancy IDs from DB (cache miss)")
         val ids = vacancyRepository.findAllIds().toSet()
         vacancyIdsCache.put(cacheKey, ids)
         return ids
@@ -362,7 +362,7 @@ class VacancyService(
                 .map { it.status }
                 .orElse(null)
             vacancyRepository.save(updatedVacancy)
-            log.info("✅ [VacancyService] Updated vacancy ${updatedVacancy.id} ('${updatedVacancy.name}') status: $oldStatus -> ${updatedVacancy.status}")
+            log.info(" [VacancyService] Updated vacancy ${updatedVacancy.id} ('${updatedVacancy.name}') status: $oldStatus -> ${updatedVacancy.status}")
 
             // Инвалидируем кэш списков вакансий при изменении статуса
             invalidateVacancyListCache()
@@ -386,31 +386,31 @@ class VacancyService(
             updateVacancyStatus(vacancy.withStatus(newStatus))
             getVacancyById(vacancyId) // Возвращаем обновленную версию
         } else {
-            log.warn("⚠️ [VacancyService] Vacancy with ID $vacancyId not found, cannot update status")
+            log.warn(" [VacancyService] Vacancy with ID $vacancyId not found, cannot update status")
             null
         }
     }
 
     private suspend fun fetchVacanciesForConfig(config: SearchConfig): List<Vacancy> {
         val configId = config.id?.toString() ?: "YAML"
-        log.info("🔍 [VacancyService] Fetching vacancies for config ID=$configId: '${config.keywords}'")
+        log.info(" [VacancyService] Fetching vacancies for config ID=$configId: '${config.keywords}'")
 
         val vacancyDtos = hhVacancyClient.searchVacancies(config)
-        log.info("📥 [VacancyService] Received ${vacancyDtos.size} vacancies from HH.ru API for config ID=$configId")
+        log.info(" [VacancyService] Received ${vacancyDtos.size} vacancies from HH.ru API for config ID=$configId")
 
         val existingIds = getAllVacancyIds()
-        log.debug("💾 [VacancyService] Checking against ${existingIds.size} existing vacancies in database")
+        log.debug(" [VacancyService] Checking against ${existingIds.size} existing vacancies in database")
 
         val newVacancies = vacancyDtos
             .filter { !existingIds.contains(it.id) }
             .map { it.toEntity(formattingConfig) }
             .take(maxVacanciesPerCycle)
 
-        log.info("🆕 [VacancyService] Found ${newVacancies.size} new vacancies (${vacancyDtos.size - newVacancies.size} already exist)")
+        log.info(" [VacancyService] Found ${newVacancies.size} new vacancies (${vacancyDtos.size - newVacancies.size} already exist)")
 
         if (newVacancies.isNotEmpty()) {
             vacancyRepository.saveAll(newVacancies)
-            log.info("💾 [VacancyService] ✅ Saved ${newVacancies.size} new vacancies to database for config ID=$configId")
+            log.info(" [VacancyService]  Saved ${newVacancies.size} new vacancies to database for config ID=$configId")
             newVacancies.forEach { vacancy ->
                 log.debug("   - Saved: ${vacancy.name} (ID: ${vacancy.id}, Employer: ${vacancy.employer}, Salary: ${vacancy.salary})")
             }
@@ -420,7 +420,7 @@ class VacancyService(
             // Также инвалидируем кэш конфигураций поиска (на случай, если они изменились)
             // Это делается через @CacheEvict в getActiveSearchConfigs, но можно и явно
         } else {
-            log.info("ℹ️ [VacancyService] No new vacancies to save for config ID=$configId")
+            log.info(" [VacancyService] No new vacancies to save for config ID=$configId")
         }
 
         return newVacancies
@@ -442,13 +442,13 @@ class VacancyService(
                 addAll(newVacancyIds)
             }
             vacancyIdsCache.put(cacheKey, updatedIds)
-            log.debug("🔄 [VacancyService] Incrementally updated vacancy IDs cache: added ${newVacancyIds.size} new IDs (total: ${updatedIds.size})")
+            log.debug(" [VacancyService] Incrementally updated vacancy IDs cache: added ${newVacancyIds.size} new IDs (total: ${updatedIds.size})")
         } else {
             // Кэш пуст - загружаем все ID из БД (это должно быть редко, только при старте приложения)
-            log.debug("💾 [VacancyService] Cache is empty, loading all vacancy IDs from DB...")
+            log.debug(" [VacancyService] Cache is empty, loading all vacancy IDs from DB...")
             val allIds = vacancyRepository.findAllIds().toSet()
             vacancyIdsCache.put(cacheKey, allIds)
-            log.debug("💾 [VacancyService] Loaded ${allIds.size} vacancy IDs from DB into cache")
+            log.debug(" [VacancyService] Loaded ${allIds.size} vacancy IDs from DB into cache")
         }
     }
 
@@ -458,7 +458,7 @@ class VacancyService(
     private fun invalidateVacancyListCache() {
         // Кэш списков вакансий будет автоматически обновлен через TTL (30 секунд)
         // Но можно явно инвалидировать через CacheManager, если нужно
-        log.debug("🔄 [VacancyService] Vacancy list cache will be refreshed on next request (TTL: 30s)")
+        log.debug(" [VacancyService] Vacancy list cache will be refreshed on next request (TTL: 30s)")
     }
 
     /**
