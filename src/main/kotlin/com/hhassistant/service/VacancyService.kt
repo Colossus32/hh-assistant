@@ -412,8 +412,8 @@ class VacancyService(
                 log.debug("   - Saved: ${vacancy.name} (ID: ${vacancy.id}, Employer: ${vacancy.employer}, Salary: ${vacancy.salary})")
             }
 
-            // Инвалидируем кэш ID вакансий при добавлении новых
-            invalidateVacancyIdsCache()
+            // Инкрементально обновляем кэш ID вакансий (добавляем новые ID вместо полной инвалидации)
+            updateVacancyIdsCacheIncrementally(newVacancies.map { it.id })
             // Также инвалидируем кэш конфигураций поиска (на случай, если они изменились)
             // Это делается через @CacheEvict в getActiveSearchConfigs, но можно и явно
         } else {
@@ -424,11 +424,29 @@ class VacancyService(
     }
 
     /**
-     * Инвалидирует кэш ID вакансий
+     * Инкрементально обновляет кэш ID вакансий, добавляя новые ID в существующий Set.
+     * Это намного быстрее, чем полная инвалидация и перезагрузка всех ID из БД.
+     *
+     * @param newVacancyIds Список новых ID вакансий для добавления в кэш
      */
-    private fun invalidateVacancyIdsCache() {
-        vacancyIdsCache.invalidateAll()
-        log.debug("🔄 [VacancyService] Invalidated vacancy IDs cache")
+    private fun updateVacancyIdsCacheIncrementally(newVacancyIds: List<String>) {
+        val cacheKey = "all"
+        val existingIds = vacancyIdsCache.getIfPresent(cacheKey)
+        
+        if (existingIds != null) {
+            // Кэш существует - добавляем новые ID инкрементально
+            val updatedIds = existingIds.toMutableSet().apply {
+                addAll(newVacancyIds)
+            }
+            vacancyIdsCache.put(cacheKey, updatedIds)
+            log.debug("🔄 [VacancyService] Incrementally updated vacancy IDs cache: added ${newVacancyIds.size} new IDs (total: ${updatedIds.size})")
+        } else {
+            // Кэш пуст - загружаем все ID из БД (это должно быть редко, только при старте приложения)
+            log.debug("💾 [VacancyService] Cache is empty, loading all vacancy IDs from DB...")
+            val allIds = vacancyRepository.findAllIds().toSet()
+            vacancyIdsCache.put(cacheKey, allIds)
+            log.debug("💾 [VacancyService] Loaded ${allIds.size} vacancy IDs from DB into cache")
+        }
     }
 
     /**

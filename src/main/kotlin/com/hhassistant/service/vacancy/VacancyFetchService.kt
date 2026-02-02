@@ -128,9 +128,12 @@ class VacancyFetchService(
 
         // Save all new vacancies to database with QUEUED status and add to processing queue
         if (allNewVacancies.isNotEmpty()) {
-            log.debug("[VacancyFetch] Saving ${allNewVacancies.size} new vacancies to database with QUEUED status...")
-            val savedVacancies = allNewVacancies.map { vacancyRepository.save(it) }
-            log.info("[VacancyFetch] Saved ${savedVacancies.size} vacancies to database with QUEUED status")
+            log.debug("[VacancyFetch] Saving ${allNewVacancies.size} new vacancies to database with QUEUED status using batch operations...")
+            
+            // Сохраняем батчами для оптимизации (Hibernate batch будет автоматически разбивать на группы)
+            val savedVacancies = saveVacanciesInBatches(allNewVacancies)
+            
+            log.info("[VacancyFetch] Saved ${savedVacancies.size} vacancies to database with QUEUED status (using batch operations)")
 
             // Инкрементально обновляем кэш ID вакансий (добавляем новые ID вместо полной инвалидации)
             updateVacancyIdsCacheIncrementally(savedVacancies.map { it.id })
@@ -245,6 +248,36 @@ class VacancyFetchService(
         log.debug("[VacancyFetch] Found ${vacancyDtos.size} total vacancies, excluded $totalExcluded, ${newVacancies.size} new (not in DB)")
 
         return newVacancies
+    }
+
+    /**
+     * Сохраняет вакансии батчами для оптимизации производительности.
+     * Разбивает большой список на батчи и сохраняет каждый батч через saveAll().
+     * Hibernate batch автоматически группирует INSERT-запросы.
+     *
+     * @param vacancies Список вакансий для сохранения
+     * @return Список сохраненных вакансий
+     */
+    private fun saveVacanciesInBatches(vacancies: List<Vacancy>): List<Vacancy> {
+        val batchSize = 100 // Размер батча для сохранения
+        val allSaved = mutableListOf<Vacancy>()
+        
+        if (vacancies.size <= batchSize) {
+            // Если вакансий немного, сохраняем все сразу
+            val saved = vacancyRepository.saveAll(vacancies)
+            log.debug("[VacancyFetch] Saved ${saved.size} vacancies in single batch")
+            return saved
+        }
+        
+        // Разбиваем на батчи и сохраняем по частям
+        vacancies.chunked(batchSize).forEachIndexed { index, batch ->
+            val saved = vacancyRepository.saveAll(batch)
+            allSaved.addAll(saved)
+            log.debug("[VacancyFetch] Saved batch ${index + 1}: ${saved.size} vacancies (total saved: ${allSaved.size}/${vacancies.size})")
+        }
+        
+        log.info("[VacancyFetch] Saved ${allSaved.size} vacancies in ${(vacancies.size + batchSize - 1) / batchSize} batches")
+        return allSaved
     }
 
     /**
