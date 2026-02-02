@@ -1,0 +1,35 @@
+databaseChangeLog:
+  - changeSet:
+      id: add-skills-extracted-at-to-vacancies
+      author: system
+      changes:
+        - addColumn:
+            tableName: vacancies
+            columns:
+              - column:
+                  name: skills_extracted_at
+                  type: timestamp
+                  constraints:
+                    nullable: true
+        - createIndex:
+            indexName: idx_vacancies_skills_extracted_at
+            tableName: vacancies
+            columns:
+              - column:
+                  name: skills_extracted_at
+        # Устанавливаем skills_extracted_at для вакансий, у которых уже есть навыки
+        - sql:
+            sql: |
+              UPDATE vacancies v
+              SET skills_extracted_at = (
+                  SELECT MIN(vs.extracted_at)
+                  FROM vacancy_skills vs
+                  WHERE vs.vacancy_id = v.id
+              )
+              WHERE v.skills_extracted_at IS NULL
+                AND EXISTS (
+                    SELECT 1
+                    FROM vacancy_skills vs
+                    WHERE vs.vacancy_id = v.id
+                )
+
