@@ -33,6 +33,7 @@ class WebClientConfig(
         @Value("\${hh.api.user-agent}") userAgent: String,
         @Value("\${hh.api.auth-prefix}") authPrefix: String,
         @Value("\${hh.api.accept-header}") acceptHeader: String,
+        @Value("\${hh.api.max-in-memory-size-mb:10}") maxInMemorySizeMb: Int,
     ): WebClient {
         // HH.ru API требует обязательный заголовок HH-User-Agent (не User-Agent!)
         // Формат: "AppName/Version (contact@email.com)"
@@ -57,6 +58,7 @@ class WebClientConfig(
 
         builder = builder
             .defaultHeader(HttpHeaders.ACCEPT, acceptHeader)
+            .codecs { it.defaultCodecs().maxInMemorySize(maxInMemorySizeMb * 1024 * 1024) }
             .filter(WebClientRequestLoggingFilter.create())
             .filter(retryFilter())
             .filter(errorLoggingFilter())
@@ -76,6 +78,8 @@ class WebClientConfig(
             log.error("   This will cause 403 Forbidden errors!")
             log.error("   Please set HH_ACCESS_TOKEN in .env file or get token via /oauth/application-token")
         }
+
+        log.info("✅ [WebClient] HH.ru WebClient configured with maxInMemorySize: ${maxInMemorySizeMb}MB")
 
         return builder.build()
     }

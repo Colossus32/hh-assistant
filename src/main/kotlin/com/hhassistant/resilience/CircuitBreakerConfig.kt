@@ -92,4 +92,3 @@ class CircuitBreakerConfig {
         return registry.retry("hh-api")
     }
 }
-
