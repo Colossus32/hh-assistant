@@ -100,21 +100,35 @@ class SkillExtractionService(
             saveOrUpdateSkill(skillName)
         }
 
-        // Шаг 5: Создание связей VacancySkill
+        // Шаг 5: Создание связей VacancySkill (оптимизировано: batch-сохранение)
         val extractedAt = java.time.LocalDateTime.now()
-        var skillsLinked = 0
-        savedSkills.forEach { skill ->
-            val skillId = skill.id ?: return@forEach
-            if (!vacancySkillRepository.existsByVacancyIdAndSkillId(vacancy.id, skillId)) {
-                val vacancySkill = VacancySkill(
-                    vacancyId = vacancy.id,
-                    skillId = skillId,
-                    extractedAt = extractedAt,
-                )
-                vacancySkillRepository.save(vacancySkill)
-                skillsLinked++
-                log.debug("💾 [SkillExtraction] Created VacancySkill link: vacancy=${vacancy.id}, skill=$skillId (${skill.name})")
+        
+        // Оптимизация: один запрос для получения всех существующих связей вместо N запросов existsByVacancyIdAndSkillId
+        val existingLinks = vacancySkillRepository.findByVacancyId(vacancy.id)
+        val existingSkillIds = existingLinks.map { it.skillId }.toSet()
+        
+        // Собираем только новые связи (которых еще нет)
+        val newVacancySkills = savedSkills
+            .mapNotNull { skill ->
+                val skillId = skill.id ?: return@mapNotNull null
+                if (skillId !in existingSkillIds) {
+                    VacancySkill(
+                        vacancyId = vacancy.id,
+                        skillId = skillId,
+                        extractedAt = extractedAt,
+                    )
+                } else {
+                    null
+                }
             }
+        
+        // Batch-сохранение всех новых связей одним запросом
+        val skillsLinked = if (newVacancySkills.isNotEmpty()) {
+            val saved = vacancySkillRepository.saveAll(newVacancySkills)
+            log.debug("💾 [SkillExtraction] Created ${saved.size} VacancySkill links for vacancy=${vacancy.id} using batch save")
+            saved.size
+        } else {
+            0
         }
 
         // Шаг 6: Обновляем вакансию, устанавливая skills_extracted_at только если были сохранены навыки
