@@ -254,6 +254,7 @@ hh:
     user-agent: ${HH_USER_AGENT:}
     accept-header: application/json
     auth-prefix: Bearer
+    max-in-memory-size-mb: 10  # Максимальный размер буфера для ответов API (в МБ, по умолчанию 256KB)
     search:
       per-page: 100  # Количество вакансий на страницу (максимум согласно документации HH.ru API)
       default-page: 0
@@ -337,4 +338,3 @@ resilience:
   retry:
     max-attempts: 3  # Maximum number of retry attempts
     wait-duration-millis: 1000  # Wait duration between retries (in milliseconds)
-

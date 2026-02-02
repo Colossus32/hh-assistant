@@ -18,8 +18,3 @@ app:
 hh:
   api:
     access-token: ${HH_ACCESS_TOKEN:}  # Может быть пустым в dry-run
-
-
-
-
-
