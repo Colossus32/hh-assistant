@@ -191,7 +191,8 @@ class VacancySchedulerService(
                 log.info("[Scheduler] Found ${queuedVacancies.size} QUEUED vacancies, adding to processing queue...")
                 val vacancyIds = queuedVacancies.map { it.id }
                 val enqueuedCount = vacancyProcessingQueueService.enqueueBatch(vacancyIds)
-                log.info("[Scheduler] Added $enqueuedCount QUEUED vacancies to processing queue (${vacancyIds.size - enqueuedCount} skipped as duplicates)")
+                val skippedCount = vacancyIds.size - enqueuedCount
+                log.info("[Scheduler] Added $enqueuedCount QUEUED vacancies to processing queue ($skippedCount skipped as duplicates)")
             } catch (e: Exception) {
                 log.error("[Scheduler] Error processing QUEUED vacancies: ${e.message}", e)
             }
