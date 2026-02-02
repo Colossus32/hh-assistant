@@ -158,3 +158,4 @@ data class SkillStatistics(
      */
     val frequencyPercentage: Double,
 )
+

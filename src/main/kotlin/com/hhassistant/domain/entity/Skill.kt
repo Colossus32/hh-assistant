@@ -73,3 +73,4 @@ data class Skill(
         return occurrenceCount >= minOccurrences
     }
 }
+

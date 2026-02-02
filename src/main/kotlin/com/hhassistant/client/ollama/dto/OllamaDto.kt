@@ -49,3 +49,4 @@ data class OllamaChatResponse(
     val message: ChatMessage,
     val done: Boolean,
 )
+

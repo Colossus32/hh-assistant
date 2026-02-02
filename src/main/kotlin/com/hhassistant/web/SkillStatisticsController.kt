@@ -140,3 +140,4 @@ data class OverallStatisticsResponse(
      */
     val totalVacanciesAnalyzed: Int,
 )
+

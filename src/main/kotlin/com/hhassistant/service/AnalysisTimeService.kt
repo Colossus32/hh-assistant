@@ -54,3 +54,4 @@ class AnalysisTimeService {
         log.debug("📊 [AnalysisTime] Average time reset")
     }
 }
+

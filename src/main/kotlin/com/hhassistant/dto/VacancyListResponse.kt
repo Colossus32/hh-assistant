@@ -20,3 +20,4 @@ data class VacancyListItemDto(
     val isViewed: Boolean? = null,
 )
 
+
