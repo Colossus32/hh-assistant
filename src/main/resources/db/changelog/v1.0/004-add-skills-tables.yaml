@@ -123,9 +123,3 @@ databaseChangeLog:
             referencedColumnNames: id
             constraintName: fk_vacancy_skills_vacancy_id
             onDelete: CASCADE
-
-
-
-
-
-

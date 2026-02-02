@@ -13,5 +13,3 @@ databaseChangeLog:
       file: db/changelog/v1.0/006-add-sent-to-telegram-tracking.yaml
   - include:
       file: db/changelog/v1.0/007-add-skills-extracted-at.yaml
-
-

@@ -32,4 +32,3 @@ databaseChangeLog:
                     FROM vacancy_skills vs
                     WHERE vs.vacancy_id = v.id
                 )
-
