@@ -1,4 +1,4 @@
-package com.hhassistant.service
+package com.hhassistant.service.util
 
 import mu.KotlinLogging
 import org.springframework.stereotype.Service

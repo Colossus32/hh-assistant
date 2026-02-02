@@ -1,4 +1,4 @@
-package com.hhassistant.service
+package com.hhassistant.service.util
 
 import com.hhassistant.client.hh.HHOAuthService
 import com.hhassistant.client.hh.dto.OAuthTokenResponse

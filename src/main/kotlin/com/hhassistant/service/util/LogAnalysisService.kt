@@ -1,4 +1,4 @@
-package com.hhassistant.service
+package com.hhassistant.service.util
 
 import com.hhassistant.client.ollama.OllamaClient
 import com.hhassistant.client.ollama.dto.ChatMessage

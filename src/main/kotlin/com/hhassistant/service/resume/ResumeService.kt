@@ -1,4 +1,4 @@
-package com.hhassistant.service
+package com.hhassistant.service.resume
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.hhassistant.client.hh.HHResumeClient

@@ -1,4 +1,4 @@
-package com.hhassistant.service
+package com.hhassistant.service.notification
 
 import com.hhassistant.client.telegram.TelegramClient
 import com.hhassistant.config.AppConstants

@@ -1,4 +1,4 @@
-package com.hhassistant.service
+package com.hhassistant.service.telegram
 
 import com.hhassistant.client.telegram.dto.User
 import mu.KotlinLogging

@@ -1,4 +1,4 @@
-package com.hhassistant.service
+package com.hhassistant.service.telegram
 
 import com.hhassistant.client.telegram.TelegramClient
 import com.hhassistant.config.AppConstants
@@ -13,6 +13,12 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.bodyToMono
+import com.hhassistant.service.skill.SkillExtractionService
+import com.hhassistant.service.skill.SkillStatistics
+import com.hhassistant.service.vacancy.VacancyService
+import com.hhassistant.service.exclusion.ExclusionRuleService
+import com.hhassistant.service.exclusion.ExclusionKeywordService
+import com.hhassistant.service.util.AnalysisTimeService
 
 /**
  * Обработчик команд Telegram бота.

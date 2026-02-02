@@ -1,4 +1,4 @@
-package com.hhassistant.service
+package com.hhassistant.service.util
 
 import com.hhassistant.config.VacancyServiceConfig
 import com.hhassistant.domain.entity.SearchConfig

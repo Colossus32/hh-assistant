@@ -1,4 +1,4 @@
-package com.hhassistant.service
+package com.hhassistant.service.exclusion
 
 import com.hhassistant.domain.entity.ExclusionRule
 import com.hhassistant.repository.ExclusionRuleRepository
