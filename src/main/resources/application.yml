@@ -26,10 +26,9 @@ spring:
         # Batch-операции для оптимизации сохранения вакансий
         jdbc:
           batch_size: 50  # Размер батча для Hibernate (группирует INSERT-запросы)
+          batch_versioned_data: true  # Включает batch для версионированных данных
         order_inserts: true  # Упорядочивает INSERT для лучшей производительности
         order_updates: true  # Упорядочивает UPDATE для лучшей производительности
-        jdbc:
-          batch_versioned_data: true  # Включает batch для версионированных данных
   
   jackson:
     serialization:
