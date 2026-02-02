@@ -12,6 +12,7 @@ import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancySkill
 import com.hhassistant.exception.HHAPIException
 import com.hhassistant.repository.SkillRepository
+import com.hhassistant.repository.VacancyAnalysisRepository
 import com.hhassistant.repository.VacancyRepository
 import com.hhassistant.repository.VacancySkillRepository
 import io.github.resilience4j.circuitbreaker.CircuitBreaker
@@ -34,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional
 class SkillExtractionService(
     private val skillRepository: SkillRepository,
     private val vacancySkillRepository: VacancySkillRepository,
+    private val vacancyAnalysisRepository: VacancyAnalysisRepository,
     private val vacancyRepository: VacancyRepository,
     private val ollamaClient: OllamaClient,
     private val promptConfig: PromptConfig,
@@ -377,8 +379,7 @@ class SkillExtractionService(
     }
 
     /**
-     * Удаляет вакансию и связанные навыки.
-     * Примечание: анализы вакансий удаляются через VacancyCleanupService для единообразия.
+     * Удаляет вакансию и все связанные данные (навыки, анализы).
      */
     @Transactional
     private fun deleteVacancyAndSkills(vacancyId: String) {
@@ -386,10 +387,16 @@ class SkillExtractionService(
             // Удаляем связи вакансия-навык
             vacancySkillRepository.deleteByVacancyId(vacancyId)
 
+            // Удаляем анализы вакансии
+            vacancyAnalysisRepository.findByVacancyId(vacancyId)?.let { analysis ->
+                vacancyAnalysisRepository.delete(analysis)
+                log.debug("🗑️ [SkillExtraction] Deleted VacancyAnalysis for vacancy $vacancyId")
+            }
+
             // Удаляем саму вакансию
             vacancyRepository.deleteById(vacancyId)
 
-            log.info("✅ [SkillExtraction] Deleted vacancy $vacancyId and related skills")
+            log.info("✅ [SkillExtraction] Deleted vacancy $vacancyId and all related data")
         } catch (e: Exception) {
             log.error("❌ [SkillExtraction] Failed to delete vacancy $vacancyId: ${e.message}", e)
         }
