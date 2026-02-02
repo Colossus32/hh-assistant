@@ -19,34 +19,67 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   # Ollama runs locally (not in Docker)
   # Install Ollama from https://ollama.ai/download
   # Run: ollama serve (starts on http://localhost:11434)
   # Pull model: ollama pull qwen2.5:7b
+  # On Windows/Mac, Docker containers can access localhost via host.docker.internal
+  # On Linux, you may need to use --network=host or add extra_hosts
 
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: hh-assistant
+    ports:
+      - "${APP_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
     environment:
+      # Database configuration
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hh_assistant
       SPRING_DATASOURCE_USERNAME: hh_user
       SPRING_DATASOURCE_PASSWORD: hh_pass
+      
+      # Ollama configuration (accessing local Ollama from Docker container)
+      # On Windows/Mac: host.docker.internal works out of the box
+      # On Linux: you may need to add extra_hosts or use network_mode: host
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      
+      # HH.ru API configuration
       HH_ACCESS_TOKEN: ${HH_ACCESS_TOKEN:-}
+      HH_TOKEN_TYPE: ${HH_TOKEN_TYPE:-user}
+      HH_USER_AGENT: ${HH_USER_AGENT:-}
+      
+      # Telegram configuration
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-true}
+      TELEGRAM_AUTHORIZATION_ENABLED: ${TELEGRAM_AUTHORIZATION_ENABLED:-true}
+      TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:-}
+      TELEGRAM_ALLOWED_USERNAMES: ${TELEGRAM_ALLOWED_USERNAMES:-}
+      
+      # Proxy configuration
       PROXY_ENABLED: ${PROXY_ENABLED:-false}
       PROXY_HOST: ${PROXY_HOST:-}
-      PROXY_PORT: ${PROXY_PORT:-}
+      PROXY_PORT: ${PROXY_PORT:-8080}
+      PROXY_TYPE: ${PROXY_TYPE:-HTTP}
+      
+      # Application configuration
+      APP_API_BASE_URL: ${APP_API_BASE_URL:-http://localhost:8080}
     volumes:
-      - ./resumes:/app/resumes
+      - ./resumes:/app/resumes:ro
+      - ./logs:/app/logs
     networks:
       - hh-network
     restart: unless-stopped
+    # Для Linux может потребоваться добавить extra_hosts для доступа к host.docker.internal
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
 
 volumes:
   postgres_data:
@@ -54,4 +87,3 @@ volumes:
 networks:
   hh-network:
     driver: bridge
-

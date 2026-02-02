@@ -1,0 +1,62 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Build artifacts
+build/
+.gradle/
+*.jar
+!build/libs/*.jar
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Scripts
+scripts/
+
+# Test files
+src/test/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Docker files (except Dockerfile)
+docker-compose*.yml
+Dockerfile*
+
+# Monitoring
+monitoring/
+
+# Interview prep
+interview-prep/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Other
+commit_message.txt
