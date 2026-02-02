@@ -15,7 +15,8 @@ import kotlin.system.measureTimeMillis
  */
 @Aspect
 @Component
-class LoggingAspect {
+class
+LoggingAspect {
     private val log = KotlinLogging.logger {}
 
     /**
@@ -47,16 +48,11 @@ class LoggingAspect {
      * - INFO: methods taking longer than threshold
      * - ERROR: exceptions
      */
-    @Around("serviceMethods() || clientMethods()")
+    @Around("(serviceMethods() || clientMethods()) && !pollUpdatesMethod()")
     fun logMethodExecution(joinPoint: ProceedingJoinPoint): Any? {
         val signature = joinPoint.signature as MethodSignature
         val className = signature.declaringType.simpleName
         val methodName = signature.name
-
-        // Skip logging for pollUpdates method to reduce noise
-        if (className == "TelegramPollingService" && methodName == "pollUpdates") {
-            return joinPoint.proceed()
-        }
 
         val args = joinPoint.args
 
