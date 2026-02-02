@@ -22,6 +22,10 @@ class VacancySchedulerServiceTest {
     private lateinit var notificationService: NotificationService
     private lateinit var resumeService: ResumeService
     private lateinit var metricsService: com.hhassistant.metrics.MetricsService
+    private lateinit var skillExtractionService: com.hhassistant.service.skill.SkillExtractionService
+    private lateinit var vacancyProcessingQueueService: com.hhassistant.service.vacancy.VacancyProcessingQueueService
+    private lateinit var skillExtractionQueueService: com.hhassistant.service.skill.SkillExtractionQueueService
+    private lateinit var vacancyRepository: com.hhassistant.repository.VacancyRepository
     private lateinit var service: VacancySchedulerService
 
     @BeforeEach
@@ -33,6 +37,10 @@ class VacancySchedulerServiceTest {
         notificationService = mockk(relaxed = true)
         resumeService = mockk(relaxed = true)
         metricsService = mockk(relaxed = true)
+        skillExtractionService = mockk(relaxed = true)
+        vacancyProcessingQueueService = mockk(relaxed = true)
+        skillExtractionQueueService = mockk(relaxed = true)
+        vacancyRepository = mockk(relaxed = true)
         service = VacancySchedulerService(
             vacancyFetchService = vacancyFetchService,
             vacancyService = vacancyService,
@@ -41,28 +49,12 @@ class VacancySchedulerServiceTest {
             notificationService = notificationService,
             resumeService = resumeService,
             metricsService = metricsService,
-            dryRun = false,
+            skillExtractionService = skillExtractionService,
+            vacancyProcessingQueueService = vacancyProcessingQueueService,
+            skillExtractionQueueService = skillExtractionQueueService,
+            vacancyRepository = vacancyRepository,
             maxConcurrentRequests = 3,
         )
-    }
-
-    @Test
-    fun `should skip execution in dry-run mode`() {
-        val dryRunService = VacancySchedulerService(
-            vacancyFetchService = vacancyFetchService,
-            vacancyService = vacancyService,
-            vacancyAnalysisService = vacancyAnalysisService,
-            vacancyStatusService = vacancyStatusService,
-            notificationService = notificationService,
-            resumeService = resumeService,
-            metricsService = metricsService,
-            dryRun = true,
-            maxConcurrentRequests = 3,
-        )
-
-        dryRunService.checkNewVacancies()
-
-        coVerify(exactly = 0) { vacancyFetchService.fetchAndSaveNewVacancies() }
     }
 
     @Test
