@@ -40,5 +40,29 @@ interface VacancyRepository : JpaRepository<Vacancy, String> {
     @Query("SELECT v FROM Vacancy v WHERE v.status = 'SKIPPED' ORDER BY v.fetchedAt ASC")
     fun findSkippedVacanciesForRetry(pageable: Pageable): List<Vacancy>
 
+    /**
+     * Получает список вакансий, для которых еще не извлечены навыки.
+     * Использует поле skills_extracted_at для быстрой проверки без запросов к vacancy_skills.
+     *
+     * @return Список вакансий без извлеченных навыков
+     */
+    @Query("SELECT v FROM Vacancy v WHERE v.skillsExtractedAt IS NULL")
+    fun findVacanciesWithoutSkills(): List<Vacancy>
+
+    /**
+     * Получает список релевантных вакансий, для которых еще не извлечены навыки.
+     * Использует JOIN с VacancyAnalysis для поиска релевантных вакансий без навыков.
+     *
+     * @return Список релевантных вакансий без извлеченных навыков
+     */
+    @Query("""
+        SELECT v FROM Vacancy v
+        INNER JOIN VacancyAnalysis va ON v.id = va.vacancyId
+        WHERE va.isRelevant = true
+        AND v.skillsExtractedAt IS NULL
+        ORDER BY va.relevanceScore DESC, va.analyzedAt DESC
+    """)
+    fun findRelevantVacanciesWithoutSkills(): List<Vacancy>
+
     override fun existsById(id: String): Boolean
 }
