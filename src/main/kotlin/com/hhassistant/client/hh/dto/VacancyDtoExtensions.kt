@@ -3,19 +3,28 @@ package com.hhassistant.client.hh.dto
 import com.hhassistant.config.FormattingConfig
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
-import mu.KotlinLogging
 
-private val log = KotlinLogging.logger {}
+/**
+ * Проверяет, требует ли вакансия более 6 лет опыта работы.
+ * Использует различные варианты написания для поддержки разных языков и форматов.
+ *
+ * @return true, если вакансия требует более 6 лет опыта, false в противном случае
+ */
+fun VacancyDto.requiresMoreThan6YearsExperience(): Boolean {
+    val experienceStr = this.getExperienceYearsString() ?: ""
+    return experienceStr.contains("morethan6", ignoreCase = true) ||
+        experienceStr.contains("более 6", ignoreCase = true) ||
+        experienceStr.contains("свыше 6", ignoreCase = true) ||
+        experienceStr.contains("more than 6", ignoreCase = true)
+}
 
 fun VacancyDto.toEntity(formattingConfig: FormattingConfig): Vacancy {
     // Используем alternate_url (браузерная ссылка) если есть и не пустая, иначе url (API ссылка)
     // Если alternate_url нет, пытаемся преобразовать API URL в браузерную ссылку
     val browserUrl = if (!this.alternateUrl.isNullOrBlank()) {
         // Используем alternate_url если он есть и не пустой
-        log.debug("🔗 [VacancyDto] Using alternateUrl for vacancy ${this.id}: ${this.alternateUrl}")
         this.alternateUrl
     } else if (!this.url.isNullOrBlank()) {
-        log.debug("🔗 [VacancyDto] alternateUrl is null/empty for vacancy ${this.id}, converting API URL: ${this.url}")
         // Преобразуем API URL в браузерную ссылку
         // https://api.hh.ru/vacancies/123?host=hh.ru -> https://hh.ru/vacancy/123
         // https://api.hh.ru/vacancies/123 -> https://hh.ru/vacancy/123
@@ -40,18 +49,14 @@ fun VacancyDto.toEntity(formattingConfig: FormattingConfig): Vacancy {
             else -> {
                 // Если не похоже на известный формат, используем ID из DTO
                 val fallbackUrl = "https://hh.ru/vacancy/${this.id}"
-                log.debug("🔗 [VacancyDto] Using fallback URL for vacancy ${this.id}: $fallbackUrl")
                 fallbackUrl
             }
         }
     } else {
         // Если и url, и alternateUrl отсутствуют, используем ID для формирования URL
         val fallbackUrl = "https://hh.ru/vacancy/${this.id}"
-        log.debug("🔗 [VacancyDto] Both url and alternateUrl are null/empty for vacancy ${this.id}, using fallback URL: $fallbackUrl")
         fallbackUrl
     }
-
-    log.debug("🔗 [VacancyDto] Final browser URL for vacancy ${this.id}: $browserUrl")
 
     return Vacancy(
         id = this.id,
