@@ -32,7 +32,14 @@ data class VacancyServiceConfig(
     val minSalary: Int? = null,
 
     /**
-     * Требуемый опыт работы
+     * Требуемый опыт работы (одно значение, для обратной совместимости)
      */
     val experience: String? = null,
+
+    /**
+     * Список ID опыта работы для фильтрации вакансий
+     * Доступные значения: "noExperience", "between1And3", "between3And6", "moreThan6"
+     * Маппится из YAML: experience-ids -> experienceIds
+     */
+    val experienceIds: List<String>? = null,
 )

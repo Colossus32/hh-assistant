@@ -58,6 +58,11 @@ app:
     # area: ${APP_SEARCH_AREA:}  # Например: "Москва"
     # min-salary: ${APP_SEARCH_MIN_SALARY:}  # Например: 150000
     # experience: ${APP_SEARCH_EXPERIENCE:}  # Например: "От 3 лет"
+    # Список ID опыта работы для фильтрации вакансий
+    # Доступные значения: "noExperience", "between1And3", "between3And6", "moreThan6"
+    experience-ids:
+      - "between1And3"  # От 1 года до 3 лет
+      - "between3And6"  # От 3 до 6 лет
   vacancy-processing:
     queue:
       enabled: true  # Enable/disable vacancy processing queue (high priority - analysis)
@@ -250,7 +255,7 @@ hh:
     accept-header: application/json
     auth-prefix: Bearer
     search:
-      per-page: 50
+      per-page: 100  # Количество вакансий на страницу (максимум согласно документации HH.ru API)
       default-page: 0
   oauth:
     client-id: ${HH_CLIENT_ID:}
@@ -273,9 +278,9 @@ hh:
     max-backoff-seconds: 10
     rate-limit-status-code: 429
   rate-limit:
-    requests-per-minute: 20  # Лимит запросов в минуту (HH.ru обычно позволяет 20-30)
-    burst-capacity: 30  # Максимальное количество одновременных запросов
-    wait-on-limit-seconds: 60  # Время ожидания при превышении лимита (в секундах)
+    requests-per-second: 2  # Лимит запросов в секунду (2 запроса в секунду для HH.ru API)
+    burst-capacity: 4  # Максимальное количество одновременных запросов (позволяет сделать несколько запросов подряд)
+    wait-on-limit-seconds: 1  # Время ожидания при превышении лимита (в секундах)
   currency:
     default: RUR
   vacancy:
