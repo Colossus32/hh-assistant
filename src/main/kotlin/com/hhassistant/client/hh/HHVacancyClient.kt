@@ -3,6 +3,7 @@ package com.hhassistant.client.hh
 import com.github.benmanes.caffeine.cache.Cache
 import com.hhassistant.client.hh.dto.VacancyDto
 import com.hhassistant.client.hh.dto.VacancySearchResponse
+import com.hhassistant.config.VacancyServiceConfig
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.exception.HHAPIException
 import com.hhassistant.ratelimit.RateLimitService
@@ -24,6 +25,7 @@ class HHVacancyClient(
     @Value("\${hh.api.search.default-page}") private val defaultPage: Int,
     private val rateLimitService: RateLimitService,
     @Qualifier("vacancyDetailsCache") private val vacancyDetailsCache: Cache<String, VacancyDto>,
+    private val searchConfig: VacancyServiceConfig,
 ) {
     private val log = KotlinLogging.logger {}
 
@@ -33,51 +35,131 @@ class HHVacancyClient(
      */
     private val maxVacanciesDepth = 2000
 
-    suspend fun searchVacancies(config: SearchConfig): List<VacancyDto> {
-        log.debug("[HH.ru API] Searching vacancies: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}, experience=${config.experience}")
+    /**
+     * Кэш для отслеживания последней обработанной страницы для каждого уникального SearchConfig.
+     * Ключ: уникальный идентификатор конфигурации (keywords + area + minSalary)
+     * Значение: последняя обработанная страница
+     */
+    private val lastProcessedPageCache = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
-        // Check rate limit before first request
-        rateLimitService.tryConsume()
+    /**
+     * Генерирует уникальный ключ для SearchConfig
+     */
+    private fun getConfigKey(config: SearchConfig): String {
+        return "${config.keywords}|${config.area ?: "null"}|${config.minSalary ?: "null"}"
+    }
 
-        // First, fetch first page to get total pages count
-        val firstPageResponse = fetchVacanciesPage(config, defaultPage)
-        val totalFound = firstPageResponse.found
-        val totalPages = firstPageResponse.pages
-        val allVacancies = firstPageResponse.items.toMutableList()
+    /**
+     * Поиск вакансий с улучшенной пагинацией.
+     * Определяет конец пагинации по пустой/неполной странице и автоматически перезапускается
+     * с начала при обнаружении новых вакансий.
+     * 
+     * Каждый уникальный SearchConfig (по keywords + area + minSalary) имеет свой независимый прогресс пагинации.
+     *
+     * @param config Конфигурация поиска
+     * @param startFromPage Страница, с которой начинать поиск (по умолчанию используется сохраненный прогресс или 0)
+     * @param isRestart Флаг, указывающий что это перезапуск (для предотвращения бесконечной рекурсии)
+     * @return Список найденных вакансий
+     */
+    suspend fun searchVacancies(config: SearchConfig, startFromPage: Int? = null, isRestart: Boolean = false): List<VacancyDto> {
+        val experienceIds = searchConfig.experienceIds ?: listOf("between1And3", "between3And6")
+        
+        // Получаем уникальный ключ для этого SearchConfig
+        val configKey = getConfigKey(config)
+        
+        // Определяем стартовую страницу: используем переданную, сохраненную или 0
+        val actualStartPage = startFromPage ?: lastProcessedPageCache.getOrDefault(configKey, 0)
+        
+        log.debug("[HH.ru API] Searching vacancies: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}, experience=$experienceIds, startFromPage=$actualStartPage (configKey=$configKey)")
 
-        log.info("[HH.ru API] First page: ${firstPageResponse.items.size} vacancies, total found: $totalFound, total pages: $totalPages")
+        val allVacancies = mutableListOf<VacancyDto>()
+        var currentPage = actualStartPage
+        var hasMorePages = true
+        var totalFound = 0
+        var lastSuccessfulPage = actualStartPage
 
-        // Calculate max pages considering HH.ru API limit (2000 vacancies)
-        val maxPage = minOf(
-            totalPages - 1, // 0-based indexing
-            (maxVacanciesDepth / perPage) - 1, // HH.ru API limit
-        )
+        while (hasMorePages && currentPage * perPage < maxVacanciesDepth) {
+            try {
+                rateLimitService.tryConsume()
 
-        // Fetch remaining pages
-        if (maxPage > defaultPage) {
-            log.debug("[HH.ru API] Fetching additional pages: ${defaultPage + 1}..$maxPage")
+                val pageResponse = fetchVacanciesPage(config, currentPage)
+                
+                // Сохраняем totalFound из первой страницы для логирования
+                if (currentPage == actualStartPage) {
+                    totalFound = pageResponse.found
+                    log.info("[HH.ru API] Page $currentPage: ${pageResponse.items.size} vacancies, total found: $totalFound")
+                }
 
-            for (page in (defaultPage + 1)..maxPage) {
-                try {
-                    rateLimitService.tryConsume()
+                // Проверяем признаки конца пагинации
+                when {
+                    // Пустая страница - достигли конца
+                    pageResponse.items.isEmpty() -> {
+                        log.info("[HH.ru API] Empty page $currentPage detected - reached end of results")
+                        hasMorePages = false
 
-                    val pageResponse = fetchVacanciesPage(config, page)
-                    allVacancies.addAll(pageResponse.items)
+                        // Если начали не с 0 и это не перезапуск, значит были новые вакансии - начинаем сначала
+                        if (currentPage > 0 && actualStartPage > 0 && !isRestart) {
+                            log.info("[HH.ru API] Empty page detected at $currentPage (started from $actualStartPage) - new vacancies may have appeared, restarting from page 0")
+                            // Сбрасываем кэш для этого конфига и перезапускаем с начала
+                            lastProcessedPageCache.remove(configKey)
+                            // Рекурсивно перезапускаем с начала
+                            return searchVacancies(config, startFromPage = 0, isRestart = true)
+                        } else if (currentPage == 0 && pageResponse.items.isEmpty()) {
+                            log.warn("[HH.ru API] First page (0) is empty - no vacancies found for this search")
+                            // Сбрасываем кэш, так как нет вакансий
+                            lastProcessedPageCache.remove(configKey)
+                        } else {
+                            // Сохраняем последнюю успешную страницу (предыдущую)
+                            lastProcessedPageCache[configKey] = lastSuccessfulPage
+                        }
+                    }
 
-                    log.trace("[HH.ru API] Page $page: ${pageResponse.items.size} vacancies (total so far: ${allVacancies.size})")
+                    // Неполная страница - последняя страница
+                    pageResponse.items.size < perPage -> {
+                        log.info("[HH.ru API] Incomplete page $currentPage (${pageResponse.items.size} < $perPage) - last page detected")
+                        allVacancies.addAll(pageResponse.items)
+                        hasMorePages = false
+                        // Сохраняем текущую страницу как последнюю обработанную
+                        lastProcessedPageCache[configKey] = currentPage
+                    }
 
-                    // Small delay between requests to avoid rate limit
+                    // Обычная страница - продолжаем
+                    else -> {
+                        allVacancies.addAll(pageResponse.items)
+                        lastSuccessfulPage = currentPage
+                        currentPage++
+                    }
+                }
+
+                log.trace("[HH.ru API] Page $currentPage: ${pageResponse.items.size} vacancies (total so far: ${allVacancies.size})")
+
+                // Небольшая задержка между запросами для избежания rate limit
+                if (hasMorePages) {
                     kotlinx.coroutines.delay(100)
-                } catch (e: HHAPIException.RateLimitException) {
-                    log.warn("[HH.ru API] Rate limit exceeded while fetching page $page, stopping pagination")
+                }
+
+            } catch (e: HHAPIException.RateLimitException) {
+                log.warn("[HH.ru API] Rate limit exceeded on page $currentPage, stopping pagination")
+                break
+            } catch (e: Exception) {
+                log.warn("[HH.ru API] Error fetching page $currentPage: ${e.message}, continuing with next page")
+                // При ошибке продолжаем со следующей страницы
+                currentPage++
+                if (currentPage * perPage >= maxVacanciesDepth) {
+                    log.warn("[HH.ru API] Reached max depth limit (${maxVacanciesDepth}), stopping pagination")
                     break
-                } catch (e: Exception) {
-                    log.warn("[HH.ru API] Error fetching page $page: ${e.message}, continuing with next page")
                 }
             }
         }
 
-        log.info("[HH.ru API] Total fetched: ${allVacancies.size} vacancies from ${minOf(maxPage + 1, totalPages)} pages (total available: $totalFound)")
+        val lastPage = if (hasMorePages && currentPage > actualStartPage) currentPage - 1 else currentPage
+        log.info("[HH.ru API] Total fetched: ${allVacancies.size} vacancies from pages $actualStartPage..$lastPage (total available: $totalFound, configKey=$configKey)")
+
+        // Если дошли до конца без ошибок, сохраняем последнюю страницу
+        if (!hasMorePages && allVacancies.isNotEmpty()) {
+            lastProcessedPageCache[configKey] = lastPage
+            log.debug("[HH.ru API] Saved last processed page $lastPage for configKey=$configKey")
+        }
 
         return allVacancies
     }
@@ -87,6 +169,7 @@ class HHVacancyClient(
      */
     private suspend fun fetchVacanciesPage(config: SearchConfig, page: Int): VacancySearchResponse {
         return try {
+            val experienceIds = searchConfig.experienceIds ?: listOf("between1And3", "between3And6")
             val requestSpec = webClient.get()
                 .uri { builder ->
                     builder.path("/vacancies")
@@ -94,7 +177,10 @@ class HHVacancyClient(
                         .apply {
                             config.area?.let { queryParam("area", it) }
                             config.minSalary?.let { queryParam("salary", it) }
-                            config.experience?.let { queryParam("experience", it) }
+                            // Фильтруем по опыту из конфигурации
+                            experienceIds.forEach { experienceId ->
+                                queryParam("experience", experienceId)
+                            }
                             queryParam("per_page", perPage)
                             queryParam("page", page)
                         }
