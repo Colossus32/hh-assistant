@@ -22,7 +22,7 @@ import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
 import java.time.LocalDateTime
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.PriorityBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -41,7 +41,6 @@ class VacancyProcessingQueueService(
     private val vacancyStatusService: VacancyStatusService,
     private val vacancyAnalysisService: VacancyAnalysisService,
     private val vacancyNotificationService: VacancyNotificationService,
-    private val skillExtractionQueueService: SkillExtractionQueueService,
     private val metricsService: com.hhassistant.metrics.MetricsService,
     @Value("\${app.vacancy-processing.queue.enabled:true}") private val queueEnabled: Boolean,
     @Value("\${app.vacancy-processing.queue.max-concurrent:3}") private val maxConcurrent: Int,
@@ -49,8 +48,14 @@ class VacancyProcessingQueueService(
 ) {
     private val log = KotlinLogging.logger {}
 
-    // In-memory очередь для обработки вакансий
-    private val queue = ConcurrentLinkedQueue<QueueItem>()
+    // Приоритетная очередь для обработки вакансий (приоритет по дате публикации - более свежие первыми)
+    private val queue = PriorityBlockingQueue<QueueItem>(11) { a, b ->
+        // Сравниваем по дате публикации (более свежие имеют больший приоритет)
+        // Если дата публикации не указана, используем дату добавления в очередь
+        val aTime = a.publishedAt ?: a.addedAt
+        val bTime = b.publishedAt ?: b.addedAt
+        bTime.compareTo(aTime) // Обратный порядок - более свежие первыми
+    }
 
     // Канал для обработки очереди (для корутин)
     private val queueChannel = Channel<QueueItem>(Channel.UNLIMITED)
@@ -72,12 +77,20 @@ class VacancyProcessingQueueService(
     private val processingSemaphore = Semaphore(maxConcurrent)
 
     /**
-     * Элемент очереди
+     * Элемент очереди с приоритетом
      */
     data class QueueItem(
         val vacancyId: String,
         val addedAt: LocalDateTime = LocalDateTime.now(),
-    )
+        val publishedAt: LocalDateTime? = null, // Дата публикации для приоритета
+    ) : Comparable<QueueItem> {
+        override fun compareTo(other: QueueItem): Int {
+            // Сравниваем по дате публикации (более свежие имеют больший приоритет)
+            val thisTime = publishedAt ?: addedAt
+            val otherTime = other.publishedAt ?: other.addedAt
+            return otherTime.compareTo(thisTime) // Обратный порядок - более свежие первыми
+        }
+    }
 
     /**
      * Загружает ожидающие вакансии в очередь при старте приложения
@@ -129,18 +142,18 @@ class VacancyProcessingQueueService(
             return false
         }
 
+        // Получаем вакансию из БД
+        var vacancy = vacancyRepository.findById(vacancyId).orElse(null)
+        if (vacancy == null) {
+            log.warn("⚠️ [VacancyProcessingQueue] Vacancy $vacancyId not found in database, skipping")
+            return false
+        }
+
         // Проверяем на дубликаты
         if (checkDuplicate) {
             // Проверяем, не обрабатывается ли уже
             if (processingVacancies.containsKey(vacancyId)) {
                 log.debug("⏭️ [VacancyProcessingQueue] Vacancy $vacancyId is already being processed, skipping")
-                return false
-            }
-
-            // Проверяем в БД, не была ли уже обработана
-            val vacancy = vacancyRepository.findById(vacancyId).orElse(null)
-            if (vacancy == null) {
-                log.warn("⚠️ [VacancyProcessingQueue] Vacancy $vacancyId not found in database, skipping")
                 return false
             }
 
@@ -167,8 +180,11 @@ class VacancyProcessingQueueService(
             }
         }
 
-        // Добавляем в очередь
-        val item = QueueItem(vacancyId)
+        // Добавляем в очередь с приоритетом (по дате публикации)
+        val item = QueueItem(
+            vacancyId = vacancyId,
+            publishedAt = vacancy.publishedAt,
+        )
         queue.offer(item)
         processingVacancies[vacancyId] = true
 
@@ -288,11 +304,12 @@ class VacancyProcessingQueueService(
             vacancyStatusService.updateVacancyStatus(vacancy.withStatus(newStatus))
             log.debug("📝 [VacancyProcessingQueue] Updated vacancy ${vacancy.id} status to: $newStatus")
 
-            // Шаг 3: Если вакансия релевантна - отправляем в Telegram и добавляем в очередь навыков
+            // Шаг 3: Если вакансия релевантна (relevance_score >= minRelevanceScore) - отправляем в Telegram
+            // Навыки уже сохранены в БД при анализе, если вакансия релевантна
             if (analysis.isRelevant) {
                 log.info("✅ [VacancyProcessingQueue] Vacancy ${vacancy.id} is relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%)")
 
-                // Отправляем в Telegram напрямую
+                // Отправляем в Telegram
                 try {
                     val sentSuccessfully = vacancyNotificationService.sendVacancyToTelegram(vacancy, analysis)
                     if (sentSuccessfully) {
@@ -304,14 +321,8 @@ class VacancyProcessingQueueService(
                     log.error("❌ [VacancyProcessingQueue] Failed to send vacancy ${vacancy.id} to Telegram: ${e.message}", e)
                     // Продолжаем обработку даже если не удалось отправить
                 }
-
-                // Добавляем в очередь для извлечения навыков (низкий приоритет)
-                if (!vacancy.hasSkillsExtracted()) {
-                    skillExtractionQueueService.enqueue(vacancy.id)
-                    log.debug("📥 [VacancyProcessingQueue] Added vacancy ${vacancy.id} to skill extraction queue")
-                }
             } else {
-                log.debug("ℹ️ [VacancyProcessingQueue] Vacancy ${vacancy.id} is not relevant, skipping Telegram and skill extraction")
+                log.debug("ℹ️ [VacancyProcessingQueue] Vacancy ${vacancy.id} is not relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%), skipping Telegram")
             }
 
             log.info("✅ [VacancyProcessingQueue] Completed processing pipeline for vacancy ${vacancy.id} (isRelevant: ${analysis.isRelevant})")
