@@ -5,18 +5,17 @@ import mu.KotlinLogging
 import org.aspectj.lang.ProceedingJoinPoint
 import org.aspectj.lang.annotation.Around
 import org.aspectj.lang.annotation.Aspect
-import org.aspectj.lang.annotation.Pointcut
 import org.aspectj.lang.reflect.MethodSignature
 import org.springframework.stereotype.Component
 import kotlin.system.measureTimeMillis
 
 /**
- * AOP aspect for centralized logging of service and client methods with performance measurement
+ * AOP aspect for centralized logging of methods annotated with @Loggable
+ * Provides performance measurement and error logging
  */
 @Aspect
 @Component
-class
-LoggingAspect {
+class LoggingAspect {
     private val log = KotlinLogging.logger {}
 
     /**
@@ -25,30 +24,13 @@ LoggingAspect {
     private val slowMethodThreshold = 100L
 
     /**
-     * Pointcut to exclude pollUpdates method from TelegramPollingService
-     */
-    @Pointcut("execution(* com.hhassistant.service.TelegramPollingService.pollUpdates(..))")
-    fun pollUpdatesMethod() {}
-
-    /**
-     * Pointcut for all public methods in services, excluding pollUpdates
-     */
-    @Pointcut("execution(public * com.hhassistant.service..*(..)) && !pollUpdatesMethod()")
-    fun serviceMethods() {}
-
-    /**
-     * Pointcut for all public methods in clients
-     */
-    @Pointcut("execution(public * com.hhassistant.client..*(..))")
-    fun clientMethods() {}
-
-    /**
-     * Logs method execution with timing measurement
-     * - DEBUG: all method calls
-     * - INFO: methods taking longer than threshold
+     * Logs method execution with timing measurement for methods annotated with @Loggable
+     * - TRACE: method entry with arguments
+     * - DEBUG: method completion (fast methods)
+     * - INFO: method completion (slow methods, > threshold)
      * - ERROR: exceptions
      */
-    @Around("(serviceMethods() || clientMethods()) && !pollUpdatesMethod()")
+    @Around("@annotation(com.hhassistant.aspect.Loggable)")
     fun logMethodExecution(joinPoint: ProceedingJoinPoint): Any? {
         val signature = joinPoint.signature as MethodSignature
         val className = signature.declaringType.simpleName
