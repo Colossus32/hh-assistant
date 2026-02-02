@@ -18,7 +18,7 @@ class RateLimitServiceTest {
         val metricsService = MetricsService(SimpleMeterRegistry())
         // Создаем сервис с низкими лимитами для тестирования
         rateLimitService = RateLimitService(
-            requestsPerMinute = 2,
+            requestsPerSecond = 2,
             burstCapacity = 3,
             waitOnLimitSeconds = 1,
             metricsService = metricsService,
@@ -36,7 +36,7 @@ class RateLimitServiceTest {
     @Test
     fun `should track available tokens`() {
         val initialTokens = rateLimitService.getAvailableTokens()
-        assertThat(initialTokens).isGreaterThanOrEqualTo(2L) // At least requests per minute
+        assertThat(initialTokens).isGreaterThanOrEqualTo(2L) // At least requests per second
 
         runBlocking {
             rateLimitService.tryConsume()
@@ -90,6 +90,6 @@ class RateLimitServiceTest {
 
         val tokensAfterReset = rateLimitService.getAvailableTokens()
         assertThat(tokensAfterReset).isGreaterThan(tokensBeforeReset)
-        assertThat(tokensAfterReset).isGreaterThanOrEqualTo(2L) // At least requests per minute restored
+        assertThat(tokensAfterReset).isGreaterThanOrEqualTo(2L) // At least requests per second restored
     }
 }
