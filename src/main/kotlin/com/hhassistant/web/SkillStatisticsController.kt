@@ -1,7 +1,7 @@
 package com.hhassistant.web
 
-import com.hhassistant.service.SkillStatistics
-import com.hhassistant.service.SkillStatisticsService
+import com.hhassistant.service.skill.SkillStatisticsService
+import com.hhassistant.service.skill.SkillStatistics
 import mu.KotlinLogging
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity

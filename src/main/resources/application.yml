@@ -23,6 +23,13 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
+        # Batch-операции для оптимизации сохранения вакансий
+        jdbc:
+          batch_size: 50  # Размер батча для Hibernate (группирует INSERT-запросы)
+        order_inserts: true  # Упорядочивает INSERT для лучшей производительности
+        order_updates: true  # Упорядочивает UPDATE для лучшей производительности
+        jdbc:
+          batch_versioned_data: true  # Включает batch для версионированных данных
   
   jackson:
     serialization:
@@ -37,6 +44,7 @@ app:
     skipped-retry: "0 */5 * * * *"  # Every 5 minutes - retry skipped vacancies when Circuit Breaker recovers
     extract-relevant-skills: "0 0 3 * * *"  # Every day at 3:00 AM - extract skills for relevant vacancies without skills
     process-queued-vacancies: "0 */10 * * * *"  # Every 10 minutes - process QUEUED vacancies from database
+    recovery-skill-extraction: "0 */5 * * * *"  # Every 5 minutes - recovery: extract skills from one vacancy if processing queue is empty
   max-vacancies-per-cycle: 2000  # Максимальное количество вакансий за цикл (ограничение HH.ru API: 2000)
   cleanup:
     enabled: true  # Включить автоматическую очистку несуществующих вакансий

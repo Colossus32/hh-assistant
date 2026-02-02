@@ -3,7 +3,7 @@ package com.hhassistant.web
 import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.exception.HHAPIException
-import com.hhassistant.service.EnvFileService
+import com.hhassistant.service.util.EnvFileService
 import kotlinx.coroutines.runBlocking
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value

@@ -2,7 +2,7 @@ package com.hhassistant.web
 
 import com.hhassistant.client.hh.HHOAuthService
 import com.hhassistant.client.hh.dto.OAuthTokenResponse
-import com.hhassistant.service.EnvFileService
+import com.hhassistant.service.util.EnvFileService
 import com.ninjasquad.springmockk.MockkBean
 import io.mockk.coEvery
 import io.mockk.every

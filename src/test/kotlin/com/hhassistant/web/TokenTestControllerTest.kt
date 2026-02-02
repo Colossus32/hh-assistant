@@ -1,7 +1,7 @@
 package com.hhassistant.web
 
 import com.hhassistant.client.hh.HHVacancyClient
-import com.hhassistant.service.EnvFileService
+import com.hhassistant.service.util.EnvFileService
 import com.ninjasquad.springmockk.MockkBean
 import io.mockk.every
 import org.junit.jupiter.api.Test

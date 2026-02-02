@@ -66,5 +66,25 @@ interface VacancyRepository : JpaRepository<Vacancy, String> {
     )
     fun findRelevantVacanciesWithoutSkills(): List<Vacancy>
 
+    /**
+     * Получает одну вакансию без навыков для обработки recovery механизма.
+     * Использует поле skills_extracted_at для быстрой проверки.
+     * Приоритет отдается релевантным вакансиям, затем по дате получения (более старые первыми).
+     *
+     * @param pageable Пагинация для ограничения результата одной вакансией
+     * @return Вакансия без навыков или null, если таких нет
+     */
+    @Query(
+        """
+        SELECT v FROM Vacancy v
+        LEFT JOIN VacancyAnalysis va ON v.id = va.vacancyId
+        WHERE v.skillsExtractedAt IS NULL
+        ORDER BY 
+            CASE WHEN va.isRelevant = true THEN 0 ELSE 1 END,
+            v.fetchedAt ASC
+    """,
+    )
+    fun findOneVacancyWithoutSkills(pageable: Pageable): List<Vacancy>
+
     override fun existsById(id: String): Boolean
 }
