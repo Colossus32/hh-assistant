@@ -13,12 +13,13 @@ import java.time.Duration
 /**
  * Сервис для управления rate limiting для HH.ru API.
  * Использует Token Bucket алгоритм для контроля частоты запросов.
+ * Настроен на 2 запроса в секунду (по умолчанию).
  */
 @Service
 class RateLimitService(
-    @Value("\${hh.rate-limit.requests-per-minute:20}") private val requestsPerMinute: Int,
-    @Value("\${hh.rate-limit.burst-capacity:30}") private val burstCapacity: Int,
-    @Value("\${hh.rate-limit.wait-on-limit-seconds:60}") private val waitOnLimitSeconds: Long,
+    @Value("\${hh.rate-limit.requests-per-second:2}") private val requestsPerSecond: Int,
+    @Value("\${hh.rate-limit.burst-capacity:4}") private val burstCapacity: Int,
+    @Value("\${hh.rate-limit.wait-on-limit-seconds:1}") private val waitOnLimitSeconds: Long,
     private val metricsService: MetricsService,
 ) {
     private val log = KotlinLogging.logger {}
@@ -44,11 +45,12 @@ class RateLimitService(
 
     /**
      * Создает bucket с настройками rate limiting.
+     * Настроен на 2 запроса в секунду.
      */
     private fun createBucket(): Bucket {
         val bandwidth = Bandwidth.builder()
             .capacity(burstCapacity.toLong())
-            .refillIntervally(requestsPerMinute.toLong(), Duration.ofMinutes(1))
+            .refillIntervally(requestsPerSecond.toLong(), Duration.ofSeconds(1))
             .build()
         return Bucket.builder()
             .addLimit(bandwidth)
@@ -109,7 +111,7 @@ class RateLimitService(
         // Если после ожидания все еще нет токена, выбрасываем исключение
         throw HHAPIException.RateLimitException(
             "Rate limit exceeded for HH.ru API. " +
-                "Requests per minute: $requestsPerMinute, " +
+                "Requests per second: $requestsPerSecond, " +
                 "Burst capacity: $burstCapacity. " +
                 "Please wait before retrying.",
         )
