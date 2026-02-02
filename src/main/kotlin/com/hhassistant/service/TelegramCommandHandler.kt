@@ -26,6 +26,7 @@ class TelegramCommandHandler(
     private val skillExtractionService: SkillExtractionService,
     private val vacancyService: VacancyService,
     private val exclusionRuleService: ExclusionRuleService,
+    private val exclusionKeywordService: ExclusionKeywordService,
     private val analysisTimeService: AnalysisTimeService,
     @Value("\${app.api.base-url:http://localhost:8080}") private val apiBaseUrl: String,
 ) {
@@ -60,6 +61,7 @@ class TelegramCommandHandler(
                 text == "/vacancies" -> handleVacanciesCommand(chatId, text)
                 text.startsWith("/skills ") -> handleSkillsCommand(chatId, text)
                 text == "/skills" -> handleSkillsCommand(chatId, text)
+                text == "/extract-relevant-skills" -> handleExtractRelevantSkillsCommand(chatId)
                 text.startsWith("/exclusion_add_keyword ") -> handleAddExclusionKeyword(chatId, text)
                 text.startsWith("/exclusion_add_phrase ") -> handleAddExclusionPhrase(chatId, text)
                 text.startsWith("/exclusion_remove_keyword ") -> handleRemoveExclusionKeyword(chatId, text)
@@ -370,6 +372,53 @@ class TelegramCommandHandler(
     }
 
     /**
+     * Обрабатывает команду /extract-relevant-skills
+     * Извлекает навыки из релевантных вакансий, которые еще не имеют навыков.
+     */
+    private suspend fun handleExtractRelevantSkillsCommand(chatId: String): String {
+        return try {
+            log.info("🔍 [TelegramCommand] Processing /extract-relevant-skills command for chat $chatId")
+
+            // Получаем список релевантных вакансий без навыков
+            val relevantVacancies = skillExtractionService.getRelevantVacanciesWithoutSkills()
+
+            if (relevantVacancies.isEmpty()) {
+                log.info("ℹ️ [TelegramCommand] No relevant vacancies without skills found")
+                return "✅ Все релевантные вакансии уже имеют извлеченные навыки.\n\nНет вакансий для обработки."
+            }
+
+            log.info("📊 [TelegramCommand] Found ${relevantVacancies.size} relevant vacancies without skills, extracting...")
+
+            // Отправляем сообщение о начале обработки
+            telegramClient.sendMessage(
+                chatId,
+                "⏳ <b>Извлечение навыков из релевантных вакансий...</b>\n\n" +
+                    "Найдено ${relevantVacancies.size} релевантных вакансий без навыков.\n" +
+                    "Обрабатываю их, пожалуйста, подождите...",
+            )
+
+            // Извлекаем навыки из всех релевантных вакансий без навыков
+            val processedCount = skillExtractionService.extractSkillsForRelevantVacancies()
+
+            log.info("✅ [TelegramCommand] Extracted skills from $processedCount relevant vacancies")
+
+            buildString {
+                appendLine("✅ <b>Извлечение навыков завершено</b>")
+                appendLine()
+                appendLine("Обработано вакансий: <b>$processedCount</b>")
+                appendLine("Найдено релевантных вакансий без навыков: <b>${relevantVacancies.size}</b>")
+                if (processedCount < relevantVacancies.size) {
+                    appendLine()
+                    appendLine("⚠️ Некоторые вакансии не были обработаны из-за ошибок.")
+                }
+            }
+        } catch (e: Exception) {
+            log.error("❌ [TelegramCommand] Error extracting skills for relevant vacancies: ${e.message}", e)
+            "❌ Ошибка при извлечении навыков из релевантных вакансий: ${e.message ?: "Неизвестная ошибка"}"
+        }
+    }
+
+    /**
      * Обрабатывает команду /help
      */
     private fun handleHelpCommand(chatId: String): String {
@@ -390,6 +439,9 @@ class TelegramCommandHandler(
             appendLine()
             appendLine("<b>/skills [N]</b> - Показать топ навыков по популярности")
             appendLine("   Пример: /skills 10 (показать топ-10 навыков)")
+            appendLine()
+            appendLine("<b>/extract-relevant-skills</b> - Извлечь навыки из релевантных вакансий без навыков")
+            appendLine("   Находит релевантные вакансии, для которых еще не извлечены навыки, и извлекает их")
             appendLine()
             appendLine("<b>/exclusion_list</b> - Показать все правила исключения (ключевые слова и фразы)")
             appendLine()
@@ -509,21 +561,26 @@ class TelegramCommandHandler(
         return try {
             if (isAdd) {
                 if (isKeyword) {
-                    exclusionRuleService.addKeyword(param)
-                    "✅ Добавлено ключевое слово для исключения: '$param'\nКэш обновлен."
+                    val added = exclusionKeywordService.addKeyword(param)
+                    if (added) {
+                        "✅ Добавлено ключевое слово для исключения: '$param'\nВсего слов-блокеров: ${exclusionKeywordService.getKeywordsCount()}"
+                    } else {
+                        "⚠️ Ключевое слово '$param' уже существует или содержит пробелы (используйте /exclusion_add_phrase для фраз)"
+                    }
                 } else {
                     exclusionRuleService.addPhrase(param)
-                    "✅ Добавлена фраза для исключения: '$param'\nКэш обновлен."
+                    "✅ Добавлена фраза для исключения: '$param'\n(Фразы используются только для LLM анализа)"
                 }
             } else {
                 val removed = if (isKeyword) {
-                    exclusionRuleService.removeKeyword(param)
+                    exclusionKeywordService.removeKeyword(param)
                 } else {
                     exclusionRuleService.removePhrase(param)
                 }
                 if (removed) {
                     val type = if (isKeyword) "ключевое слово" else "фраза"
-                    "✅ Удалено $type из исключений: '$param'\nКэш обновлен."
+                    val countInfo = if (isKeyword) "\nВсего слов-блокеров: ${exclusionKeywordService.getKeywordsCount()}" else ""
+                    "✅ Удалено $type из исключений: '$param'$countInfo"
                 } else {
                     val type = if (isKeyword) "ключевое слово" else "фраза"
                     "⚠️ $type '$param' не найдено"
@@ -570,14 +627,15 @@ class TelegramCommandHandler(
      */
     private fun handleListExclusions(chatId: String): String {
         return try {
+            val keywords = exclusionKeywordService.getAllKeywords().sorted()
             val rules = exclusionRuleService.listAll()
-            val keywords = rules["keywords"] ?: emptyList<String>()
             val phrases = rules["phrases"] ?: emptyList<String>()
 
             buildString {
                 appendLine("📋 <b>Правила исключения</b>")
                 appendLine()
-                appendLine("<b>Ключевые слова (${keywords.size}):</b>")
+                appendLine("<b>Слова-блокеры (${keywords.size}):</b>")
+                appendLine("<i>Используются для первичной валидации в названии вакансии</i>")
                 if (keywords.isEmpty()) {
                     appendLine("   (нет)")
                 } else {
