@@ -36,4 +36,3 @@ data class EducationDto(
 data class TotalExperienceDto(
     val months: Int?,
 )
-

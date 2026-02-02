@@ -1,6 +1,7 @@
 package com.hhassistant.client.hh
 
 import com.github.benmanes.caffeine.cache.Cache
+import com.hhassistant.aspect.Loggable
 import com.hhassistant.client.hh.dto.VacancyDto
 import com.hhassistant.client.hh.dto.VacancySearchResponse
 import com.hhassistant.config.VacancyServiceConfig
@@ -53,7 +54,7 @@ class HHVacancyClient(
      * Поиск вакансий с улучшенной пагинацией.
      * Определяет конец пагинации по пустой/неполной странице и автоматически перезапускается
      * с начала при обнаружении новых вакансий.
-     * 
+     *
      * Каждый уникальный SearchConfig (по keywords + area + minSalary) имеет свой независимый прогресс пагинации.
      *
      * @param config Конфигурация поиска
@@ -61,15 +62,16 @@ class HHVacancyClient(
      * @param isRestart Флаг, указывающий что это перезапуск (для предотвращения бесконечной рекурсии)
      * @return Список найденных вакансий
      */
+    @Loggable
     suspend fun searchVacancies(config: SearchConfig, startFromPage: Int? = null, isRestart: Boolean = false): List<VacancyDto> {
         val experienceIds = searchConfig.experienceIds ?: listOf("between1And3", "between3And6")
-        
+
         // Получаем уникальный ключ для этого SearchConfig
         val configKey = getConfigKey(config)
-        
+
         // Определяем стартовую страницу: используем переданную, сохраненную или 0
         val actualStartPage = startFromPage ?: lastProcessedPageCache.getOrDefault(configKey, 0)
-        
+
         log.debug("[HH.ru API] Searching vacancies: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}, experience=$experienceIds, startFromPage=$actualStartPage (configKey=$configKey)")
 
         val allVacancies = mutableListOf<VacancyDto>()
@@ -83,7 +85,7 @@ class HHVacancyClient(
                 rateLimitService.tryConsume()
 
                 val pageResponse = fetchVacanciesPage(config, currentPage)
-                
+
                 // Сохраняем totalFound из первой страницы для логирования
                 if (currentPage == actualStartPage) {
                     totalFound = pageResponse.found
@@ -137,7 +139,6 @@ class HHVacancyClient(
                 if (hasMorePages) {
                     kotlinx.coroutines.delay(100)
                 }
-
             } catch (e: HHAPIException.RateLimitException) {
                 log.warn("[HH.ru API] Rate limit exceeded on page $currentPage, stopping pagination")
                 break
@@ -146,7 +147,7 @@ class HHVacancyClient(
                 // При ошибке продолжаем со следующей страницы
                 currentPage++
                 if (currentPage * perPage >= maxVacanciesDepth) {
-                    log.warn("[HH.ru API] Reached max depth limit (${maxVacanciesDepth}), stopping pagination")
+                    log.warn("[HH.ru API] Reached max depth limit ($maxVacanciesDepth), stopping pagination")
                     break
                 }
             }
@@ -210,6 +211,7 @@ class HHVacancyClient(
         }
     }
 
+    @Loggable
     suspend fun getVacancyDetails(id: String): VacancyDto {
         // Check cache before API request
         @Suppress("UNCHECKED_CAST")

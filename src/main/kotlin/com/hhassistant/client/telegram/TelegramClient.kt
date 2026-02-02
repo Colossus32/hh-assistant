@@ -1,5 +1,6 @@
 package com.hhassistant.client.telegram
 
+import com.hhassistant.aspect.Loggable
 import com.hhassistant.client.telegram.dto.GetUpdatesRequest
 import com.hhassistant.client.telegram.dto.GetUpdatesResponse
 import com.hhassistant.client.telegram.dto.SendMessageRequest
@@ -33,6 +34,7 @@ class TelegramClient(
      * @return true если сообщение успешно отправлено, false если отключено или не настроено
      * @throws TelegramException если произошла ошибка при отправке (rate limit, invalid chat, etc.)
      */
+    @Loggable
     suspend fun sendMessage(
         text: String,
         replyMarkup: com.hhassistant.client.telegram.dto.InlineKeyboardMarkup? = null,
@@ -47,6 +49,7 @@ class TelegramClient(
      * @return true если сообщение успешно отправлено, false если отключено или не настроено
      * @throws TelegramException если произошла ошибка при отправке (rate limit, invalid chat, etc.)
      */
+    @Loggable
     suspend fun sendMessage(
         targetChatId: String,
         text: String,
@@ -169,6 +172,7 @@ class TelegramClient(
      * @return Список обновлений или пустой список при ошибке
      * @throws TelegramException если произошла ошибка при запросе
      */
+    @Loggable
     suspend fun getUpdates(
         offset: Long? = null,
         limit: Int = 100,

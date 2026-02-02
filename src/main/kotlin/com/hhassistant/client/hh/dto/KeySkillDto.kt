@@ -20,4 +20,3 @@ data class KeySkillDto(
      */
     val id: String? = null,
 )
-

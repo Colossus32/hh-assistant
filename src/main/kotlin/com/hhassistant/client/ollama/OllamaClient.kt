@@ -1,5 +1,6 @@
 package com.hhassistant.client.ollama
 
+import com.hhassistant.aspect.Loggable
 import com.hhassistant.client.ollama.dto.ChatMessage
 import com.hhassistant.client.ollama.dto.OllamaChatRequest
 import com.hhassistant.client.ollama.dto.OllamaChatResponse
@@ -19,6 +20,7 @@ class OllamaClient(
     @Value("\${ollama.temperature}") private val temperature: Double,
 ) {
 
+    @Loggable
     suspend fun generate(
         prompt: String,
         systemPrompt: String? = null,
@@ -41,6 +43,7 @@ class OllamaClient(
         return response.response
     }
 
+    @Loggable
     suspend fun chat(messages: List<ChatMessage>): String {
         val request = OllamaChatRequest(
             model = model,

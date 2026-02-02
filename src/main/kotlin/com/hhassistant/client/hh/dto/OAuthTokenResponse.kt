@@ -14,4 +14,3 @@ data class OAuthTokenResponse(
     @JsonProperty("scope")
     val scope: String? = null,
 )
-
