@@ -43,7 +43,6 @@ class VacancySchedulerService(
     private val vacancyProcessingQueueService: VacancyProcessingQueueService,
     private val skillExtractionQueueService: SkillExtractionQueueService,
     private val vacancyRepository: com.hhassistant.repository.VacancyRepository,
-    @Value("\${app.dry-run:false}") private val dryRun: Boolean,
     @Value("\${app.analysis.max-concurrent-requests:3}") private val maxConcurrentRequests: Int,
 ) {
     private val log = KotlinLogging.logger {}
@@ -75,12 +74,8 @@ class VacancySchedulerService(
 
         notificationService.sendStartupNotification()
 
-        if (!dryRun) {
-            log.info("[Scheduler] Running initial vacancy check on startup...")
-            checkNewVacancies()
-        } else {
-            log.debug("[Scheduler] Dry-run mode enabled, skipping initial check")
-        }
+        log.info("[Scheduler] Running initial vacancy check on startup...")
+        checkNewVacancies()
     }
 
     /**
@@ -91,11 +86,6 @@ class VacancySchedulerService(
      */
     @Scheduled(cron = "\${app.schedule.skipped-retry:0 */5 * * * *}")
     fun retrySkippedVacancies() {
-        if (dryRun) {
-            log.debug("[Scheduler] Dry-run mode enabled, skipping skipped vacancies retry")
-            return
-        }
-
         val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
         if (circuitBreakerState == "OPEN") {
             log.debug("[Scheduler] Circuit Breaker is still OPEN, skipping retry of skipped vacancies")
@@ -139,11 +129,6 @@ class VacancySchedulerService(
      */
     @Scheduled(cron = "\${app.schedule.vacancy-check:0 */15 * * * *}")
     fun checkNewVacancies() {
-        if (dryRun) {
-            log.debug("[Scheduler] Dry-run mode enabled, skipping vacancy check")
-            return
-        }
-
         val cycleStartTime = System.currentTimeMillis()
         logCycleStart()
 
@@ -172,11 +157,6 @@ class VacancySchedulerService(
      */
     @Scheduled(cron = "\${app.schedule.process-queued-vacancies:0 */10 * * * *}")
     fun processQueuedVacancies() {
-        if (dryRun) {
-            log.debug("[Scheduler] Dry-run mode enabled, skipping queued vacancies processing")
-            return
-        }
-
         log.info("[Scheduler] Processing QUEUED vacancies from database...")
 
         // Запускаем обработку асинхронно, не блокируя поток
@@ -206,11 +186,6 @@ class VacancySchedulerService(
      */
     @Scheduled(cron = "\${app.schedule.extract-relevant-skills:0 0 3 * * *}")
     fun extractSkillsForRelevantVacancies() {
-        if (dryRun) {
-            log.debug("[Scheduler] Dry-run mode enabled, skipping skill extraction for relevant vacancies")
-            return
-        }
-
         log.info("[Scheduler] Starting skill extraction for relevant vacancies without skills...")
 
         // Запускаем извлечение асинхронно, не блокируя поток
@@ -236,11 +211,6 @@ class VacancySchedulerService(
      */
     @Scheduled(cron = "\${app.schedule.recovery-skill-extraction:0 */5 * * * *}")
     fun recoverySkillExtraction() {
-        if (dryRun) {
-            log.debug("[Scheduler] Dry-run mode enabled, skipping recovery skill extraction")
-            return
-        }
-
         // Запускаем обработку асинхронно, не блокируя поток
         schedulerScope.launch {
             try {
@@ -409,7 +379,7 @@ class VacancySchedulerService(
                 // - Если релевантна - отправка в Telegram и добавление в очередь навыков
                 if (analysis.isRelevant) {
                     log.info("📱 [Scheduler] Vacancy ${vacancy.id} is relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%)")
-                    log.info("ℹ️ [Scheduler] Vacancy will be processed by event-driven pipeline (cover letter queue -> notification service)")
+                    log.info("ℹ️ [Scheduler] Vacancy will be processed by event-driven pipeline (notification service -> skill extraction queue)")
                 } else {
                     log.debug("ℹ️ [Scheduler] Vacancy ${vacancy.id} is not relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%), skipping")
                 }
