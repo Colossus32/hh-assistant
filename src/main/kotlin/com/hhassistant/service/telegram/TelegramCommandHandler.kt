@@ -6,6 +6,10 @@ import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.dto.ApiResponse
 import com.hhassistant.dto.VacancyListResponse
 import com.hhassistant.web.TopSkillsResponse
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.reactor.awaitSingle
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
@@ -38,6 +42,9 @@ class TelegramCommandHandler(
     @Value("\${app.api.base-url:http://localhost:8080}") private val apiBaseUrl: String,
 ) {
     private val log = KotlinLogging.logger {}
+    
+    // CoroutineScope для фоновых задач
+    private val backgroundScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     companion object {
         private const val TELEGRAM_MESSAGE_MAX_LENGTH = AppConstants.TextLimits.TELEGRAM_MESSAGE_MAX_LENGTH
@@ -148,8 +155,8 @@ class TelegramCommandHandler(
             appendLine("   /stats - Статистика по вакансиям")
             appendLine("   /vacancies - Список непросмотренных вакансий")
             appendLine("   /vacancies_all - Список всех вакансий (включая просмотренные)")
-            appendLine("   /skills [N] - Топ навыков (с обработкой вакансий)")
-            appendLine("   /skills_now [N] - Текущий топ навыков (без ожидания)")
+            appendLine("   /skills [N] - Топ навыков (статистика сразу, обработка в фоне)")
+            appendLine("   /skills_now [N] - Текущий топ навыков (без обработки)")
             appendLine("   /help - Справка")
             appendLine()
             appendLine("💡 Используйте /help для подробной информации.")
@@ -316,6 +323,7 @@ class TelegramCommandHandler(
 
     /**
      * Обрабатывает команду /skills (suspend функция для асинхронной обработки)
+     * Показывает текущую статистику сразу, затем обрабатывает вакансии без навыков в фоне
      */
     private suspend fun handleSkillsCommand(chatId: String, text: String): String {
         return try {
@@ -327,54 +335,82 @@ class TelegramCommandHandler(
                 DEFAULT_SKILLS_LIMIT
             }
 
-            // Шаг 1: Проверяем, есть ли вакансии без навыков
+            // Шаг 1: Показываем текущую статистику сразу
+            val skillsStatistics = skillStatisticsService.getTopSkills(limit)
+            val totalSkillsCount = skillStatisticsService.getTotalSkillsCount()
+            val totalAnalyzedVacancies = skillStatisticsService.getTotalAnalyzedVacancies()
+
+            val currentStatsMessage = if (skillsStatistics.isEmpty()) {
+                buildString {
+                    appendLine("📊 <b>Текущая статистика навыков:</b>")
+                    appendLine()
+                    appendLine("📋 <b>Всего уникальных навыков:</b> $totalSkillsCount")
+                    appendLine("📈 <b>Проанализировано вакансий:</b> $totalAnalyzedVacancies")
+                    appendLine()
+                    appendLine("❌ <b>Нет данных для отображения топа навыков</b>")
+                }
+            } else {
+                buildString {
+                    appendLine("📊 <b>Текущий топ навыков по популярности:</b>")
+                    appendLine()
+                    skillsStatistics.forEachIndexed { index, skill ->
+                        appendLine("${index + 1}. <b>${escapeHtml(skill.skillName)}</b> - ${String.format("%.1f", skill.frequencyPercentage)}% (${skill.occurrenceCount} вакансий)")
+                    }
+                    appendLine()
+                    appendLine("📋 <b>Всего уникальных навыков:</b> $totalSkillsCount")
+                    appendLine("📈 <b>Проанализировано вакансий:</b> $totalAnalyzedVacancies")
+                }
+            }
+
+            // Шаг 2: Проверяем, есть ли вакансии без навыков и запускаем обработку в фоне
             val allVacancies = vacancyService.findAllVacancies()
             val vacanciesWithoutSkills = skillExtractionService.getVacanciesWithoutSkills(allVacancies)
 
             if (vacanciesWithoutSkills.isNotEmpty()) {
-                // Есть вакансии без навыков - извлекаем их
-                log.info("📊 [TelegramCommand] Found ${vacanciesWithoutSkills.size} vacancies without skills, extracting...")
+                log.info("📊 [TelegramCommand] Found ${vacanciesWithoutSkills.size} vacancies without skills, processing in background...")
 
-                // Отправляем сообщение о начале обработки
-                telegramClient.sendMessage(
-                    chatId,
-                    "⏳ <b>Извлечение навыков из вакансий...</b>\n\n" +
-                        "Найдено ${vacanciesWithoutSkills.size} вакансий без навыков.\n" +
-                        "Обрабатываю их, пожалуйста, подождите...",
-                )
+                // Запускаем обработку в фоне
+                backgroundScope.launch {
+                    try {
+                        log.info("🔄 [TelegramCommand] Starting background skill extraction for ${vacanciesWithoutSkills.size} vacancies")
+                        val processedCount = skillExtractionService.extractSkillsForAllVacancies(vacanciesWithoutSkills)
+                        log.info("✅ [TelegramCommand] Background extraction completed: processed $processedCount vacancies")
 
-                // Извлекаем навыки из всех вакансий без навыков
-                val processedCount = skillExtractionService.extractSkillsForAllVacancies(vacanciesWithoutSkills)
-
-                log.info("✅ [TelegramCommand] Extracted skills from $processedCount vacancies")
-            }
-
-            // Шаг 2: Получаем статистику навыков
-            val url = "$apiBaseUrl/api/skills/top?limit=$limit"
-            val response = webClient.get()
-                .uri(url)
-                .retrieve()
-                .onStatus({ it.isError }) { response ->
-                    response.bodyToMono<String>().map { body ->
-                        RuntimeException("API error: ${response.statusCode()} - $body")
+                        // Отправляем уведомление о завершении обработки
+                        val updatedStats = skillStatisticsService.getTopSkills(limit)
+                        val updatedTotal = skillStatisticsService.getTotalAnalyzedVacancies()
+                        
+                        if (updatedStats.isNotEmpty() && updatedTotal > totalAnalyzedVacancies) {
+                            val updateMessage = buildString {
+                                appendLine("✅ <b>Обработка завершена!</b>")
+                                appendLine()
+                                appendLine("Обработано вакансий: <b>$processedCount</b>")
+                                appendLine("Обновлено вакансий: <b>${updatedTotal - totalAnalyzedVacancies}</b>")
+                                appendLine()
+                                appendLine("💡 Используйте /skills для обновленной статистики")
+                            }
+                            telegramClient.sendMessage(chatId, updateMessage)
+                        }
+                    } catch (e: Exception) {
+                        log.error("❌ [TelegramCommand] Error in background skill extraction: ${e.message}", e)
+                        telegramClient.sendMessage(
+                            chatId,
+                            "❌ <b>Ошибка при обработке вакансий:</b>\n${e.message ?: "Неизвестная ошибка"}"
+                        )
                     }
                 }
-                .bodyToMono<TopSkillsResponse>()
-                .awaitSingle()
 
-            if (response.skills.isEmpty()) {
-                "📊 <b>Топ навыков:</b>\n\nНет данных. Навыки будут извлекаться при анализе вакансий."
-            } else {
-                buildString {
-                    appendLine("📊 <b>Топ навыков по популярности:</b>")
+                // Добавляем информацию о фоновой обработке к сообщению
+                return buildString {
+                    appendLine(currentStatsMessage)
                     appendLine()
-                    response.skills.forEachIndexed { index, skill: SkillStatistics ->
-                        appendLine("${index + 1}. <b>${escapeHtml(skill.skillName)}</b> - ${String.format("%.1f", skill.frequencyPercentage)}% (${skill.occurrenceCount} вакансий)")
-                    }
-                    appendLine()
-                    appendLine("Всего проанализировано: <b>${response.totalVacanciesAnalyzed}</b> вакансий")
+                    appendLine("🔄 <i>Обработка ${vacanciesWithoutSkills.size} вакансий без навыков запущена в фоне...</i>")
+                    appendLine("💡 Вы получите уведомление по завершении")
                 }
             }
+
+            // Если нет вакансий без навыков, просто возвращаем статистику
+            currentStatsMessage
         } catch (e: Exception) {
             log.error("Error getting skills: ${e.message}", e)
             "❌ Ошибка при получении статистики навыков: ${e.message ?: "Неизвестная ошибка"}"
@@ -501,11 +537,11 @@ class TelegramCommandHandler(
             appendLine()
             appendLine("<b>/skills [N]</b> - Показать топ навыков по популярности")
             appendLine("   Пример: /skills 10 (показать топ-10 навыков)")
-            appendLine("   ⚠️ Сначала обрабатывает все вакансии без навыков, может занять время")
+            appendLine("   ⚡ Показывает статистику сразу, обработку вакансий запускает в фоне")
             appendLine()
             appendLine("<b>/skills_now [N]</b> - Показать текущий топ навыков")
             appendLine("   Пример: /skills_now 15 (показать топ-15 навыков)")
-            appendLine("   ⚡ Показывает данные сразу, без дополнительной обработки")
+            appendLine("   ⚡ Показывает данные сразу, без обработки вакансий")
             appendLine()
             appendLine("<b>/extract-relevant-skills</b> - Извлечь навыки из релевантных вакансий без навыков")
             appendLine("   Находит релевантные вакансии, для которых еще не извлечены навыки, и извлекает их")
