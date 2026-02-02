@@ -33,7 +33,7 @@ class VacancyManagementController(
      * GET /api/vacancies/unviewed
      */
     @GetMapping("/unviewed")
-    @Cacheable(value = ["vacancyLists"], key = "'unviewed'", unless = "#result.body.count == 0")
+    @Cacheable(value = ["vacancyLists"], key = "'unviewed'", unless = "#result.body['count'] == 0")
     fun getUnviewedVacancies(): ResponseEntity<Map<String, Any>> {
         log.info("📋 [VacancyManagement] Getting unviewed vacancies...")
         val vacancies = vacancyService.getUnviewedVacancies()
