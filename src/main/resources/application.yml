@@ -49,11 +49,9 @@ app:
     enabled: true  # Включить автоматическую очистку несуществующих вакансий
     schedule: "0 0 2 * * *"  # Каждый день в 2:00 (cron: секунда минута час день месяц день_недели)
     batch-size: 50  # Количество вакансий для проверки за один батч
-  dry-run: false  # По умолчанию выключен, включается через профиль dry-run
   # Для работы с реальными вакансиями:
   # 1. Убедитесь, что HH_ACCESS_TOKEN указан в .env
   # 2. Настройте поиск через БД (см. docs/WINDOWS_SETUP.md) ИЛИ через application.yml (см. ниже)
-  # 3. Установите dry-run: false (или не используйте dry-run профиль)
   search:
     # Альтернативный способ настройки поиска через application.yml
     # Если указаны keywords, они будут использованы вместо конфигураций из БД
@@ -104,16 +102,6 @@ app:
       - "стажировка"
       - "internship"
     exclusion-case-sensitive: false  # Учитывать регистр при поиске (false = регистронезависимый поиск)
-    cover-letter:
-      max-retries: 3  # Maximum number of retry attempts for cover letter generation
-      retry-delay-seconds: 5  # Delay between retry attempts (in seconds)
-      queue:
-        enabled: false  # Enable/disable cover letter generation. If false, relevant vacancies will be sent to Telegram without cover letters
-        max-concurrent: 2  # Maximum concurrent cover letter generations
-      retry-queue:
-        enabled: true  # Enable retry queue for failed cover letter generations
-        batch-size: 10  # Number of analyses to process per batch
-        cron: "0 */5 * * * *"  # Cron expression for queue processing (every 5 minutes)
   log-analysis:
     enabled: true  # Enable daily log analysis with Ollama
     cron: "0 0 9 * * *"  # Cron expression for daily analysis (every day at 9:00 AM)
@@ -123,44 +111,29 @@ app:
     max-batches: 10  # Maximum number of batches to process (to avoid too long analysis)
     summary-first: true  # First create summaries of batches, then analyze summaries
   prompts:
-    # Системный промпт для анализа вакансий (можно переопределить)
+    # Системный промпт для анализа вакансий (максимально оптимизирован для скорости)
+    # Требует только skills и relevance_score - без reasoning для ускорения
     analysis-system: |
-      Ты - эксперт по подбору персонала. Твоя задача - проанализировать вакансию и резюме кандидата, 
-      определить релевантность вакансии для кандидата и предоставить структурированный ответ в формате JSON.
+      Извлеки навыки из вакансии и определи процент совпадения с резюме.
       
-      Формат ответа:
+      JSON:
       {
-          "is_relevant": true/false,
-          "relevance_score": 0.0-1.0,
-          "reasoning": "Обоснование решения на русском языке",
-          "matched_skills": ["навык1", "навык2", ...]
+          "skills": ["Kotlin", "Spring Boot", "PostgreSQL"],
+          "relevance_score": 0.85
       }
       
-      Критерии релевантности:
-      - Совпадение ключевых навыков (вес: 40%)
-      - Соответствие опыта работы требованиям (вес: 30%)
-      - Соответствие желаемой позиции (вес: 20%)
-      - Соответствие зарплатных ожиданий (вес: 10%)
-      
-      Отвечай ТОЛЬКО валидным JSON, без дополнительных комментариев.
-    # Шаблон промпта для анализа (переменные: {vacancyName}, {employer}, {salary}, {area}, {experience}, {description}, {resumeContent})
+      skills: технологии из вакансии (3-20). relevance_score: 0.0-1.0 (навыки 40%, опыт 30%, позиция 20%, зарплата 10%).
+      Только JSON.
+    # Шаблон промпта для анализа (максимально оптимизирован - компактный формат)
+    # Переменные: {vacancyName}, {salary}, {experience}, {description}, {resumeContent}
     analysis-template: |
-      ВАКАНСИЯ:
-      Название: {vacancyName}
-      Работодатель: {employer}
-      Зарплата: {salary}
-      Регион: {area}
-      Требуемый опыт: {experience}
+      {vacancyName} | {salary} | {experience}
       
-      Описание вакансии:
       {description}
       
-      ---
+      Резюме: {resumeContent}
       
-      РЕЗЮМЕ КАНДИДАТА:
-      {resumeContent}
-      
-      Проанализируй релевантность вакансии для кандидата и верни JSON ответ.
+      Извлеки навыки и определи совпадение. JSON: {"skills": [...], "relevance_score": 0.0-1.0}
     # Системный промпт для генерации сопроводительного письма
     cover-letter-system: |
       Ты - эксперт по написанию сопроводительных писем. Напиши КРАТКОЕ, ЕСТЕСТВЕННОЕ и ПЕРСОНАЛИЗИРОВАННОЕ сопроводительное письмо (максимум 120 слов, идеально 80-100 слов).
@@ -222,8 +195,11 @@ ollama:
   base-url: ${OLLAMA_BASE_URL:http://localhost:11434}  # For local Ollama (default)
   # For Docker: use http://host.docker.internal:11434
   model: ${OLLAMA_MODEL:qwen2.5:7b}
-  temperature: 0.7
-  timeout-seconds: 300  # Увеличено до 5 минут для генерации сопроводительных писем
+  temperature: 0.7  # Default temperature (для обратной совместимости)
+  # Оптимизированные temperature для анализа вакансий
+  analysis:
+    temperature: 0.3  # Низкая temperature для детерминированного анализа
+  timeout-seconds: 90  # Таймаут для анализа вакансий через Ollama (обычно 10-30 секунд)
   max-in-memory-size-mb: 10
 
 telegram:
