@@ -24,37 +24,47 @@ class ExclusionRuleService(
 
     /**
      * Gets all exclusion keywords (cached)
+     * Cache is invalidated when keywords are added/removed
      */
     @Cacheable(value = [KEYWORDS_CACHE])
     fun getAllKeywords(): List<String> {
-        log.debug("[ExclusionRuleService] Loading exclusion keywords from database")
-        return exclusionRuleRepository.findByType(ExclusionRule.ExclusionRuleType.KEYWORD)
+        log.trace("[ExclusionRuleService] Loading exclusion keywords from database (cache miss)")
+        val keywords = exclusionRuleRepository.findByType(ExclusionRule.ExclusionRuleType.KEYWORD)
             .map { it.text }
+        log.debug("[ExclusionRuleService] Loaded ${keywords.size} exclusion keywords from database")
+        return keywords
     }
 
     /**
      * Gets all exclusion phrases (cached)
+     * Cache is invalidated when phrases are added/removed
      */
     @Cacheable(value = [PHRASES_CACHE])
     fun getAllPhrases(): List<String> {
-        log.debug("[ExclusionRuleService] Loading exclusion phrases from database")
-        return exclusionRuleRepository.findByType(ExclusionRule.ExclusionRuleType.PHRASE)
+        log.trace("[ExclusionRuleService] Loading exclusion phrases from database (cache miss)")
+        val phrases = exclusionRuleRepository.findByType(ExclusionRule.ExclusionRuleType.PHRASE)
             .map { it.text }
+        log.debug("[ExclusionRuleService] Loaded ${phrases.size} exclusion phrases from database")
+        return phrases
     }
 
     /**
      * Gets case sensitivity setting (defaults to false)
+     * Uses cached keywords/phrases to avoid DB query if possible
      */
+    @Cacheable(value = ["exclusionCaseSensitive"])
     fun isCaseSensitive(): Boolean {
         // Get from first rule or default to false
-        return exclusionRuleRepository.findAll().firstOrNull()?.caseSensitive ?: false
+        // Try to get from cached data first to avoid DB query
+        val allRules = exclusionRuleRepository.findAll()
+        return allRules.firstOrNull()?.caseSensitive ?: false
     }
 
     /**
      * Adds a new exclusion keyword
      */
     @Transactional
-    @CacheEvict(value = [KEYWORDS_CACHE], allEntries = true)
+    @CacheEvict(value = [KEYWORDS_CACHE, "exclusionCaseSensitive"], allEntries = true)
     fun addKeyword(keyword: String, caseSensitive: Boolean = false): ExclusionRule {
         val existing = exclusionRuleRepository.findByTextAndType(keyword, ExclusionRule.ExclusionRuleType.KEYWORD)
         if (existing != null) {
@@ -76,7 +86,7 @@ class ExclusionRuleService(
      * Adds a new exclusion phrase
      */
     @Transactional
-    @CacheEvict(value = [PHRASES_CACHE], allEntries = true)
+    @CacheEvict(value = [PHRASES_CACHE, "exclusionCaseSensitive"], allEntries = true)
     fun addPhrase(phrase: String, caseSensitive: Boolean = false): ExclusionRule {
         val existing = exclusionRuleRepository.findByTextAndType(phrase, ExclusionRule.ExclusionRuleType.PHRASE)
         if (existing != null) {
@@ -98,7 +108,7 @@ class ExclusionRuleService(
      * Removes an exclusion keyword
      */
     @Transactional
-    @CacheEvict(value = [KEYWORDS_CACHE], allEntries = true)
+    @CacheEvict(value = [KEYWORDS_CACHE, "exclusionCaseSensitive"], allEntries = true)
     fun removeKeyword(keyword: String): Boolean {
         val rule = exclusionRuleRepository.findByTextAndType(keyword, ExclusionRule.ExclusionRuleType.KEYWORD)
         if (rule != null) {
@@ -114,7 +124,7 @@ class ExclusionRuleService(
      * Removes an exclusion phrase
      */
     @Transactional
-    @CacheEvict(value = [PHRASES_CACHE], allEntries = true)
+    @CacheEvict(value = [PHRASES_CACHE, "exclusionCaseSensitive"], allEntries = true)
     fun removePhrase(phrase: String): Boolean {
         val rule = exclusionRuleRepository.findByTextAndType(phrase, ExclusionRule.ExclusionRuleType.PHRASE)
         if (rule != null) {
@@ -127,12 +137,13 @@ class ExclusionRuleService(
     }
 
     /**
-     * Lists all exclusion rules
+     * Lists all exclusion rules (uses cached data to avoid DB queries)
      */
     @Transactional(readOnly = true)
     fun listAll(): Map<String, List<String>> {
-        val keywords = exclusionRuleRepository.findByType(ExclusionRule.ExclusionRuleType.KEYWORD).map { it.text }
-        val phrases = exclusionRuleRepository.findByType(ExclusionRule.ExclusionRuleType.PHRASE).map { it.text }
+        // Use cached methods instead of direct DB access
+        val keywords = getAllKeywords()
+        val phrases = getAllPhrases()
         return mapOf(
             "keywords" to keywords,
             "phrases" to phrases,

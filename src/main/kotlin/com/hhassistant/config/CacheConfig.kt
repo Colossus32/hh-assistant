@@ -74,17 +74,24 @@ class CacheConfig {
 
     /**
      * Основной CacheManager для Spring Cache
+     * Настраивает кэши по умолчанию для всех @Cacheable методов
+     * 
+     * Кэши для exclusion rules (exclusionKeywords, exclusionPhrases, exclusionCaseSensitive)
+     * создаются автоматически при первом использовании и используют эти настройки.
+     * Они инвалидируются через @CacheEvict при добавлении/удалении правил.
      */
     @Bean
     fun cacheManager(): CacheManager {
         val cacheManager = CaffeineCacheManager()
 
         // Настройка кэшей по умолчанию
+        // Для exclusion rules используется длинный TTL, так как они инвалидируются
+        // при изменении через @CacheEvict, а не по истечении TTL
         cacheManager.setCaffeine(
             Caffeine.newBuilder()
                 .maximumSize(AppConstants.Cache.DEFAULT_MAX_SIZE.toLong())
-                .expireAfterWrite(10, TimeUnit.MINUTES)
-                .recordStats(),
+                .expireAfterWrite(24, TimeUnit.HOURS) // Длинный TTL для exclusion rules
+                .recordStats(), // Статистика для мониторинга
         )
 
         return cacheManager
