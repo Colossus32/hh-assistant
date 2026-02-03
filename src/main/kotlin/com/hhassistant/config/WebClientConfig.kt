@@ -91,6 +91,19 @@ class WebClientConfig(
         @Value("\${ollama.timeout-seconds}") timeoutSeconds: Long,
         @Value("\${ollama.max-in-memory-size-mb}") maxInMemorySizeMb: Int,
     ): WebClient {
+        log.info("🔧 [WebClient] Configuring Ollama WebClient")
+        log.info("   Base URL: $baseUrl")
+        log.info("   Timeout: ${timeoutSeconds}s")
+        log.info("   Max in-memory size: ${maxInMemorySizeMb}MB")
+
+        // Предупреждение если используется localhost в Docker
+        if (baseUrl.contains("localhost") || baseUrl.contains("127.0.0.1")) {
+            log.warn("⚠️ [WebClient] Ollama URL contains localhost/127.0.0.1")
+            log.warn("   If running in Docker, this will NOT work!")
+            log.warn("   Use 'host.docker.internal:11434' instead of 'localhost:11434'")
+            log.warn("   Set OLLAMA_BASE_URL=http://host.docker.internal:11434 in docker-compose.yml or .env file")
+        }
+
         val timeout = Duration.ofSeconds(timeoutSeconds)
         val httpClient = HttpClient.create()
             .responseTimeout(timeout)
@@ -100,11 +113,15 @@ class WebClientConfig(
                 )
             }
 
-        return WebClient.builder()
+        val webClient = WebClient.builder()
             .baseUrl(baseUrl)
             .clientConnector(ReactorClientHttpConnector(httpClient))
             .codecs { it.defaultCodecs().maxInMemorySize(maxInMemorySizeMb * 1024 * 1024) }
             .build()
+
+        log.info("✅ [WebClient] Ollama WebClient configured successfully")
+
+        return webClient
     }
 
     @Bean
