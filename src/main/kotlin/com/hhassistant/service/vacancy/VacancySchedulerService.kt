@@ -6,6 +6,11 @@ import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.exception.OllamaException
 import com.hhassistant.exception.VacancyProcessingException
+import com.hhassistant.service.monitoring.OllamaMonitoringService
+import com.hhassistant.service.notification.NotificationService
+import com.hhassistant.service.resume.ResumeService
+import com.hhassistant.service.skill.SkillExtractionQueueService
+import com.hhassistant.service.skill.SkillExtractionService
 import jakarta.annotation.PreDestroy
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -26,11 +31,6 @@ import org.springframework.context.event.EventListener
 import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
-import com.hhassistant.service.monitoring.OllamaMonitoringService
-import com.hhassistant.service.notification.NotificationService
-import com.hhassistant.service.resume.ResumeService
-import com.hhassistant.service.skill.SkillExtractionService
-import com.hhassistant.service.skill.SkillExtractionQueueService
 
 @Service
 class VacancySchedulerService(
@@ -45,6 +45,7 @@ class VacancySchedulerService(
     private val vacancyProcessingQueueService: VacancyProcessingQueueService,
     private val skillExtractionQueueService: SkillExtractionQueueService,
     private val vacancyRepository: com.hhassistant.repository.VacancyRepository,
+    private val vacancyContentValidator: VacancyContentValidator,
     @Autowired(required = false) private val ollamaMonitoringService: OllamaMonitoringService?,
     @Value("\${app.analysis.max-concurrent-requests:3}") private val maxConcurrentRequests: Int,
 ) {
@@ -106,19 +107,39 @@ class VacancySchedulerService(
                     return@launch
                 }
 
-                log.info("[Scheduler] Found ${skippedVacancies.size} skipped vacancies to retry (within 48 hour window), resetting status to NEW...")
+                log.info("[Scheduler] Found ${skippedVacancies.size} skipped vacancies to retry (within 48 hour window), checking exclusion rules...")
 
-                // Сбрасываем статус на NEW для повторной обработки
+                // Проверяем вакансии на бан-слова перед повторной обработкой
+                var validCount = 0
+                var deletedCount = 0
+                
                 skippedVacancies.forEach { vacancy ->
                     try {
-                        vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.NEW))
-                        log.debug("[Scheduler] Reset vacancy ${vacancy.id} status from SKIPPED to NEW for retry")
+                        // Проверяем на бан-слова перед повторной обработкой
+                        val validationResult = vacancyContentValidator.validate(vacancy)
+                        if (!validationResult.isValid) {
+                            log.warn("[Scheduler] Retry: Vacancy ${vacancy.id} ('${vacancy.name}') contains exclusion rules: ${validationResult.rejectionReason}, deleting from database")
+                            
+                            // Удаляем вакансию из БД, так как она содержит бан-слова
+                            try {
+                                skillExtractionService.deleteVacancyAndSkills(vacancy.id)
+                                log.info("[Scheduler] Retry: Deleted vacancy ${vacancy.id} from database due to exclusion rules")
+                                deletedCount++
+                            } catch (e: Exception) {
+                                log.error("[Scheduler] Retry: Failed to delete vacancy ${vacancy.id}: ${e.message}", e)
+                            }
+                        } else {
+                            // Вакансия прошла проверку, сбрасываем статус на NEW для повторной обработки
+                            vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.NEW))
+                            log.debug("[Scheduler] Reset vacancy ${vacancy.id} status from SKIPPED to NEW for retry")
+                            validCount++
+                        }
                     } catch (e: Exception) {
-                        log.error("[Scheduler] Failed to reset status for vacancy ${vacancy.id}: ${e.message}", e)
+                        log.error("[Scheduler] Failed to process vacancy ${vacancy.id} for retry: ${e.message}", e)
                     }
                 }
 
-                log.info("[Scheduler] Reset ${skippedVacancies.size} vacancies to NEW status, they will be processed in the next cycle")
+                log.info("[Scheduler] Retry: Reset $validCount vacancies to NEW status, deleted $deletedCount vacancies with exclusion rules")
             } catch (e: Exception) {
                 log.error("[Scheduler] Error retrying skipped vacancies: ${e.message}", e)
             }
@@ -216,12 +237,12 @@ class VacancySchedulerService(
     @Scheduled(cron = "\${app.schedule.recovery-skill-extraction:0 */5 * * * *}")
     fun recoverySkillExtraction() {
         log.debug("[Scheduler] Recovery skill extraction scheduled task triggered")
-        
+
         // Подсчитываем количество вакансий без навыков для логирования (всегда, даже если recovery пропускается)
         val allVacanciesWithoutSkills = vacancyRepository.findVacanciesWithoutSkills()
         val totalCount = allVacanciesWithoutSkills.size
         val relevantCount = vacancyRepository.findRelevantVacanciesWithoutSkills().size
-        
+
         // Запускаем обработку асинхронно, не блокируя поток
         schedulerScope.launch {
             try {
@@ -257,9 +278,25 @@ class VacancySchedulerService(
                 }
 
                 val vacancy = vacanciesWithoutSkills.first()
-                log.info("[Scheduler] Recovery: Found vacancy ${vacancy.id} without skills, adding to skill extraction queue (remaining: ${totalCount - 1})")
+                log.info("[Scheduler] Recovery: Found vacancy ${vacancy.id} without skills, checking for exclusion rules (remaining: ${totalCount - 1})")
 
-                // Добавляем вакансию в очередь извлечения навыков
+                // Проверяем вакансию на бан-слова перед добавлением в очередь
+                val validationResult = vacancyContentValidator.validate(vacancy)
+                if (!validationResult.isValid) {
+                    log.warn("[Scheduler] Recovery: Vacancy ${vacancy.id} ('${vacancy.name}') contains exclusion rules: ${validationResult.rejectionReason}, deleting from database")
+                    
+                    // Удаляем вакансию из БД, так как она содержит бан-слова
+                    try {
+                        skillExtractionService.deleteVacancyAndSkills(vacancy.id)
+                        log.info("[Scheduler] Recovery: Deleted vacancy ${vacancy.id} from database due to exclusion rules")
+                    } catch (e: Exception) {
+                        log.error("[Scheduler] Recovery: Failed to delete vacancy ${vacancy.id}: ${e.message}", e)
+                    }
+                    return@launch
+                }
+
+                // Вакансия прошла проверку на бан-слова, добавляем в очередь извлечения навыков
+                log.info("[Scheduler] Recovery: Vacancy ${vacancy.id} passed exclusion rules check, adding to skill extraction queue")
                 val enqueued = skillExtractionQueueService.enqueue(vacancy.id)
                 if (enqueued) {
                     log.info("[Scheduler] Recovery: Added vacancy ${vacancy.id} to skill extraction queue")

@@ -319,13 +319,23 @@ class VacancyProcessingQueueService(
                         val sentAt = java.time.LocalDateTime.now()
                         vacancyStatusService.updateVacancyStatus(vacancy.withSentToTelegramAt(sentAt))
                         log.info("📱 [VacancyProcessingQueue] Successfully sent vacancy ${vacancy.id} to Telegram")
+                    } else {
+                        log.warn("⚠️ [VacancyProcessingQueue] Vacancy ${vacancy.id} was not sent to Telegram (Telegram may be disabled or not configured)")
                     }
                 } catch (e: Exception) {
                     log.error(" [VacancyProcessingQueue] Failed to send vacancy ${vacancy.id} to Telegram: ${e.message}", e)
                     // Продолжаем обработку даже если не удалось отправить
                 }
             } else {
-                log.debug("ℹ️ [VacancyProcessingQueue] Vacancy ${vacancy.id} is not relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%), skipping Telegram")
+                val reason = when {
+                    analysis.relevanceScore == 0.0 && analysis.reasoning.contains("отклонена") -> 
+                        "rejected by exclusion rules: ${analysis.reasoning}"
+                    analysis.relevanceScore == 0.0 -> 
+                        "relevance score is 0%"
+                    else -> 
+                        "relevance score ${String.format("%.2f", analysis.relevanceScore * 100)}% is below threshold"
+                }
+                log.info("ℹ️ [VacancyProcessingQueue] Vacancy ${vacancy.id} ('${vacancy.name}') is not relevant ($reason), skipping Telegram")
             }
 
             log.info(" [VacancyProcessingQueue] Completed processing pipeline for vacancy ${vacancy.id} (isRelevant: ${analysis.isRelevant})")

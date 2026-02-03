@@ -104,11 +104,11 @@ class SkillExtractionService(
 
         // Шаг 5: Создание связей VacancySkill (оптимизировано: batch-сохранение)
         val extractedAt = java.time.LocalDateTime.now()
-        
+
         // Оптимизация: один запрос для получения всех существующих связей вместо N запросов existsByVacancyIdAndSkillId
         val existingLinks = vacancySkillRepository.findByVacancyId(vacancy.id)
         val existingSkillIds = existingLinks.map { it.skillId }.toSet()
-        
+
         // Собираем только новые связи (которых еще нет)
         val newVacancySkills = savedSkills
             .mapNotNull { skill ->
@@ -123,7 +123,7 @@ class SkillExtractionService(
                     null
                 }
             }
-        
+
         // Batch-сохранение всех новых связей одним запросом
         val skillsLinked = if (newVacancySkills.isNotEmpty()) {
             val saved = vacancySkillRepository.saveAll(newVacancySkills)
@@ -382,7 +382,11 @@ class SkillExtractionService(
      * Удаляет вакансию и все связанные данные (навыки, анализы).
      */
     @Transactional
-    private fun deleteVacancyAndSkills(vacancyId: String) {
+    /**
+     * Удаляет вакансию и все связанные данные (навыки, анализы)
+     * Используется при обнаружении вакансий с бан-словами или несуществующих вакансий
+     */
+    fun deleteVacancyAndSkills(vacancyId: String) {
         try {
             // Удаляем связи вакансия-навык
             vacancySkillRepository.deleteByVacancyId(vacancyId)
