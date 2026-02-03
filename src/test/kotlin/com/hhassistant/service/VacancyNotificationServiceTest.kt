@@ -103,7 +103,9 @@ class VacancyNotificationServiceTest {
             score = 0.85,
         )
 
-        coEvery { telegramClient.sendMessage(text = any(), replyMarkup = any()) } throws TelegramException.RateLimitException("Rate limit")
+        coEvery {
+            telegramClient.sendMessage(text = any(), replyMarkup = any())
+        } throws TelegramException.RateLimitException("Rate limit")
 
         // When/Then
         assertThatThrownBy {

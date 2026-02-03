@@ -144,7 +144,8 @@ class VacancyServiceTest {
             val existingIds = listOf<String>()
 
             every { searchConfigRepository.findByIsActiveTrue() } returns listOf(config1, config2)
-            coEvery { hhVacancyClient.searchVacancies(config1) } throws HHAPIException.ConnectionException("Connection error")
+            coEvery { hhVacancyClient.searchVacancies(config1) } throws
+                HHAPIException.ConnectionException("Connection error")
             coEvery { hhVacancyClient.searchVacancies(config2) } returns listOf(vacancyDto)
             every { vacancyRepository.findAllIds() } returns existingIds
             every { vacancyRepository.saveAll(any<List<Vacancy>>()) } returns listOf(createTestVacancy())
@@ -166,7 +167,9 @@ class VacancyServiceTest {
             every { searchConfigRepository.findByIsActiveTrue() } returns listOf(config)
             coEvery { hhVacancyClient.searchVacancies(config) } returns vacancyDtos
             every { vacancyRepository.findAllIds() } returns existingIds
-            every { vacancyRepository.saveAll(any<List<Vacancy>>()) } returns vacancyDtos.take(50).map { createTestVacancy(id = it.id) }
+            every {
+                vacancyRepository.saveAll(any<List<Vacancy>>())
+            } returns vacancyDtos.take(50).map { createTestVacancy(id = it.id) }
 
             val result = service.fetchAndSaveNewVacancies()
 

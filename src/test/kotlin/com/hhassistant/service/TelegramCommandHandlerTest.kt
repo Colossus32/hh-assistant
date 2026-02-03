@@ -77,7 +77,14 @@ class TelegramCommandHandlerTest {
         kotlinx.coroutines.runBlocking {
             handler.handleCommand(chatId = "123", text = "/nope")
 
-            coVerify { telegramClient.sendMessage(targetChatId = "123", text = match { it.contains("Unknown command") || it.contains("Неизвестная команда") }) }
+            coVerify {
+                telegramClient.sendMessage(
+                    targetChatId = "123",
+                    text = match {
+                        it.contains("Unknown command") || it.contains("Неизвестная команда")
+                    },
+                )
+            }
         }
     }
 
@@ -86,7 +93,12 @@ class TelegramCommandHandlerTest {
         kotlinx.coroutines.runBlocking {
             handler.handleCommand(chatId = "123", text = "/vacancies")
 
-            coVerify { telegramClient.sendMessage(targetChatId = "123", text = match { it.contains("Нет новых вакансий") }) }
+            coVerify {
+                telegramClient.sendMessage(
+                    targetChatId = "123",
+                    text = match { it.contains("Нет новых вакансий") },
+                )
+            }
         }
     }
 
@@ -108,7 +120,14 @@ class TelegramCommandHandlerTest {
 
             handler.handleCommand(chatId = "123", text = "/vacancies")
 
-            coVerify { telegramClient.sendMessage(targetChatId = "123", text = match { it.contains("Доступ запрещен") || it.contains("Access denied") }) }
+            coVerify {
+                telegramClient.sendMessage(
+                    targetChatId = "123",
+                    text = match {
+                        it.contains("Доступ запрещен") || it.contains("Access denied")
+                    },
+                )
+            }
         }
     }
 }

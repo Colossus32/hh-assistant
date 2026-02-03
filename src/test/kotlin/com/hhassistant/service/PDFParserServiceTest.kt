@@ -46,7 +46,9 @@ class PDFParserServiceTest {
         val structure = parser.extractStructuredData(text)
 
         assertThat(structure.skills).isNotEmpty
-        assertThat(structure.skills).containsAnyOf("Kotlin", "kotlin", "Spring Boot", "spring", "PostgreSQL", "postgresql", "Docker", "docker")
+        assertThat(
+            structure.skills,
+        ).containsAnyOf("Kotlin", "kotlin", "Spring Boot", "spring", "PostgreSQL", "postgresql", "Docker", "docker")
         // Experience and education parsing is complex, so we just check they exist
         assertThat(structure.desiredSalary).isEqualTo(200000)
     }

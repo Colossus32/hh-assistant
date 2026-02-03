@@ -129,7 +129,9 @@ class VacancySchedulerServiceTest {
 
             coEvery { vacancyFetchService.fetchAndSaveNewVacancies() } returns fetchResult
             every { vacancyService.getNewVacanciesForAnalysis() } returns listOf(vacancy1, vacancy2)
-            coEvery { vacancyAnalysisService.analyzeVacancy(vacancy1) } throws OllamaException.ConnectionException("Connection error")
+            coEvery {
+                vacancyAnalysisService.analyzeVacancy(vacancy1)
+            } throws OllamaException.ConnectionException("Connection error")
             coEvery { vacancyAnalysisService.analyzeVacancy(vacancy2) } returns analysis
             every { vacancyStatusService.updateVacancyStatus(any()) } returns Unit
 

@@ -47,7 +47,9 @@ class HHVacancyClientTest {
             experienceIds = null,
         )
 
-        client = HHVacancyClient(webClient, perPage = 50, defaultPage = 0, rateLimitService, vacancyDetailsCache, searchConfig)
+        client = HHVacancyClient(
+            webClient, perPage = 50, defaultPage = 0, rateLimitService, vacancyDetailsCache, searchConfig,
+        )
     }
 
     @AfterEach
