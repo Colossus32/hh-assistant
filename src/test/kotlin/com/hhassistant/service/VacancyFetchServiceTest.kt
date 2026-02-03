@@ -5,33 +5,35 @@ import com.hhassistant.client.hh.dto.VacancyDto
 import com.hhassistant.config.FormattingConfig
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.domain.entity.Vacancy
-import com.hhassistant.event.VacancyFetchedEvent
 import com.hhassistant.repository.SearchConfigRepository
 import com.hhassistant.repository.VacancyRepository
+import com.hhassistant.service.notification.NotificationService
+import com.hhassistant.service.util.SearchConfigFactory
+import com.hhassistant.service.util.TokenRefreshService
+import com.hhassistant.service.vacancy.VacancyFetchService
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.springframework.context.ApplicationEventPublisher
-
 class VacancyFetchServiceTest {
 
     private lateinit var hhVacancyClient: HHVacancyClient
     private lateinit var vacancyRepository: VacancyRepository
     private lateinit var searchConfigRepository: SearchConfigRepository
     private lateinit var formattingConfig: FormattingConfig
-    private lateinit var eventPublisher: ApplicationEventPublisher
     private lateinit var notificationService: NotificationService
     private lateinit var tokenRefreshService: TokenRefreshService
     private lateinit var searchConfigFactory: SearchConfigFactory
     private lateinit var searchConfig: com.hhassistant.config.VacancyServiceConfig
     private lateinit var vacancyIdsCache: com.github.benmanes.caffeine.cache.Cache<String, Set<String>>
     private lateinit var metricsService: com.hhassistant.metrics.MetricsService
+    private lateinit var vacancyProcessingQueueService: com.hhassistant.service.vacancy.VacancyProcessingQueueService
+    private lateinit var exclusionKeywordService: com.hhassistant.service.exclusion.ExclusionKeywordService
     private lateinit var service: VacancyFetchService
-    private lateinit var capturedEvents: MutableList<org.springframework.context.ApplicationEvent>
 
     @BeforeEach
     fun setUp() {
@@ -42,18 +44,14 @@ class VacancyFetchServiceTest {
             defaultCurrency = "RUR",
             areaNotSpecified = "Не указан",
         )
-        eventPublisher = mockk(relaxed = true)
         notificationService = mockk(relaxed = true)
         tokenRefreshService = mockk(relaxed = true)
         searchConfigFactory = mockk(relaxed = true)
         searchConfig = com.hhassistant.config.VacancyServiceConfig()
         vacancyIdsCache = com.github.benmanes.caffeine.cache.Caffeine.newBuilder().build<String, Set<String>>()
         metricsService = mockk(relaxed = true)
-        capturedEvents = mutableListOf()
-
-        every { eventPublisher.publishEvent(any<org.springframework.context.ApplicationEvent>()) } answers {
-            capturedEvents.add(arg(0))
-        }
+        vacancyProcessingQueueService = mockk(relaxed = true)
+        exclusionKeywordService = mockk(relaxed = true)
 
         service = VacancyFetchService(
             hhVacancyClient = hhVacancyClient,
@@ -64,15 +62,16 @@ class VacancyFetchServiceTest {
             searchConfigFactory = searchConfigFactory,
             searchConfig = searchConfig,
             formattingConfig = formattingConfig,
-            eventPublisher = eventPublisher,
             metricsService = metricsService,
+            vacancyProcessingQueueService = vacancyProcessingQueueService,
+            exclusionKeywordService = exclusionKeywordService,
             maxVacanciesPerCycle = 50,
             vacancyIdsCache = vacancyIdsCache,
         )
     }
 
     @Test
-    fun `should fetch vacancies and publish VacancyFetchedEvent`() = runBlocking {
+    fun `should fetch vacancies and save them`() = runBlocking {
         // Given
         val vacancyDto1 = createTestVacancyDto("1", "Java Developer")
         val vacancyDto2 = createTestVacancyDto("2", "Kotlin Developer")
@@ -80,24 +79,20 @@ class VacancyFetchServiceTest {
 
         every { searchConfigRepository.findByIsActiveTrue() } returns listOf(searchConfig)
         coEvery { hhVacancyClient.searchVacancies(any()) } returns listOf(vacancyDto1, vacancyDto2)
-        every { vacancyRepository.existsById(any()) } returns false
-        every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { arg(0) }
+        every { vacancyRepository.findAllIds() } returns emptyList()
+        every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { firstArg() }
+        every { vacancyProcessingQueueService.enqueueBatch(any()) } returns 2
 
         // When
         val result = service.fetchAndSaveNewVacancies()
 
         // Then
         assertThat(result.vacancies.size).isEqualTo(2)
-        assertThat(capturedEvents.size).isEqualTo(1)
-        assertThat(capturedEvents[0]).isInstanceOf(VacancyFetchedEvent::class.java)
-
-        val event = capturedEvents[0] as VacancyFetchedEvent
-        assertThat(event.vacancies).hasSize(2)
-        assertThat(event.searchKeywords).contains("Java")
+        verify(exactly = 1) { vacancyRepository.saveAll(any<List<Vacancy>>()) }
     }
 
     @Test
-    fun `should not publish event when no new vacancies found`() = runBlocking {
+    fun `should return empty result when no new vacancies found`() = runBlocking {
         // Given
         val searchConfig = createTestSearchConfig("Java")
 
@@ -109,7 +104,6 @@ class VacancyFetchServiceTest {
 
         // Then
         assertThat(result.vacancies.size).isEqualTo(0)
-        assertThat(capturedEvents.size).isEqualTo(0)
     }
 
     @Test
@@ -123,7 +117,7 @@ class VacancyFetchServiceTest {
         coEvery { hhVacancyClient.searchVacancies(any()) } returns listOf(vacancyDto1, vacancyDto2)
         every { vacancyRepository.existsById("1") } returns true // Уже существует
         every { vacancyRepository.existsById("2") } returns false
-        every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { arg(0) }
+        every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { firstArg() }
 
         // When
         val result = service.fetchAndSaveNewVacancies()
@@ -134,7 +128,7 @@ class VacancyFetchServiceTest {
     }
 
     @Test
-    fun `should publish separate events for different search keywords`() = runBlocking {
+    fun `should fetch vacancies for multiple search configs`() = runBlocking {
         // Given
         val vacancyDto1 = createTestVacancyDto("1", "Java Developer")
         val vacancyDto2 = createTestVacancyDto("2", "Kotlin Developer")
@@ -146,16 +140,16 @@ class VacancyFetchServiceTest {
             listOf(vacancyDto1),
             listOf(vacancyDto2),
         )
-        every { vacancyRepository.existsById(any()) } returns false
-        every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { arg(0) }
+        every { vacancyRepository.findAllIds() } returns emptyList()
+        every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { firstArg() }
+        every { vacancyProcessingQueueService.enqueueBatch(any()) } returns 2
 
         // When
-        service.fetchAndSaveNewVacancies()
+        val result = service.fetchAndSaveNewVacancies()
 
         // Then
-        // События публикуются для каждой группы вакансий по ключевым словам
-        // В реальной реализации это может быть одно или несколько событий в зависимости от группировки
-        assertThat(capturedEvents.size).isGreaterThan(0)
+        assertThat(result.vacancies.size).isEqualTo(2)
+        verify(exactly = 1) { vacancyRepository.saveAll(any<List<Vacancy>>()) }
     }
 
     // Helper methods

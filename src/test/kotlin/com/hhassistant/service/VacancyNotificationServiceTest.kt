@@ -6,14 +6,16 @@ import com.hhassistant.domain.entity.CoverLetterGenerationStatus
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.domain.entity.VacancyStatus
-import com.hhassistant.event.VacancyReadyForTelegramEvent
 import com.hhassistant.exception.TelegramException
+import com.hhassistant.service.vacancy.VacancyNotificationService
+import com.hhassistant.service.vacancy.VacancyStatusService
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.LocalDateTime
@@ -33,9 +35,9 @@ class VacancyNotificationServiceTest {
         metricsService = mockk(relaxed = true)
         capturedMessages = mutableListOf()
 
-        coEvery { telegramClient.sendMessage(any(), any()) } answers {
-            val message = arg<String>(0)
-            val keyboard = arg<InlineKeyboardMarkup?>(1)
+        coEvery { telegramClient.sendMessage(text = any(), replyMarkup = any()) } answers {
+            val message = firstArg<String>()
+            val keyboard = secondArg<InlineKeyboardMarkup?>()
             capturedMessages.add(Pair(message, keyboard))
             true
         }
@@ -49,7 +51,7 @@ class VacancyNotificationServiceTest {
     }
 
     @Test
-    fun `should handle VacancyReadyForTelegramEvent and send message to Telegram`() = runBlocking {
+    fun `should send vacancy to Telegram and update status`() = runBlocking {
         // Given
         val vacancy = createTestVacancy("1", "Java Developer")
         val analysis = createTestAnalysis(
@@ -58,19 +60,18 @@ class VacancyNotificationServiceTest {
             score = 0.85,
             coverLetter = "Test cover letter",
         )
-        val event = VacancyReadyForTelegramEvent(this, vacancy, analysis)
 
         // When
-        service.handleVacancyReadyForTelegram(event)
+        val result = service.sendVacancyToTelegram(vacancy, analysis)
 
         // Then
-        coVerify(exactly = 1) { telegramClient.sendMessage(any(), any()) }
+        assertThat(result).isTrue
+        coVerify(exactly = 1) { telegramClient.sendMessage(text = any(), replyMarkup = any()) }
         verify(exactly = 1) { vacancyStatusService.updateVacancyStatus(any()) }
         assertThat(capturedMessages.size).isEqualTo(1)
         assertThat(capturedMessages[0].first).contains(vacancy.name)
         assertThat(capturedMessages[0].first).contains(vacancy.employer)
-        assertThat(capturedMessages[0].first).contains("Test cover letter")
-        assertThat(capturedMessages[0].second).isNotNull
+        assertThat(capturedMessages[0].second).isNull()
     }
 
     @Test
@@ -83,13 +84,12 @@ class VacancyNotificationServiceTest {
             score = 0.85,
             coverLetter = null,
         )
-        val event = VacancyReadyForTelegramEvent(this, vacancy, analysis)
 
         // When
-        service.handleVacancyReadyForTelegram(event)
+        service.sendVacancyToTelegram(vacancy, analysis)
 
         // Then
-        coVerify(exactly = 1) { telegramClient.sendMessage(any(), any()) }
+        coVerify(exactly = 1) { telegramClient.sendMessage(text = any(), replyMarkup = any()) }
         assertThat(capturedMessages[0].first).doesNotContain("Сопроводительное письмо")
     }
 
@@ -102,15 +102,17 @@ class VacancyNotificationServiceTest {
             isRelevant = true,
             score = 0.85,
         )
-        val event = VacancyReadyForTelegramEvent(this, vacancy, analysis)
 
-        coEvery { telegramClient.sendMessage(any(), any()) } throws TelegramException.RateLimitException("Rate limit")
+        coEvery { telegramClient.sendMessage(text = any(), replyMarkup = any()) } throws TelegramException.RateLimitException("Rate limit")
 
-        // When
-        service.handleVacancyReadyForTelegram(event)
+        // When/Then
+        assertThatThrownBy {
+            runBlocking {
+                service.sendVacancyToTelegram(vacancy, analysis)
+            }
+        }.isInstanceOf(TelegramException.RateLimitException::class.java)
 
-        // Then
-        coVerify(exactly = 1) { telegramClient.sendMessage(any(), any()) }
+        coVerify(exactly = 1) { telegramClient.sendMessage(text = any(), replyMarkup = any()) }
         verify(exactly = 0) { vacancyStatusService.updateVacancyStatus(any()) }
     }
 
@@ -123,10 +125,9 @@ class VacancyNotificationServiceTest {
             isRelevant = true,
             score = 0.85,
         )
-        val event = VacancyReadyForTelegramEvent(this, vacancy, analysis)
 
         // When
-        service.handleVacancyReadyForTelegram(event)
+        service.sendVacancyToTelegram(vacancy, analysis)
 
         // Then
         val keyboard = capturedMessages[0].second
@@ -143,10 +144,9 @@ class VacancyNotificationServiceTest {
             score = 0.85,
             reasoning = "Test <reasoning> with & special chars",
         )
-        val event = VacancyReadyForTelegramEvent(this, vacancy, analysis)
 
         // When
-        service.handleVacancyReadyForTelegram(event)
+        service.sendVacancyToTelegram(vacancy, analysis)
 
         // Then
         val message = capturedMessages[0].first

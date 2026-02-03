@@ -38,7 +38,16 @@ class HHVacancyClientTest {
         val vacancyDetailsCache = com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
             .build<String, com.hhassistant.client.hh.dto.VacancyDto>()
 
-        client = HHVacancyClient(webClient, perPage = 50, defaultPage = 0, rateLimitService, vacancyDetailsCache)
+        val searchConfig = com.hhassistant.config.VacancyServiceConfig(
+            keywordsRotation = null,
+            keywords = null,
+            area = null,
+            minSalary = null,
+            experience = null,
+            experienceIds = null,
+        )
+
+        client = HHVacancyClient(webClient, perPage = 50, defaultPage = 0, rateLimitService, vacancyDetailsCache, searchConfig)
     }
 
     @AfterEach

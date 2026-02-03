@@ -2,41 +2,29 @@ package com.hhassistant.service
 
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
-import com.hhassistant.event.VacancyStatusChangedEvent
+import com.hhassistant.service.vacancy.VacancyStatusService
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.springframework.context.ApplicationEvent
-import org.springframework.context.ApplicationEventPublisher
 import java.time.LocalDateTime
 import java.util.*
 
 class VacancyStatusServiceTest {
 
     private lateinit var vacancyRepository: com.hhassistant.repository.VacancyRepository
-    private lateinit var eventPublisher: ApplicationEventPublisher
     private lateinit var service: VacancyStatusService
-    private lateinit var capturedEvents: MutableList<ApplicationEvent>
 
     @BeforeEach
     fun setUp() {
         vacancyRepository = mockk(relaxed = true)
-        eventPublisher = mockk(relaxed = true)
-        capturedEvents = mutableListOf()
-
-        every { eventPublisher.publishEvent(any()) } answers {
-            val event = arg<ApplicationEvent>(0)
-            capturedEvents.add(event)
-        }
-
-        service = VacancyStatusService(vacancyRepository, eventPublisher)
+        service = VacancyStatusService(vacancyRepository)
     }
 
     @Test
-    fun `should update vacancy status and publish VacancyStatusChangedEvent`() {
+    fun `should update vacancy status`() {
         // Given
         val vacancy = createTestVacancy("1", "Java Developer", VacancyStatus.NEW)
         val updatedVacancy = vacancy.withStatus(VacancyStatus.ANALYZED)
@@ -50,17 +38,10 @@ class VacancyStatusServiceTest {
         // Then
         verify(exactly = 1) { vacancyRepository.findById(vacancy.id) }
         verify(exactly = 1) { vacancyRepository.save(updatedVacancy) }
-        assertThat(capturedEvents).hasSize(1)
-        assertThat(capturedEvents[0]).isInstanceOf(VacancyStatusChangedEvent::class.java)
-
-        val event = capturedEvents[0] as VacancyStatusChangedEvent
-        assertThat(event.vacancy).isEqualTo(updatedVacancy)
-        assertThat(event.oldStatus).isEqualTo(VacancyStatus.NEW)
-        assertThat(event.newStatus).isEqualTo(VacancyStatus.ANALYZED)
     }
 
     @Test
-    fun `should publish event with null oldStatus when vacancy is new`() {
+    fun `should update vacancy status when old status is null`() {
         // Given
         val vacancy = createTestVacancy("1", "Java Developer", VacancyStatus.NEW)
         val updatedVacancy = vacancy.withStatus(VacancyStatus.ANALYZED)
@@ -72,9 +53,7 @@ class VacancyStatusServiceTest {
         service.updateVacancyStatus(updatedVacancy)
 
         // Then
-        val event = capturedEvents[0] as VacancyStatusChangedEvent
-        assertThat(event.oldStatus).isNull()
-        assertThat(event.newStatus).isEqualTo(VacancyStatus.ANALYZED)
+        verify(exactly = 1) { vacancyRepository.save(updatedVacancy) }
     }
 
     @Test
@@ -94,9 +73,9 @@ class VacancyStatusServiceTest {
 
         // Then
         assertThat(result).isNotNull
-        assertThat(result!!.status).isEqualTo(VacancyStatus.APPLIED)
+        val resultVacancy: Vacancy = result!!
+        assertThat(resultVacancy.status).isEqualTo(VacancyStatus.APPLIED)
         verify(exactly = 1) { vacancyRepository.save(any()) }
-        assertThat(capturedEvents).hasSize(1)
     }
 
     @Test
@@ -110,7 +89,6 @@ class VacancyStatusServiceTest {
         // Then
         assertThat(result).isNull()
         verify(exactly = 0) { vacancyRepository.save(any()) }
-        assertThat(capturedEvents.size).isEqualTo(0)
     }
 
     // Helper methods

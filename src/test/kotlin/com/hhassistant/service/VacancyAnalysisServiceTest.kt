@@ -11,6 +11,11 @@ import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.domain.model.ResumeStructure
 import com.hhassistant.exception.OllamaException
 import com.hhassistant.repository.VacancyAnalysisRepository
+import com.hhassistant.service.resume.ResumeService
+import com.hhassistant.service.skill.SkillExtractionService
+import com.hhassistant.service.util.AnalysisTimeService
+import com.hhassistant.service.vacancy.VacancyAnalysisService
+import com.hhassistant.service.vacancy.VacancyContentValidator
 import io.github.resilience4j.circuitbreaker.CircuitBreaker
 import io.github.resilience4j.retry.Retry
 import io.mockk.coEvery
@@ -32,10 +37,10 @@ class VacancyAnalysisServiceTest {
     private lateinit var repository: VacancyAnalysisRepository
     private lateinit var objectMapper: ObjectMapper
     private lateinit var promptConfig: PromptConfig
-    private lateinit var coverLetterQueueService: CoverLetterQueueService
-    private lateinit var eventPublisher: org.springframework.context.ApplicationEventPublisher
     private lateinit var vacancyContentValidator: VacancyContentValidator
     private lateinit var metricsService: com.hhassistant.metrics.MetricsService
+    private lateinit var analysisTimeService: AnalysisTimeService
+    private lateinit var skillExtractionService: SkillExtractionService
     private lateinit var ollamaCircuitBreaker: CircuitBreaker
     private lateinit var ollamaRetry: Retry
     private lateinit var service: VacancyAnalysisService
@@ -47,10 +52,10 @@ class VacancyAnalysisServiceTest {
         repository = mockk(relaxed = true)
         objectMapper = jacksonObjectMapper()
         promptConfig = PromptConfig()
-        coverLetterQueueService = mockk(relaxed = true)
-        eventPublisher = mockk(relaxed = true)
         vacancyContentValidator = mockk(relaxed = true)
         metricsService = mockk(relaxed = true)
+        analysisTimeService = mockk(relaxed = true)
+        skillExtractionService = mockk(relaxed = true)
         ollamaCircuitBreaker = CircuitBreaker.ofDefaults("ollamaTest")
         ollamaRetry = Retry.ofDefaults("ollamaTest")
         service = VacancyAnalysisService(
@@ -59,10 +64,10 @@ class VacancyAnalysisServiceTest {
             repository = repository,
             objectMapper = objectMapper,
             promptConfig = promptConfig,
-            coverLetterQueueService = coverLetterQueueService,
-            eventPublisher = eventPublisher,
             vacancyContentValidator = vacancyContentValidator,
             metricsService = metricsService,
+            analysisTimeService = analysisTimeService,
+            skillExtractionService = skillExtractionService,
             ollamaCircuitBreaker = ollamaCircuitBreaker,
             ollamaRetry = ollamaRetry,
             minRelevanceScore = 0.6,
@@ -77,7 +82,7 @@ class VacancyAnalysisServiceTest {
             val resumeStructure = createTestResumeStructure()
 
             every { repository.findByVacancyId(vacancy.id) } returns null
-            every { vacancyContentValidator.validate(vacancy) } returns com.hhassistant.service.VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
+            coEvery { vacancyContentValidator.validate(vacancy) } returns VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
             coEvery { resumeService.loadResume() } returns resume
             every { resumeService.getResumeStructure(resume) } returns resumeStructure
 
@@ -107,15 +112,14 @@ class VacancyAnalysisServiceTest {
 
             val result = service.analyzeVacancy(vacancy)
 
-            assertThat(result).isNotNull
+            assertThat(result as Any).isNotNull
             assertThat(result.isRelevant).isTrue
             assertThat(result.relevanceScore).isEqualTo(0.85)
-            assertThat(result.matchedSkills).isNotNull
+            assertThat(result.matchedSkills as Any).isNotNull
             assertThat(result.suggestedCoverLetter).isNull()
 
             coVerify { ollamaClient.chat(any()) }
             verify { repository.save(any()) }
-            verify { coverLetterQueueService.enqueue(savedAnalysis.id!!, savedAnalysis.vacancyId, 1) }
         }
     }
 
@@ -127,7 +131,7 @@ class VacancyAnalysisServiceTest {
             val resumeStructure = createTestResumeStructure()
 
             every { repository.findByVacancyId(vacancy.id) } returns null
-            every { vacancyContentValidator.validate(vacancy) } returns com.hhassistant.service.VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
+            coEvery { vacancyContentValidator.validate(vacancy) } returns VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
             coEvery { resumeService.loadResume() } returns resume
             every { resumeService.getResumeStructure(resume) } returns resumeStructure
 
@@ -154,10 +158,10 @@ class VacancyAnalysisServiceTest {
 
             every { repository.save(any()) } returns savedAnalysis
 
-            val result = service.analyzeVacancy(vacancy)
+            val result: com.hhassistant.domain.entity.VacancyAnalysis? = service.analyzeVacancy(vacancy)
 
-            assertThat(result).isNotNull
-            assertThat(result.isRelevant).isFalse
+            assertThat(result as Any).isNotNull
+            assertThat(result!!.isRelevant).isFalse
             assertThat(result.relevanceScore).isEqualTo(0.25)
             assertThat(result.suggestedCoverLetter).isNull()
 
@@ -182,7 +186,7 @@ class VacancyAnalysisServiceTest {
         every { repository.findByVacancyId(vacancy.id) } returns existingAnalysis
 
         runBlocking {
-            val result = service.analyzeVacancy(vacancy)
+            val result: com.hhassistant.domain.entity.VacancyAnalysis? = service.analyzeVacancy(vacancy)
 
             assertThat(result).isEqualTo(existingAnalysis)
             coVerify(exactly = 0) { ollamaClient.chat(any()) }
@@ -197,7 +201,7 @@ class VacancyAnalysisServiceTest {
         val resumeStructure = createTestResumeStructure()
 
         every { repository.findByVacancyId(vacancy.id) } returns null
-        every { vacancyContentValidator.validate(vacancy) } returns com.hhassistant.service.VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
+        coEvery { vacancyContentValidator.validate(vacancy) } returns com.hhassistant.service.vacancy.VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
         coEvery { resumeService.loadResume() } returns resume
         every { resumeService.getResumeStructure(resume) } returns resumeStructure
 
@@ -221,7 +225,7 @@ class VacancyAnalysisServiceTest {
         val resumeStructure = createTestResumeStructure()
 
         every { repository.findByVacancyId(vacancy.id) } returns null
-        every { vacancyContentValidator.validate(vacancy) } returns com.hhassistant.service.VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
+        coEvery { vacancyContentValidator.validate(vacancy) } returns com.hhassistant.service.vacancy.VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
         coEvery { resumeService.loadResume() } returns resume
         every { resumeService.getResumeStructure(resume) } returns resumeStructure
 
@@ -245,7 +249,7 @@ class VacancyAnalysisServiceTest {
         val resumeStructure = createTestResumeStructure()
 
         every { repository.findByVacancyId(vacancy.id) } returns null
-        every { vacancyContentValidator.validate(vacancy) } returns com.hhassistant.service.VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
+        coEvery { vacancyContentValidator.validate(vacancy) } returns com.hhassistant.service.vacancy.VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
         coEvery { resumeService.loadResume() } returns resume
         every { resumeService.getResumeStructure(resume) } returns resumeStructure
 
@@ -279,7 +283,7 @@ class VacancyAnalysisServiceTest {
             val resumeStructure = createTestResumeStructure()
 
             every { repository.findByVacancyId(vacancy.id) } returns null
-            every { vacancyContentValidator.validate(vacancy) } returns com.hhassistant.service.VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
+            coEvery { vacancyContentValidator.validate(vacancy) } returns VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
             coEvery { resumeService.loadResume() } returns resume
             every { resumeService.getResumeStructure(resume) } returns resumeStructure
 
@@ -308,16 +312,15 @@ class VacancyAnalysisServiceTest {
 
             every { repository.save(any()) } returns savedAnalysis
 
-            val result = service.analyzeVacancy(vacancy)
+            val result: com.hhassistant.domain.entity.VacancyAnalysis? = service.analyzeVacancy(vacancy)
 
-            assertThat(result).isNotNull
-            assertThat(result.isRelevant).isTrue
+            assertThat(result as Any).isNotNull
+            assertThat(result!!.isRelevant).isTrue
             assertThat(result.suggestedCoverLetter).isNull()
             assertThat(result.coverLetterGenerationStatus).isEqualTo(com.hhassistant.domain.entity.CoverLetterGenerationStatus.RETRY_QUEUED)
 
             coVerify(exactly = 1) { ollamaClient.chat(any()) }
             verify { repository.save(any()) }
-            verify { coverLetterQueueService.enqueue(savedAnalysis.id!!, savedAnalysis.vacancyId, 1) }
         }
     }
 

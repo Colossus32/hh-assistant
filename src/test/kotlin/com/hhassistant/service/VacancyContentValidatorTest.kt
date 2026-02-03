@@ -4,6 +4,7 @@ import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.service.exclusion.ExclusionRuleService
 import com.hhassistant.service.resume.ResumeService
+import com.hhassistant.service.vacancy.VacancyContentValidator
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking

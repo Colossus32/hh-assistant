@@ -7,6 +7,8 @@ import com.hhassistant.client.hh.dto.ResumeDto
 import com.hhassistant.domain.entity.Resume
 import com.hhassistant.domain.entity.ResumeSource
 import com.hhassistant.repository.ResumeRepository
+import com.hhassistant.service.resume.PDFParserService
+import com.hhassistant.service.resume.ResumeService
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -80,7 +82,14 @@ class ResumeServiceTest {
             coEvery { hhResumeClient.getMyResumes() } returns listOf(hhResumeDto)
             coEvery { hhResumeClient.getResumeDetails("123") } returns hhResumeDto
 
-            every { pdfParser.extractStructuredData(any()) } returns com.hhassistant.domain.model.ResumeStructure()
+            every { pdfParser.extractStructuredData(any()) } returns com.hhassistant.domain.model.ResumeStructure(
+                skills = emptyList(),
+                experience = emptyList(),
+                education = emptyList(),
+                desiredPosition = null,
+                desiredSalary = null,
+                summary = null,
+            )
 
             val savedResume = Resume(
                 fileName = "hh_resume_123.txt",
@@ -111,7 +120,14 @@ class ResumeServiceTest {
 
             // Mock PDF parser
             every { pdfParser.extractText(any()) } returns "Test resume content"
-            every { pdfParser.extractStructuredData(any()) } returns com.hhassistant.domain.model.ResumeStructure()
+            every { pdfParser.extractStructuredData(any()) } returns com.hhassistant.domain.model.ResumeStructure(
+                skills = emptyList(),
+                experience = emptyList(),
+                education = emptyList(),
+                desiredPosition = null,
+                desiredSalary = null,
+                summary = null,
+            )
 
             val savedResume = Resume(
                 fileName = "resume.pdf",

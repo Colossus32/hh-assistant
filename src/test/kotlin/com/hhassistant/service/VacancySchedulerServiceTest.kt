@@ -4,6 +4,13 @@ import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.exception.OllamaException
+import com.hhassistant.service.notification.NotificationService
+import com.hhassistant.service.resume.ResumeService
+import com.hhassistant.service.vacancy.VacancyAnalysisService
+import com.hhassistant.service.vacancy.VacancyFetchService
+import com.hhassistant.service.vacancy.VacancySchedulerService
+import com.hhassistant.service.vacancy.VacancyService
+import com.hhassistant.service.vacancy.VacancyStatusService
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -30,17 +37,20 @@ class VacancySchedulerServiceTest {
 
     @BeforeEach
     fun setup() {
-        vacancyFetchService = mockk()
-        vacancyService = mockk()
-        vacancyAnalysisService = mockk()
-        vacancyStatusService = mockk()
-        notificationService = mockk(relaxed = true)
-        resumeService = mockk(relaxed = true)
+        vacancyFetchService = mockk<VacancyFetchService>()
+        vacancyService = mockk<VacancyService>()
+        vacancyAnalysisService = mockk<VacancyAnalysisService>()
+        vacancyStatusService = mockk<VacancyStatusService>()
+        notificationService = mockk<NotificationService>(relaxed = true)
+        resumeService = mockk<ResumeService>(relaxed = true)
         metricsService = mockk(relaxed = true)
         skillExtractionService = mockk(relaxed = true)
         vacancyProcessingQueueService = mockk(relaxed = true)
         skillExtractionQueueService = mockk(relaxed = true)
         vacancyRepository = mockk(relaxed = true)
+        val vacancyContentValidator = mockk<com.hhassistant.service.vacancy.VacancyContentValidator>(relaxed = true)
+        val ollamaMonitoringService = mockk<com.hhassistant.service.monitoring.OllamaMonitoringService>(relaxed = true)
+
         service = VacancySchedulerService(
             vacancyFetchService = vacancyFetchService,
             vacancyService = vacancyService,
@@ -53,6 +63,8 @@ class VacancySchedulerServiceTest {
             vacancyProcessingQueueService = vacancyProcessingQueueService,
             skillExtractionQueueService = skillExtractionQueueService,
             vacancyRepository = vacancyRepository,
+            vacancyContentValidator = vacancyContentValidator,
+            ollamaMonitoringService = ollamaMonitoringService,
             maxConcurrentRequests = 3,
         )
     }
@@ -63,7 +75,7 @@ class VacancySchedulerServiceTest {
             val newVacancies = listOf(createTestVacancy())
             val vacanciesToAnalyze = listOf(createTestVacancy())
             val analysis = createTestAnalysis(isRelevant = true, score = 0.85)
-            val fetchResult = com.hhassistant.service.VacancyFetchService.FetchResult(
+            val fetchResult = VacancyFetchService.FetchResult(
                 vacancies = newVacancies,
                 searchKeywords = listOf("Kotlin"),
             )
@@ -87,7 +99,7 @@ class VacancySchedulerServiceTest {
         runBlocking {
             val vacanciesToAnalyze = listOf(createTestVacancy())
             val analysis = createTestAnalysis(isRelevant = false, score = 0.3)
-            val fetchResult = com.hhassistant.service.VacancyFetchService.FetchResult(
+            val fetchResult = VacancyFetchService.FetchResult(
                 vacancies = emptyList(),
                 searchKeywords = listOf("Kotlin"),
             )
@@ -110,7 +122,7 @@ class VacancySchedulerServiceTest {
             val vacancy1 = createTestVacancy(id = "1")
             val vacancy2 = createTestVacancy(id = "2")
             val analysis = createTestAnalysis(isRelevant = true, score = 0.8)
-            val fetchResult = com.hhassistant.service.VacancyFetchService.FetchResult(
+            val fetchResult = VacancyFetchService.FetchResult(
                 vacancies = emptyList(),
                 searchKeywords = listOf("Kotlin"),
             )
@@ -133,7 +145,7 @@ class VacancySchedulerServiceTest {
     @Test
     fun `should handle empty vacancy list`() {
         runBlocking {
-            val fetchResult = com.hhassistant.service.VacancyFetchService.FetchResult(
+            val fetchResult = VacancyFetchService.FetchResult(
                 vacancies = emptyList(),
                 searchKeywords = listOf("Kotlin"),
             )

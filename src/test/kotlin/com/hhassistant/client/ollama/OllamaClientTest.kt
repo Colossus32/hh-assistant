@@ -25,7 +25,7 @@ class OllamaClientTest {
             .codecs { it.defaultCodecs().maxInMemorySize(10 * 1024 * 1024) }
             .build()
 
-        client = OllamaClient(webClient, "qwen2.5:7b", 0.7)
+        client = OllamaClient(webClient, "qwen2.5:7b", 0.7, analysisTemperature = 0.7, ollamaMonitoringService = null)
     }
 
     @AfterEach

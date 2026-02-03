@@ -1,26 +1,35 @@
 package com.hhassistant.service
 
-import com.fasterxml.jackson.databind.ObjectMapper
 import com.hhassistant.client.telegram.TelegramClient
 import com.hhassistant.client.telegram.dto.User
+import com.hhassistant.service.exclusion.ExclusionKeywordService
+import com.hhassistant.service.exclusion.ExclusionRuleService
+import com.hhassistant.service.skill.SkillExtractionQueueService
+import com.hhassistant.service.skill.SkillExtractionService
+import com.hhassistant.service.skill.SkillStatisticsService
+import com.hhassistant.service.telegram.TelegramAuthorizationService
+import com.hhassistant.service.telegram.TelegramCommandHandler
+import com.hhassistant.service.util.AnalysisTimeService
+import com.hhassistant.service.vacancy.VacancyService
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.springframework.web.client.RestTemplate
+import org.springframework.web.reactive.function.client.WebClient
 
 class TelegramCommandHandlerTest {
     private lateinit var telegramClient: TelegramClient
-    private lateinit var restTemplate: RestTemplate
+    private lateinit var webClient: WebClient
     private lateinit var skillExtractionService: SkillExtractionService
+    private lateinit var skillExtractionQueueService: SkillExtractionQueueService
+    private lateinit var skillStatisticsService: SkillStatisticsService
     private lateinit var vacancyService: VacancyService
     private lateinit var exclusionRuleService: ExclusionRuleService
-    private lateinit var resumeService: ResumeService
-    private lateinit var vacancyAnalysisService: VacancyAnalysisService
+    private lateinit var exclusionKeywordService: ExclusionKeywordService
+    private lateinit var analysisTimeService: AnalysisTimeService
     private lateinit var authorizationService: TelegramAuthorizationService
-    private lateinit var objectMapper: ObjectMapper
     private lateinit var handler: TelegramCommandHandler
 
     private val authorizedUser = User(
@@ -33,13 +42,14 @@ class TelegramCommandHandlerTest {
     @BeforeEach
     fun setUp() {
         telegramClient = mockk(relaxed = true)
-        restTemplate = mockk(relaxed = true)
+        webClient = mockk(relaxed = true)
         skillExtractionService = mockk(relaxed = true)
+        skillExtractionQueueService = mockk(relaxed = true)
+        skillStatisticsService = mockk(relaxed = true)
         vacancyService = mockk(relaxed = true)
         exclusionRuleService = mockk(relaxed = true)
-        resumeService = mockk(relaxed = true)
-        vacancyAnalysisService = mockk(relaxed = true)
-        objectMapper = ObjectMapper()
+        exclusionKeywordService = mockk(relaxed = true)
+        analysisTimeService = mockk(relaxed = true)
 
         // Мокаем authorizationService так, чтобы он всегда разрешал доступ для тестов
         authorizationService = mockk(relaxed = true) {
@@ -49,58 +59,56 @@ class TelegramCommandHandlerTest {
 
         handler = TelegramCommandHandler(
             telegramClient = telegramClient,
-            restTemplate = restTemplate,
+            webClient = webClient,
             skillExtractionService = skillExtractionService,
+            skillStatisticsService = skillStatisticsService,
+            skillExtractionQueueService = skillExtractionQueueService,
             vacancyService = vacancyService,
             exclusionRuleService = exclusionRuleService,
-            resumeService = resumeService,
-            vacancyAnalysisService = vacancyAnalysisService,
-            authorizationService = authorizationService,
-            objectMapper = objectMapper,
+            exclusionKeywordService = exclusionKeywordService,
+            analysisTimeService = analysisTimeService,
             apiBaseUrl = "http://localhost:8080",
         )
-        coEvery { telegramClient.sendMessage(any(), any()) } returns true
+        coEvery { telegramClient.sendMessage(targetChatId = any(), text = any(), replyMarkup = any()) } returns true
     }
 
     @Test
     fun `unknown command returns help hint`() {
-        handler.handleCommand(chatId = "123", text = "/nope", user = authorizedUser)
+        kotlinx.coroutines.runBlocking {
+            handler.handleCommand(chatId = "123", text = "/nope")
 
-        coVerify { telegramClient.sendMessage("123", match { it.contains("Unknown command") || it.contains("Неизвестная команда") }) }
+            coVerify { telegramClient.sendMessage(targetChatId = "123", text = match { it.contains("Unknown command") || it.contains("Неизвестная команда") }) }
+        }
     }
 
     @Test
     fun `vacancies command calls REST and formats empty result`() {
-        every { restTemplate.getForObject<Map<String, Any>>(any<String>(), any<Class<Map<String, Any>>>()) } returns mapOf(
-            "count" to 0,
-            "vacancies" to emptyList<Map<String, Any>>(),
-        )
+        kotlinx.coroutines.runBlocking {
+            handler.handleCommand(chatId = "123", text = "/vacancies")
 
-        handler.handleCommand(chatId = "123", text = "/vacancies", user = authorizedUser)
-
-        coVerify { telegramClient.sendMessage("123", match { it.contains("Нет новых вакансий") }) }
+            coVerify { telegramClient.sendMessage(targetChatId = "123", text = match { it.contains("Нет новых вакансий") }) }
+        }
     }
 
     @Test
     fun `mark-applied command posts and reports success`() {
-        every { restTemplate.postForObject<Map<String, Any>>(any<String>(), any(), any<Class<Map<String, Any>>>()) } returns mapOf(
-            "success" to true,
-        )
+        kotlinx.coroutines.runBlocking {
+            handler.handleCommand(chatId = "123", text = "/mark-applied-999")
 
-        handler.handleCommand(chatId = "123", text = "/mark-applied-999", user = authorizedUser)
-
-        coVerify { telegramClient.sendMessage("123", match { it.contains("откликнулся") }) }
+            coVerify { telegramClient.sendMessage(targetChatId = "123", text = match { it.contains("откликнулся") }) }
+        }
     }
 
     @Test
     fun `unauthorized user gets access denied message`() {
-        // Мокаем authorizationService так, чтобы он запрещал доступ
-        every { authorizationService.isAuthorized(any()) } returns false
-        every { authorizationService.getUserInfo(any()) } returns "Unauthorized User"
+        kotlinx.coroutines.runBlocking {
+            // Мокаем authorizationService так, чтобы он запрещал доступ
+            every { authorizationService.isAuthorized(any()) } returns false
+            every { authorizationService.getUserInfo(any()) } returns "Unauthorized User"
 
-        handler.handleCommand(chatId = "123", text = "/vacancies", user = authorizedUser)
+            handler.handleCommand(chatId = "123", text = "/vacancies")
 
-        coVerify { telegramClient.sendMessage("123", match { it.contains("Доступ запрещен") || it.contains("Access denied") }) }
-        coVerify(exactly = 0) { restTemplate.getForObject<Any>(any(), any()) }
+            coVerify { telegramClient.sendMessage(targetChatId = "123", text = match { it.contains("Доступ запрещен") || it.contains("Access denied") }) }
+        }
     }
 }

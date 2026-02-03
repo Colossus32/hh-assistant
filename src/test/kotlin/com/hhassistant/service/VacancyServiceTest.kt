@@ -3,6 +3,7 @@ package com.hhassistant.service
 import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.client.hh.dto.VacancyDto
 import com.hhassistant.config.FormattingConfig
+import com.hhassistant.config.VacancyServiceConfig
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
@@ -10,6 +11,10 @@ import com.hhassistant.exception.HHAPIException
 import com.hhassistant.exception.VacancyProcessingException
 import com.hhassistant.repository.SearchConfigRepository
 import com.hhassistant.repository.VacancyRepository
+import com.hhassistant.service.notification.NotificationService
+import com.hhassistant.service.util.SearchConfigFactory
+import com.hhassistant.service.util.TokenRefreshService
+import com.hhassistant.service.vacancy.VacancyService
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -28,9 +33,9 @@ class VacancyServiceTest {
     private lateinit var vacancyRepository: VacancyRepository
     private lateinit var searchConfigRepository: SearchConfigRepository
     private lateinit var formattingConfig: FormattingConfig
-    private lateinit var notificationService: com.hhassistant.service.NotificationService
-    private lateinit var tokenRefreshService: com.hhassistant.service.TokenRefreshService
-    private lateinit var searchConfigFactory: com.hhassistant.service.SearchConfigFactory
+    private lateinit var notificationService: NotificationService
+    private lateinit var tokenRefreshService: TokenRefreshService
+    private lateinit var searchConfigFactory: SearchConfigFactory
     private lateinit var searchConfig: com.hhassistant.config.VacancyServiceConfig
     private lateinit var vacancyIdsCache: com.github.benmanes.caffeine.cache.Cache<String, Set<String>>
     private lateinit var service: VacancyService
@@ -181,7 +186,7 @@ class VacancyServiceTest {
         val result = service.getNewVacanciesForAnalysis()
 
         assertThat(result).hasSize(2)
-        assertThat(result).allMatch { it.status == VacancyStatus.NEW }
+        assertThat(result).allSatisfy { vacancy -> assertThat(vacancy.status).isEqualTo(VacancyStatus.NEW) }
     }
 
     @Test
