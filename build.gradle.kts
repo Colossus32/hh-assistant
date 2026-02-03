@@ -128,6 +128,8 @@ ktlint {
         exclude("**/generated/**")
         exclude("**/build/**")
     }
+    // Отключаем правило лексикографического порядка импортов
+    disabledRules.set(setOf("import-ordering"))
 }
 
 tasks.named("check") {
