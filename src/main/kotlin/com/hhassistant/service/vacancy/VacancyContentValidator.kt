@@ -156,14 +156,18 @@ class VacancyContentValidator(
 
             // If no matching skills found - vacancy is not relevant
             if (matchingSkills == 0) {
-                log.debug("[VacancyValidator] Vacancy ${vacancy.id} ('${vacancy.name}') rejected: no matching skills from resume")
+                log.debug(
+                    "[VacancyValidator] Vacancy ${vacancy.id} ('${vacancy.name}') rejected: no matching skills from resume",
+                )
                 return ValidationResult(
                     isValid = false,
                     rejectionReason = "no matching skills from resume (checked ${resumeSkills.size} skills)",
                 )
             }
 
-            log.debug("[VacancyValidator] Vacancy ${vacancy.id} passed skills matching check ($matchingSkills/${resumeSkills.size} skills matched)")
+            log.debug(
+                "[VacancyValidator] Vacancy ${vacancy.id} passed skills matching check ($matchingSkills/${resumeSkills.size} skills matched)",
+            )
             return ValidationResult(isValid = true, rejectionReason = null)
         } catch (e: Exception) {
             // If resume loading fails - don't block validation, just log and continue

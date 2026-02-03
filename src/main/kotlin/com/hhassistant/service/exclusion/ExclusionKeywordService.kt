@@ -55,7 +55,9 @@ class ExclusionKeywordService(
         // Перестраиваем Aho-Corasick Trie для быстрого поиска
         rebuildTrie(keywords)
 
-        log.debug("[ExclusionKeywordService] Reloaded ${exclusionKeywords.size} exclusion keywords and rebuilt Aho-Corasick trie")
+        log.debug(
+            "[ExclusionKeywordService] Reloaded ${exclusionKeywords.size} exclusion keywords and rebuilt Aho-Corasick trie",
+        )
     }
 
     /**
@@ -130,7 +132,9 @@ class ExclusionKeywordService(
 
         // Проверяем, не является ли это фразой (содержит пробелы)
         if (normalizedKeyword.contains(" ")) {
-            log.warn("[ExclusionKeywordService] Attempted to add phrase as keyword: '$keyword'. Use ExclusionRuleService for phrases.")
+            log.warn(
+                "[ExclusionKeywordService] Attempted to add phrase as keyword: '$keyword'. Use ExclusionRuleService for phrases.",
+            )
             return false
         }
 

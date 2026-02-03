@@ -210,18 +210,35 @@ class TelegramCommandHandler(
 
                     when {
                         estimatedHours >= 1.0 -> {
-                            appendLine("🕐 <b>Приблизительное время обработки оставшихся:</b> ${String.format("%.1f", estimatedHours)} ч (${String.format("%.1f", estimatedMinutes)} мин)")
+                            appendLine(
+                                "🕐 <b>Приблизительное время обработки оставшихся:</b> ${String.format(
+                                    "%.1f",
+                                    estimatedHours,
+                                )} ч (${String.format("%.1f", estimatedMinutes)} мин)",
+                            )
                         }
                         estimatedMinutes >= 1.0 -> {
-                            appendLine("🕐 <b>Приблизительное время обработки оставшихся:</b> ${String.format("%.1f", estimatedMinutes)} мин")
+                            appendLine(
+                                "🕐 <b>Приблизительное время обработки оставшихся:</b> ${String.format(
+                                    "%.1f",
+                                    estimatedMinutes,
+                                )} мин",
+                            )
                         }
                         else -> {
-                            appendLine("🕐 <b>Приблизительное время обработки оставшихся:</b> ${String.format("%.1f", estimatedSeconds)} сек")
+                            appendLine(
+                                "🕐 <b>Приблизительное время обработки оставшихся:</b> ${String.format(
+                                    "%.1f",
+                                    estimatedSeconds,
+                                )} сек",
+                            )
                         }
                     }
                 } else {
                     if (statistics.queueCount > 0) {
-                        appendLine("🕐 <b>Приблизительное время обработки оставшихся:</b> Неизвестно (нет данных о скорости обработки)")
+                        appendLine(
+                            "🕐 <b>Приблизительное время обработки оставшихся:</b> Неизвестно (нет данных о скорости обработки)",
+                        )
                     } else {
                         appendLine("🕐 <b>Приблизительное время обработки оставшихся:</b> Очередь пуста")
                     }
@@ -356,7 +373,14 @@ class TelegramCommandHandler(
                     appendLine("📊 <b>Текущий топ навыков по популярности:</b>")
                     appendLine()
                     skillsStatistics.forEachIndexed { index, skill ->
-                        appendLine("${index + 1}. <b>${escapeHtml(skill.skillName)}</b> - ${String.format("%.1f", skill.frequencyPercentage)}% (${skill.occurrenceCount} вакансий)")
+                        appendLine(
+                            "${index + 1}. <b>${escapeHtml(
+                                skill.skillName,
+                            )}</b> - ${String.format(
+                                "%.1f",
+                                skill.frequencyPercentage,
+                            )}% (${skill.occurrenceCount} вакансий)",
+                        )
                     }
                     appendLine()
                     appendLine("📋 <b>Всего уникальных навыков:</b> $totalSkillsCount")
@@ -369,7 +393,9 @@ class TelegramCommandHandler(
             val vacanciesWithoutSkills = skillExtractionService.getVacanciesWithoutSkills(allVacancies)
 
             if (vacanciesWithoutSkills.isNotEmpty()) {
-                log.info("📊 [TelegramCommand] Found ${vacanciesWithoutSkills.size} vacancies without skills, adding to queue...")
+                log.info(
+                    "📊 [TelegramCommand] Found ${vacanciesWithoutSkills.size} vacancies without skills, adding to queue...",
+                )
 
                 // Добавляем вакансии в очередь извлечения навыков (низкий приоритет)
                 // Это гарантирует, что приоритет будет у новых вакансий и их анализа
@@ -394,7 +420,9 @@ class TelegramCommandHandler(
                                 val currentQueueSize = skillExtractionQueueService.getQueueSize()
                                 // Если очередь уменьшилась, значит идет обработка
                                 if (currentQueueSize < lastQueueSize) {
-                                    log.debug("🔄 [TelegramCommand] Queue processing: $currentQueueSize items remaining")
+                                    log.debug(
+                                        "🔄 [TelegramCommand] Queue processing: $currentQueueSize items remaining",
+                                    )
                                 }
                                 lastQueueSize = currentQueueSize
                             }
@@ -476,7 +504,14 @@ class TelegramCommandHandler(
                     appendLine("📊 <b>Текущий топ навыков по популярности:</b>")
                     appendLine()
                     skillsStatistics.forEachIndexed { index, skill ->
-                        appendLine("${index + 1}. <b>${escapeHtml(skill.skillName)}</b> - ${String.format("%.1f", skill.frequencyPercentage)}% (${skill.occurrenceCount} вакансий)")
+                        appendLine(
+                            "${index + 1}. <b>${escapeHtml(
+                                skill.skillName,
+                            )}</b> - ${String.format(
+                                "%.1f",
+                                skill.frequencyPercentage,
+                            )}% (${skill.occurrenceCount} вакансий)",
+                        )
                     }
                     appendLine()
                     appendLine("📋 <b>Всего уникальных навыков:</b> $totalSkillsCount")
@@ -507,7 +542,9 @@ class TelegramCommandHandler(
                 return "✅ Все релевантные вакансии уже имеют извлеченные навыки.\n\nНет вакансий для обработки."
             }
 
-            log.info("📊 [TelegramCommand] Found ${relevantVacancies.size} relevant vacancies without skills, extracting...")
+            log.info(
+                "📊 [TelegramCommand] Found ${relevantVacancies.size} relevant vacancies without skills, extracting...",
+            )
 
             // Отправляем сообщение о начале обработки
             telegramClient.sendMessage(

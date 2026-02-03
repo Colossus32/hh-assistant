@@ -53,14 +53,18 @@ class VacancyNotificationService(
                 metricsService.incrementNotificationsSent()
                 log.info("[Notification] Successfully sent vacancy ${vacancy.id} to Telegram at $sentAt")
             } else {
-                log.warn("[Notification] Message sending returned false for vacancy ${vacancy.id} (Telegram may be disabled or not configured)")
+                log.warn(
+                    "[Notification] Message sending returned false for vacancy ${vacancy.id} (Telegram may be disabled or not configured)",
+                )
                 // Don't update status - vacancy remains in ANALYZED state
             }
 
             return sentSuccessfully
         } catch (e: TelegramException.RateLimitException) {
             metricsService.incrementNotificationsFailed()
-            log.warn("⚠️ [Notification] Rate limit exceeded for Telegram, skipping vacancy ${vacancy.id} (will retry later)")
+            log.warn(
+                "⚠️ [Notification] Rate limit exceeded for Telegram, skipping vacancy ${vacancy.id} (will retry later)",
+            )
             // Не обновляем статус, попробуем отправить в следующий раз
             throw e
         } catch (e: TelegramException) {
@@ -138,7 +142,9 @@ class VacancyNotificationService(
             sb.appendLine()
         }
 
-        sb.appendLine("<b>📊 Оценка релевантности:</b> ${(analysis.relevanceScore * AppConstants.Formatting.PERCENTAGE_MULTIPLIER).toInt()}%")
+        sb.appendLine(
+            "<b>📊 Оценка релевантности:</b> ${(analysis.relevanceScore * AppConstants.Formatting.PERCENTAGE_MULTIPLIER).toInt()}%",
+        )
         sb.appendLine()
         sb.appendLine("<b>💡 Обоснование:</b>")
         sb.appendLine(escapeHtml(analysis.reasoning))

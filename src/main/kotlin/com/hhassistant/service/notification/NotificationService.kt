@@ -139,12 +139,16 @@ class NotificationService(
             appendLine("$errorMessage")
             appendLine()
             appendLine("🔧 <b>Что делать:</b>")
-            appendLine("1. Откройте в браузере: <a href=\"${AppConstants.Urls.OAUTH_AUTHORIZE}\">${AppConstants.Urls.OAUTH_AUTHORIZE}</a>")
+            appendLine(
+                "1. Откройте в браузере: <a href=\"${AppConstants.Urls.OAUTH_AUTHORIZE}\">${AppConstants.Urls.OAUTH_AUTHORIZE}</a>",
+            )
             appendLine("2. Авторизуйтесь на HH.ru")
             appendLine("3. Токен автоматически сохранится в .env файл")
             appendLine("4. Перезапустите приложение")
             appendLine()
-            appendLine("💡 <b>Совет:</b> После получения токена он будет автоматически сохранен, вам не нужно копировать его вручную!")
+            appendLine(
+                "💡 <b>Совет:</b> После получения токена он будет автоматически сохранен, вам не нужно копировать его вручную!",
+            )
             appendLine()
             appendLine("📖 Подробная инструкция: docs/GET_TOKEN_STEP_BY_STEP.md")
         }

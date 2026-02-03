@@ -31,7 +31,9 @@ class TokenRefreshService(
         // Проверяем тип токена - application tokens не обновляются
         val tokenType = envFileService.readEnvVariable("HH_TOKEN_TYPE") ?: "user"
         if (tokenType == "application") {
-            log.debug("ℹ️ [TokenRefresh] Application token detected, skipping refresh (application tokens have unlimited lifetime)")
+            log.debug(
+                "ℹ️ [TokenRefresh] Application token detected, skipping refresh (application tokens have unlimited lifetime)",
+            )
             return
         }
 
@@ -89,8 +91,12 @@ class TokenRefreshService(
         // Проверяем тип токена - application tokens не обновляются
         val tokenType = envFileService.readEnvVariable("HH_TOKEN_TYPE") ?: "user"
         if (tokenType == "application") {
-            log.info("ℹ️ [TokenRefresh] Application token detected, cannot refresh (application tokens have unlimited lifetime)")
-            log.info("ℹ️ [TokenRefresh] If you get 403, the token may be invalid or the application may lack permissions")
+            log.info(
+                "ℹ️ [TokenRefresh] Application token detected, cannot refresh (application tokens have unlimited lifetime)",
+            )
+            log.info(
+                "ℹ️ [TokenRefresh] If you get 403, the token may be invalid or the application may lack permissions",
+            )
             return false
         }
 

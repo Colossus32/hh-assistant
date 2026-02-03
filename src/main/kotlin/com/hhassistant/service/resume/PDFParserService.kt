@@ -171,7 +171,10 @@ class PDFParserService(
 
     private fun extractDesiredPosition(text: String): String? {
         val patterns = listOf(
-            Pattern.compile("(?:желаемая должность|desired position|ищу работу|looking for)[\\s:]+([^\\n]+)", Pattern.CASE_INSENSITIVE),
+            Pattern.compile(
+                "(?:желаемая должность|desired position|ищу работу|looking for)[\\s:]+([^\\n]+)",
+                Pattern.CASE_INSENSITIVE,
+            ),
             Pattern.compile("(?:позиция|position)[\\s:]+([^\\n]+)", Pattern.CASE_INSENSITIVE),
         )
 
@@ -190,7 +193,10 @@ class PDFParserService(
 
     private fun extractDesiredSalary(text: String): Int? {
         val patterns = listOf(
-            Pattern.compile("(?:желаемая зарплата|desired salary|зарплата|salary)[\\s:]+(?:от|from)?\\s*(\\d+)\\s*(?:руб|rub|rur)", Pattern.CASE_INSENSITIVE),
+            Pattern.compile(
+                "(?:желаемая зарплата|desired salary|зарплата|salary)[\\s:]+(?:от|from)?\\s*(\\d+)\\s*(?:руб|rub|rur)",
+                Pattern.CASE_INSENSITIVE,
+            ),
             Pattern.compile("(?:от|from)\\s*(\\d+)\\s*(?:руб|rub|rur)", Pattern.CASE_INSENSITIVE),
         )
 

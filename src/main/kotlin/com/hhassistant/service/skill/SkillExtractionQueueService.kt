@@ -94,7 +94,9 @@ class SkillExtractionQueueService(
                     return@runBlocking
                 }
 
-                log.info("📋 [SkillExtractionQueue] Found ${relevantVacanciesWithoutSkills.size} relevant vacancies without skills on startup")
+                log.info(
+                    "📋 [SkillExtractionQueue] Found ${relevantVacanciesWithoutSkills.size} relevant vacancies without skills on startup",
+                )
 
                 // Добавляем в очередь
                 for (vacancy in relevantVacanciesWithoutSkills) {
@@ -155,7 +157,9 @@ class SkillExtractionQueueService(
             queueChannel.send(item)
         }
 
-        log.info("📥 [SkillExtractionQueue] Enqueued vacancy $vacancyId for skill extraction, queue size: ${queue.size}")
+        log.info(
+            "📥 [SkillExtractionQueue] Enqueued vacancy $vacancyId for skill extraction, queue size: ${queue.size}",
+        )
 
         // Запускаем обработку, если еще не запущена
         if (!isRunning.get()) {
@@ -221,7 +225,9 @@ class SkillExtractionQueueService(
 
                 // Проверяем, не были ли уже извлечены навыки
                 if (vacancy.hasSkillsExtracted()) {
-                    log.debug("ℹ️ [SkillExtractionQueue] Vacancy ${item.vacancyId} already has skills extracted, skipping")
+                    log.debug(
+                        "ℹ️ [SkillExtractionQueue] Vacancy ${item.vacancyId} already has skills extracted, skipping",
+                    )
                     processingVacancies.remove(item.vacancyId)
                     return@withPermit
                 }
@@ -259,7 +265,9 @@ class SkillExtractionQueueService(
                 log.warn("⏸️ [SkillExtractionQueue] Rate limit exceeded while checking vacancy ${vacancy.id}, skipping")
                 return
             } catch (e: Exception) {
-                log.debug("⚠️ [SkillExtractionQueue] Could not fetch key_skills from API for vacancy ${vacancy.id}: ${e.message}")
+                log.debug(
+                    "⚠️ [SkillExtractionQueue] Could not fetch key_skills from API for vacancy ${vacancy.id}: ${e.message}",
+                )
                 null
             }
 

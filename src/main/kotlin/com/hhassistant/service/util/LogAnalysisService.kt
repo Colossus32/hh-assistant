@@ -136,7 +136,9 @@ class LogAnalysisService(
      * Анализирует логи с помощью Ollama с батчингом и саммаризацией
      */
     private suspend fun analyzeLogsWithOllama(logLines: List<String>): LogAnalysisResult {
-        log.info(" [LogAnalysis] Analyzing ${logLines.size} log lines with Ollama (batch size: $batchSize, max batches: $maxBatches)...")
+        log.info(
+            " [LogAnalysis] Analyzing ${logLines.size} log lines with Ollama (batch size: $batchSize, max batches: $maxBatches)...",
+        )
 
         // Разбиваем логи на батчи
         val batches = logLines.chunked(batchSize).take(maxBatches)
@@ -174,7 +176,9 @@ class LogAnalysisService(
         // Шаг 1: Создаем саммари каждого батча
         for ((index, batch) in batches.withIndex()) {
             try {
-                log.info(" [LogAnalysis] Creating summary for batch ${index + 1}/${batches.size} (${batch.size} lines)...")
+                log.info(
+                    " [LogAnalysis] Creating summary for batch ${index + 1}/${batches.size} (${batch.size} lines)...",
+                )
 
                 val summary = createBatchSummary(batch, index + 1, batches.size)
                 batchSummaries.add("=== Батч ${index + 1} ===\n$summary")
@@ -186,7 +190,9 @@ class LogAnalysisService(
                     summary.contains("failed", ignoreCase = true)
                 ) {
                     problematicBatches.add(index + 1 to batch)
-                    log.info(" [LogAnalysis] Batch ${index + 1} contains errors, will include details in final analysis")
+                    log.info(
+                        " [LogAnalysis] Batch ${index + 1} contains errors, will include details in final analysis",
+                    )
                 }
             } catch (e: Exception) {
                 log.error(" [LogAnalysis] Error creating summary for batch ${index + 1}: ${e.message}", e)
@@ -195,7 +201,9 @@ class LogAnalysisService(
         }
 
         // Шаг 2: Анализируем саммари вместе с деталями из проблемных батчей
-        log.info(" [LogAnalysis] Analyzing ${batchSummaries.size} summaries and ${problematicBatches.size} problematic batch details...")
+        log.info(
+            " [LogAnalysis] Analyzing ${batchSummaries.size} summaries and ${problematicBatches.size} problematic batch details...",
+        )
 
         val finalAnalysis = analyzeSummariesWithDetails(batchSummaries, problematicBatches)
 
@@ -258,8 +266,12 @@ class LogAnalysisService(
         val summariesText = summaries.joinToString("\n\n")
 
         // Добавляем детали из проблемных батчей (ограничиваем размер)
-        val problematicDetails = problematicBatches.take(AppConstants.Indices.PROBLEMATIC_BATCHES_LIMIT).joinToString("\n\n") { (batchNum, batch) ->
-            "=== Детали проблемного батча $batchNum ===\n${batch.takeLast(AppConstants.TextLimits.PROBLEMATIC_BATCH_DETAILS_LINES).joinToString("\n")}"
+        val problematicDetails = problematicBatches.take(
+            AppConstants.Indices.PROBLEMATIC_BATCHES_LIMIT,
+        ).joinToString("\n\n") { (batchNum, batch) ->
+            "=== Детали проблемного батча $batchNum ===\n${batch.takeLast(
+                AppConstants.TextLimits.PROBLEMATIC_BATCH_DETAILS_LINES,
+            ).joinToString("\n")}"
         }
 
         val systemPrompt = """

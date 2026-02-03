@@ -31,7 +31,12 @@ class AnalysisTimeService {
             } else {
                 // Вычисляем среднее между текущим средним и новым значением
                 val newAverage = (currentAverage + durationMs) / 2.0
-                log.debug("📊 [AnalysisTime] Updated average time: ${String.format("%.2f", currentAverage)}ms -> ${String.format("%.2f", newAverage)}ms (new: ${durationMs}ms)")
+                log.debug(
+                    "📊 [AnalysisTime] Updated average time: ${String.format(
+                        "%.2f",
+                        currentAverage,
+                    )}ms -> ${String.format("%.2f", newAverage)}ms (new: ${durationMs}ms)",
+                )
                 newAverage
             }
         }

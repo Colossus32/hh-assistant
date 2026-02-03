@@ -31,7 +31,9 @@ class VacancyStatusService(
                 .orElse(null)
 
             vacancyRepository.save(updatedVacancy)
-            log.info("✅ [StatusService] Updated vacancy ${updatedVacancy.id} ('${updatedVacancy.name}') status: $oldStatus -> ${updatedVacancy.status}")
+            log.info(
+                "✅ [StatusService] Updated vacancy ${updatedVacancy.id} ('${updatedVacancy.name}') status: $oldStatus -> ${updatedVacancy.status}",
+            )
         } catch (e: Exception) {
             log.error("Error updating vacancy ${updatedVacancy.id} status: ${e.message}", e)
             throw VacancyProcessingException(

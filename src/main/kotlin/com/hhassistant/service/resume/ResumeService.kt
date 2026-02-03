@@ -102,7 +102,9 @@ class ResumeService(
         log.info("🔄 [ResumeService] Preloading resume into memory...")
         try {
             val resume = loadResumeInternal()
-            log.info("✅ [ResumeService] Resume preloaded successfully: ${resume.fileName} (${resume.rawText.length} chars)")
+            log.info(
+                "✅ [ResumeService] Resume preloaded successfully: ${resume.fileName} (${resume.rawText.length} chars)",
+            )
             if (cachedResumeStructure != null) {
                 log.info("✅ [ResumeService] Resume structure parsed: ${cachedResumeStructure!!.skills.size} skills")
             }
@@ -252,7 +254,9 @@ class ResumeService(
         cachedResume = savedResume
         cachedResumeStructure = structuredData
 
-        log.info("✅ [ResumeService] Resume saved successfully: ${savedResume.fileName} (${rawText.length} chars, ${structuredData.skills.size} skills)")
+        log.info(
+            "✅ [ResumeService] Resume saved successfully: ${savedResume.fileName} (${rawText.length} chars, ${structuredData.skills.size} skills)",
+        )
         return savedResume
     }
 
