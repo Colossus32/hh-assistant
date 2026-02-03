@@ -19,14 +19,12 @@ class VacancyContentValidatorTest {
     @Test
     fun `validate returns valid when no exclusion rules configured`() = runBlocking {
         every { exclusionRuleService.getAllKeywords() } returns emptyList()
-        every { exclusionRuleService.getAllPhrases() } returns emptyList()
         every { exclusionRuleService.isCaseSensitive() } returns false
 
         val validator = VacancyContentValidator(
             exclusionRuleService = exclusionRuleService,
             resumeService = resumeService,
             fallbackKeywords = emptyList(),
-            fallbackPhrases = emptyList(),
             fallbackCaseSensitive = false,
             skillMatchingEnabled = false, // Отключаем проверку навыков для этого теста
         )
@@ -39,14 +37,12 @@ class VacancyContentValidatorTest {
     @Test
     fun `validate rejects vacancy when exclusion keyword matches (case-insensitive)`() = runBlocking {
         every { exclusionRuleService.getAllKeywords() } returns listOf("remote")
-        every { exclusionRuleService.getAllPhrases() } returns emptyList()
         every { exclusionRuleService.isCaseSensitive() } returns false
 
         val validator = VacancyContentValidator(
             exclusionRuleService = exclusionRuleService,
             resumeService = resumeService,
             fallbackKeywords = emptyList(),
-            fallbackPhrases = emptyList(),
             fallbackCaseSensitive = false,
             skillMatchingEnabled = false,
         )
@@ -60,14 +56,12 @@ class VacancyContentValidatorTest {
     @Test
     fun `validate respects caseSensitive flag`() = runBlocking {
         every { exclusionRuleService.getAllKeywords() } returns listOf("REMOTE")
-        every { exclusionRuleService.getAllPhrases() } returns emptyList()
         every { exclusionRuleService.isCaseSensitive() } returns true
 
         val validator = VacancyContentValidator(
             exclusionRuleService = exclusionRuleService,
             resumeService = resumeService,
             fallbackKeywords = emptyList(),
-            fallbackPhrases = emptyList(),
             fallbackCaseSensitive = true,
             skillMatchingEnabled = false,
         )
@@ -77,26 +71,6 @@ class VacancyContentValidatorTest {
 
         val shouldFail = validator.validate(testVacancy(description = "REMOTE work"))
         assertThat(shouldFail.isValid).isFalse
-    }
-
-    @Test
-    fun `validate rejects vacancy when exclusion phrase matches`() = runBlocking {
-        every { exclusionRuleService.getAllKeywords() } returns emptyList()
-        every { exclusionRuleService.getAllPhrases() } returns listOf("no relocation")
-        every { exclusionRuleService.isCaseSensitive() } returns false
-
-        val validator = VacancyContentValidator(
-            exclusionRuleService = exclusionRuleService,
-            resumeService = resumeService,
-            fallbackKeywords = emptyList(),
-            fallbackPhrases = emptyList(),
-            fallbackCaseSensitive = false,
-            skillMatchingEnabled = false,
-        )
-
-        val result = validator.validate(testVacancy(description = "Offer: No Relocation support"))
-        assertThat(result.isValid).isFalse
-        assertThat(result.rejectionReason).contains("exclusion phrases")
     }
 
     private fun testVacancy(description: String?): Vacancy {

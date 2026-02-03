@@ -133,7 +133,7 @@ class ExclusionKeywordService(
         // Проверяем, не является ли это фразой (содержит пробелы)
         if (normalizedKeyword.contains(" ")) {
             log.warn(
-                "[ExclusionKeywordService] Attempted to add phrase as keyword: '$keyword'. Use ExclusionRuleService for phrases.",
+                "[ExclusionKeywordService] Attempted to add phrase as keyword: '$keyword'. Keywords should not contain spaces.",
             )
             return false
         }

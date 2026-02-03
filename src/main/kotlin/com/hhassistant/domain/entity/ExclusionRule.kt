@@ -12,7 +12,8 @@ import jakarta.persistence.UniqueConstraint
 import java.time.LocalDateTime
 
 /**
- * Entity for storing exclusion rules (keywords and phrases) for vacancy filtering
+ * Entity for storing exclusion rules (keywords) for vacancy filtering
+ * Note: PHRASE type is kept for backward compatibility but is no longer used
  */
 @Entity
 @Table(
@@ -42,6 +43,8 @@ data class ExclusionRule(
 ) {
     enum class ExclusionRuleType {
         KEYWORD, // Single word to search for
-        PHRASE, // Phrase to search for as whole
+
+        @Deprecated("Phrases are no longer supported, use keywords only")
+        PHRASE, // Phrase to search for as whole (deprecated, kept for backward compatibility)
     }
 }

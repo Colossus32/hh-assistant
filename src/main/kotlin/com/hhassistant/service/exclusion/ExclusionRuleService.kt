@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
 /**
- * Service for managing exclusion rules (keywords and phrases) for vacancy filtering
+ * Service for managing exclusion rules (keywords) for vacancy filtering
  */
 @Service
 class ExclusionRuleService(
@@ -19,7 +19,6 @@ class ExclusionRuleService(
 
     companion object {
         const val KEYWORDS_CACHE = "exclusionKeywords"
-        const val PHRASES_CACHE = "exclusionPhrases"
     }
 
     /**
@@ -36,21 +35,8 @@ class ExclusionRuleService(
     }
 
     /**
-     * Gets all exclusion phrases (cached)
-     * Cache is invalidated when phrases are added/removed
-     */
-    @Cacheable(value = [PHRASES_CACHE])
-    fun getAllPhrases(): List<String> {
-        log.trace("[ExclusionRuleService] Loading exclusion phrases from database (cache miss)")
-        val phrases = exclusionRuleRepository.findByType(ExclusionRule.ExclusionRuleType.PHRASE)
-            .map { it.text }
-        log.debug("[ExclusionRuleService] Loaded ${phrases.size} exclusion phrases from database")
-        return phrases
-    }
-
-    /**
      * Gets case sensitivity setting (defaults to false)
-     * Uses cached keywords/phrases to avoid DB query if possible
+     * Uses cached keywords to avoid DB query if possible
      */
     @Cacheable(value = ["exclusionCaseSensitive"])
     fun isCaseSensitive(): Boolean {
@@ -83,28 +69,6 @@ class ExclusionRuleService(
     }
 
     /**
-     * Adds a new exclusion phrase
-     */
-    @Transactional
-    @CacheEvict(value = [PHRASES_CACHE, "exclusionCaseSensitive"], allEntries = true)
-    fun addPhrase(phrase: String, caseSensitive: Boolean = false): ExclusionRule {
-        val existing = exclusionRuleRepository.findByTextAndType(phrase, ExclusionRule.ExclusionRuleType.PHRASE)
-        if (existing != null) {
-            log.warn("[ExclusionRuleService] Phrase '$phrase' already exists")
-            return existing
-        }
-
-        val rule = ExclusionRule(
-            text = phrase,
-            type = ExclusionRule.ExclusionRuleType.PHRASE,
-            caseSensitive = caseSensitive,
-        )
-        val saved = exclusionRuleRepository.save(rule)
-        log.info("[ExclusionRuleService] Added exclusion phrase: '$phrase'")
-        return saved
-    }
-
-    /**
      * Removes an exclusion keyword
      */
     @Transactional
@@ -121,32 +85,14 @@ class ExclusionRuleService(
     }
 
     /**
-     * Removes an exclusion phrase
-     */
-    @Transactional
-    @CacheEvict(value = [PHRASES_CACHE, "exclusionCaseSensitive"], allEntries = true)
-    fun removePhrase(phrase: String): Boolean {
-        val rule = exclusionRuleRepository.findByTextAndType(phrase, ExclusionRule.ExclusionRuleType.PHRASE)
-        if (rule != null) {
-            exclusionRuleRepository.delete(rule)
-            log.info("[ExclusionRuleService] Removed exclusion phrase: '$phrase'")
-            return true
-        }
-        log.warn("[ExclusionRuleService] Phrase '$phrase' not found")
-        return false
-    }
-
-    /**
-     * Lists all exclusion rules (uses cached data to avoid DB queries)
+     * Lists all exclusion keywords (uses cached data to avoid DB queries)
      */
     @Transactional(readOnly = true)
     fun listAll(): Map<String, List<String>> {
         // Use cached methods instead of direct DB access
         val keywords = getAllKeywords()
-        val phrases = getAllPhrases()
         return mapOf(
             "keywords" to keywords,
-            "phrases" to phrases,
         )
     }
 }
