@@ -1,6 +1,7 @@
 package com.hhassistant.service.monitoring
 
 import com.hhassistant.service.vacancy.VacancyAnalysisService
+import jakarta.annotation.PreDestroy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -16,16 +17,15 @@ import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
-import jakarta.annotation.PreDestroy
 
 /**
  * Тип задачи для Ollama
  */
 enum class OllamaTaskType {
-    VACANCY_ANALYSIS,  // Анализ новой вакансии
-    SKILL_EXTRACTION,  // Извлечение навыков (recovery)
-    LOG_ANALYSIS,      // Анализ логов
-    OTHER              // Другие задачи
+    VACANCY_ANALYSIS, // Анализ новой вакансии
+    SKILL_EXTRACTION, // Извлечение навыков (recovery)
+    LOG_ANALYSIS, // Анализ логов
+    OTHER, // Другие задачи
 }
 
 /**
@@ -39,19 +39,19 @@ class OllamaMonitoringService(
     @Value("\${app.ollama-monitoring.interval-seconds:5}") private val intervalSeconds: Int,
 ) {
     private val log = KotlinLogging.logger {}
-    
+
     // Счетчик активных запросов к Ollama
     private val activeRequests = AtomicInteger(0)
-    
+
     // Отслеживание активных задач по типам
     private val activeTasksByType = ConcurrentHashMap<OllamaTaskType, AtomicInteger>()
-    
+
     // Scope для корутин мониторинга
     private val supervisorJob = SupervisorJob()
     private val monitoringScope = CoroutineScope(
-        Dispatchers.Default + supervisorJob
+        Dispatchers.Default + supervisorJob,
     )
-    
+
     private var monitoringJob: Job? = null
 
     /**
@@ -109,7 +109,7 @@ class OllamaMonitoringService(
         }
 
         log.info("[OllamaMonitoring] Starting Ollama monitoring (interval: ${intervalSeconds}s)")
-        
+
         monitoringJob = monitoringScope.launch {
             while (true) {
                 try {
@@ -130,7 +130,7 @@ class OllamaMonitoringService(
         val activeCount = activeRequests.get()
         val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
         val tasksByType = getActiveTasksByType()
-        
+
         val status = when {
             activeCount > 0 -> {
                 val tasksDescription = if (tasksByType.isNotEmpty()) {
@@ -150,7 +150,7 @@ class OllamaMonitoringService(
             circuitBreakerState == "OPEN" -> "UNAVAILABLE (Circuit Breaker OPEN)"
             else -> "IDLE (no active requests)"
         }
-        
+
         log.info("[OllamaMonitoring] Status: $status | Circuit Breaker: $circuitBreakerState | Active requests: $activeCount")
     }
 
@@ -164,4 +164,3 @@ class OllamaMonitoringService(
         supervisorJob.cancel()
     }
 }
-

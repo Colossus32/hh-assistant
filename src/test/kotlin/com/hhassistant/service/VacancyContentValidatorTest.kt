@@ -4,7 +4,6 @@ import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.service.exclusion.ExclusionRuleService
 import com.hhassistant.service.resume.ResumeService
-import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -114,4 +113,3 @@ class VacancyContentValidatorTest {
         )
     }
 }
-

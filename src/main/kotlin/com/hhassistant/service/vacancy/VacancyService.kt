@@ -14,6 +14,9 @@ import com.hhassistant.exception.HHAPIException
 import com.hhassistant.exception.VacancyProcessingException
 import com.hhassistant.repository.SearchConfigRepository
 import com.hhassistant.repository.VacancyRepository
+import com.hhassistant.service.notification.NotificationService
+import com.hhassistant.service.util.SearchConfigFactory
+import com.hhassistant.service.util.TokenRefreshService
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
@@ -21,9 +24,6 @@ import org.springframework.cache.annotation.CacheEvict
 import org.springframework.cache.annotation.Cacheable
 import org.springframework.stereotype.Service
 import java.util.concurrent.atomic.AtomicInteger
-import com.hhassistant.service.notification.NotificationService
-import com.hhassistant.service.util.TokenRefreshService
-import com.hhassistant.service.util.SearchConfigFactory
 
 @Service
 class VacancyService(
@@ -440,7 +440,7 @@ class VacancyService(
     private fun updateVacancyIdsCacheIncrementally(newVacancyIds: List<String>) {
         val cacheKey = "all"
         val existingIds = vacancyIdsCache.getIfPresent(cacheKey)
-        
+
         if (existingIds != null) {
             // Кэш существует - добавляем новые ID инкрементально
             val updatedIds = existingIds.toMutableSet().apply {

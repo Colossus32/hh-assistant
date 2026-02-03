@@ -2,8 +2,8 @@ package com.hhassistant.service.vacancy
 
 import com.hhassistant.aspect.Loggable
 import com.hhassistant.client.hh.HHVacancyClient
-import com.hhassistant.client.hh.dto.toEntity
 import com.hhassistant.client.hh.dto.requiresMoreThan6YearsExperience
+import com.hhassistant.client.hh.dto.toEntity
 import com.hhassistant.config.VacancyServiceConfig
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.domain.entity.Vacancy
@@ -11,16 +11,16 @@ import com.hhassistant.event.VacancyFetchedEvent
 import com.hhassistant.exception.HHAPIException
 import com.hhassistant.repository.SearchConfigRepository
 import com.hhassistant.repository.VacancyRepository
+import com.hhassistant.service.exclusion.ExclusionKeywordService
+import com.hhassistant.service.notification.NotificationService
+import com.hhassistant.service.util.SearchConfigFactory
+import com.hhassistant.service.util.TokenRefreshService
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import java.util.concurrent.atomic.AtomicInteger
-import com.hhassistant.service.notification.NotificationService
-import com.hhassistant.service.util.TokenRefreshService
-import com.hhassistant.service.util.SearchConfigFactory
-import com.hhassistant.service.exclusion.ExclusionKeywordService
 
 /**
  * Сервис для получения вакансий от HH.ru API
@@ -130,10 +130,10 @@ class VacancyFetchService(
         // Save all new vacancies to database with QUEUED status and add to processing queue
         if (allNewVacancies.isNotEmpty()) {
             log.debug("[VacancyFetch] Saving ${allNewVacancies.size} new vacancies to database with QUEUED status using batch operations...")
-            
+
             // Сохраняем батчами для оптимизации (Hibernate batch будет автоматически разбивать на группы)
             val savedVacancies = saveVacanciesInBatches(allNewVacancies)
-            
+
             log.info("[VacancyFetch] Saved ${savedVacancies.size} vacancies to database with QUEUED status (using batch operations)")
 
             // Инкрементально обновляем кэш ID вакансий (добавляем новые ID вместо полной инвалидации)
@@ -183,7 +183,7 @@ class VacancyFetchService(
         // Priority 2: YAML keywords (single string)
         if (!searchConfig.keywords.isNullOrBlank()) {
             log.trace("[VacancyFetch] Using YAML keywords: ${searchConfig.keywords}")
-            return listOf(searchConfigFactory.createFromYamlConfig(searchConfig.keywords ?: "", searchConfig))
+            return listOf(searchConfigFactory.createFromYamlConfig(searchConfig.keywords, searchConfig))
         }
 
         // Priority 3: DB (active search configs)
@@ -259,21 +259,21 @@ class VacancyFetchService(
     private fun saveVacanciesInBatches(vacancies: List<Vacancy>): List<Vacancy> {
         val batchSize = 100 // Размер батча для сохранения
         val allSaved = mutableListOf<Vacancy>()
-        
+
         if (vacancies.size <= batchSize) {
             // Если вакансий немного, сохраняем все сразу
             val saved = vacancyRepository.saveAll(vacancies)
             log.debug("[VacancyFetch] Saved ${saved.size} vacancies in single batch")
             return saved
         }
-        
+
         // Разбиваем на батчи и сохраняем по частям
         vacancies.chunked(batchSize).forEachIndexed { index, batch ->
             val saved = vacancyRepository.saveAll(batch)
             allSaved.addAll(saved)
             log.debug("[VacancyFetch] Saved batch ${index + 1}: ${saved.size} vacancies (total saved: ${allSaved.size}/${vacancies.size})")
         }
-        
+
         log.info("[VacancyFetch] Saved ${allSaved.size} vacancies in ${(vacancies.size + batchSize - 1) / batchSize} batches")
         return allSaved
     }
@@ -287,7 +287,7 @@ class VacancyFetchService(
     private fun updateVacancyIdsCacheIncrementally(newVacancyIds: List<String>) {
         val cacheKey = "all"
         val existingIds = vacancyIdsCache.getIfPresent(cacheKey)
-        
+
         if (existingIds != null) {
             // Кэш существует - добавляем новые ID инкрементально
             val updatedIds = existingIds.toMutableSet().apply {

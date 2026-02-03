@@ -5,6 +5,12 @@ import com.hhassistant.config.AppConstants
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.dto.ApiResponse
 import com.hhassistant.dto.VacancyListResponse
+import com.hhassistant.service.exclusion.ExclusionKeywordService
+import com.hhassistant.service.exclusion.ExclusionRuleService
+import com.hhassistant.service.skill.SkillExtractionService
+import com.hhassistant.service.skill.SkillStatisticsService
+import com.hhassistant.service.util.AnalysisTimeService
+import com.hhassistant.service.vacancy.VacancyService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,12 +22,6 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.bodyToMono
-import com.hhassistant.service.skill.SkillExtractionService
-import com.hhassistant.service.skill.SkillStatisticsService
-import com.hhassistant.service.vacancy.VacancyService
-import com.hhassistant.service.exclusion.ExclusionRuleService
-import com.hhassistant.service.exclusion.ExclusionKeywordService
-import com.hhassistant.service.util.AnalysisTimeService
 
 /**
  * Обработчик команд Telegram бота.
@@ -40,7 +40,7 @@ class TelegramCommandHandler(
     @Value("\${app.api.base-url:http://localhost:8080}") private val apiBaseUrl: String,
 ) {
     private val log = KotlinLogging.logger {}
-    
+
     // CoroutineScope для фоновых задач
     private val backgroundScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -65,27 +65,27 @@ class TelegramCommandHandler(
 
         try {
             val response = when {
-                text == "/start" -> handleStartCommand(chatId)
-                text == "/status" -> handleStatusCommand(chatId)
+                text == "/start" -> handleStartCommand()
+                text == "/status" -> handleStatusCommand()
                 text == "/stats" -> handleStatsCommand(chatId)
-                text == "/vacancies_all" -> handleAllVacanciesCommand(chatId)
-                text.startsWith("/vacancies ") -> handleVacanciesCommand(chatId, text)
-                text == "/vacancies" -> handleVacanciesCommand(chatId, text)
+                text == "/vacancies_all" -> handleAllVacanciesCommand()
+                text.startsWith("/vacancies ") -> handleVacanciesCommand()
+                text == "/vacancies" -> handleVacanciesCommand()
                 text.startsWith("/skills ") -> handleSkillsCommand(chatId, text)
                 text == "/skills" -> handleSkillsCommand(chatId, text)
                 text.startsWith("/skills_now ") -> handleSkillsNowCommand(chatId, text)
                 text == "/skills_now" -> handleSkillsNowCommand(chatId, text)
                 text == "/extract-relevant-skills" -> handleExtractRelevantSkillsCommand(chatId)
-                text.startsWith("/exclusion_add_keyword ") -> handleAddExclusionKeyword(chatId, text)
-                text.startsWith("/exclusion_add_phrase ") -> handleAddExclusionPhrase(chatId, text)
-                text.startsWith("/exclusion_remove_keyword ") -> handleRemoveExclusionKeyword(chatId, text)
-                text.startsWith("/exclusion_remove_phrase ") -> handleRemoveExclusionPhrase(chatId, text)
+                text.startsWith("/exclusion_add_keyword ") -> handleAddExclusionKeyword(text)
+                text.startsWith("/exclusion_add_phrase ") -> handleAddExclusionPhrase(text)
+                text.startsWith("/exclusion_remove_keyword ") -> handleRemoveExclusionKeyword(text)
+                text.startsWith("/exclusion_remove_phrase ") -> handleRemoveExclusionPhrase(text)
                 text == "/exclusion_list" -> handleListExclusions()
                 text.startsWith("/sent_status ") -> handleSentStatusCommand(text)
                 text == "/sent_status" -> handleSentStatusCommand(text)
                 text == "/help" -> handleHelpCommand(chatId)
-                text.matches(Regex("/mark-applied-\\d+")) -> handleMarkAppliedCommand(chatId, text)
-                text.matches(Regex("/mark-not-interested-\\d+")) -> handleMarkNotInterestedCommand(chatId, text)
+                text.matches(Regex("/mark-applied-\\d+")) -> handleMarkAppliedCommand(text)
+                text.matches(Regex("/mark-not-interested-\\d+")) -> handleMarkNotInterestedCommand(text)
                 else -> {
                     log.debug("[TelegramCommand] Unknown command: $text")
                     "❓ Неизвестная команда. Используйте /help для списка доступных команд."
@@ -141,7 +141,7 @@ class TelegramCommandHandler(
     /**
      * Обрабатывает команду /start
      */
-    private fun handleStartCommand(_chatId: String): String {
+    private fun handleStartCommand(): String {
         return buildString {
             appendLine("👋 <b>Добро пожаловать в HH Assistant!</b>")
             appendLine()
@@ -164,7 +164,7 @@ class TelegramCommandHandler(
     /**
      * Обрабатывает команду /status
      */
-    private fun handleStatusCommand(_chatId: String): String {
+    private fun handleStatusCommand(): String {
         return buildString {
             appendLine("📊 <b>Статус системы:</b>")
             appendLine()
@@ -234,7 +234,7 @@ class TelegramCommandHandler(
     /**
      * Обрабатывает команду /vacancies
      */
-    private suspend fun handleVacanciesCommand(_chatId: String, _text: String): String {
+    private suspend fun handleVacanciesCommand(): String {
         return try {
             val url = "$apiBaseUrl/api/vacancies/unviewed"
             val response = webClient.get()
@@ -276,7 +276,7 @@ class TelegramCommandHandler(
     /**
      * Обрабатывает команду /vacancies_all - показывает все вакансии (включая просмотренные)
      */
-    private suspend fun handleAllVacanciesCommand(_chatId: String): String {
+    private suspend fun handleAllVacanciesCommand(): String {
         return try {
             val url = "$apiBaseUrl/api/vacancies/all"
             val response = webClient.get()
@@ -377,7 +377,7 @@ class TelegramCommandHandler(
                         // Отправляем уведомление о завершении обработки
                         val updatedStats = skillStatisticsService.getTopSkills(limit)
                         val updatedTotal = skillStatisticsService.getTotalAnalyzedVacancies()
-                        
+
                         if (updatedStats.isNotEmpty() && updatedTotal > totalAnalyzedVacancies) {
                             val updateMessage = buildString {
                                 appendLine("✅ <b>Обработка завершена!</b>")
@@ -393,7 +393,7 @@ class TelegramCommandHandler(
                         log.error("❌ [TelegramCommand] Error in background skill extraction: ${e.message}", e)
                         telegramClient.sendMessage(
                             chatId,
-                            "❌ <b>Ошибка при обработке вакансий:</b>\n${e.message ?: "Неизвестная ошибка"}"
+                            "❌ <b>Ошибка при обработке вакансий:</b>\n${e.message ?: "Неизвестная ошибка"}",
                         )
                     }
                 }
@@ -574,7 +574,7 @@ class TelegramCommandHandler(
     /**
      * Обрабатывает команду /mark-applied-{id}
      */
-    private suspend fun handleMarkAppliedCommand(_chatId: String, text: String): String {
+    private suspend fun handleMarkAppliedCommand(text: String): String {
         val vacancyId = text.removePrefix("/mark-applied-")
         if (!validateVacancyId(vacancyId)) {
             return "❌ Неверный формат ID вакансии"
@@ -608,7 +608,7 @@ class TelegramCommandHandler(
     /**
      * Обрабатывает команду /mark-not-interested-{id}
      */
-    private suspend fun handleMarkNotInterestedCommand(_chatId: String, text: String): String {
+    private suspend fun handleMarkNotInterestedCommand(text: String): String {
         val vacancyId = text.removePrefix("/mark-not-interested-")
         if (!validateVacancyId(vacancyId)) {
             return "❌ Неверный формат ID вакансии"
@@ -643,7 +643,6 @@ class TelegramCommandHandler(
      * Обрабатывает команды добавления/удаления exclusion правил
      */
     private fun handleExclusionCommand(
-        _chatId: String,
         text: String,
         commandPrefix: String,
         isAdd: Boolean,
@@ -698,29 +697,29 @@ class TelegramCommandHandler(
     /**
      * Обрабатывает команду /exclusion_add_keyword <word>
      */
-    private fun handleAddExclusionKeyword(chatId: String, text: String): String {
-        return handleExclusionCommand(chatId, text, "/exclusion_add_keyword ", isAdd = true, isKeyword = true)
+    private fun handleAddExclusionKeyword(text: String): String {
+        return handleExclusionCommand(text, "/exclusion_add_keyword ", isAdd = true, isKeyword = true)
     }
 
     /**
      * Обрабатывает команду /exclusion_add_phrase <phrase>
      */
-    private fun handleAddExclusionPhrase(chatId: String, text: String): String {
-        return handleExclusionCommand(chatId, text, "/exclusion_add_phrase ", isAdd = true, isKeyword = false)
+    private fun handleAddExclusionPhrase(text: String): String {
+        return handleExclusionCommand(text, "/exclusion_add_phrase ", isAdd = true, isKeyword = false)
     }
 
     /**
      * Обрабатывает команду /exclusion_remove_keyword <word>
      */
-    private fun handleRemoveExclusionKeyword(chatId: String, text: String): String {
-        return handleExclusionCommand(chatId, text, "/exclusion_remove_keyword ", isAdd = false, isKeyword = true)
+    private fun handleRemoveExclusionKeyword(text: String): String {
+        return handleExclusionCommand(text, "/exclusion_remove_keyword ", isAdd = false, isKeyword = true)
     }
 
     /**
      * Обрабатывает команду /exclusion_remove_phrase <phrase>
      */
-    private fun handleRemoveExclusionPhrase(chatId: String, text: String): String {
-        return handleExclusionCommand(chatId, text, "/exclusion_remove_phrase ", isAdd = false, isKeyword = false)
+    private fun handleRemoveExclusionPhrase(text: String): String {
+        return handleExclusionCommand(text, "/exclusion_remove_phrase ", isAdd = false, isKeyword = false)
     }
 
     /**

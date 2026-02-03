@@ -7,4 +7,3 @@ package com.hhassistant.aspect
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class Loggable
-

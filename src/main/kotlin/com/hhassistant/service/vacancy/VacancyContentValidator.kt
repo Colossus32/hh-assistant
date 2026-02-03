@@ -1,11 +1,11 @@
 package com.hhassistant.service.vacancy
 
 import com.hhassistant.domain.entity.Vacancy
+import com.hhassistant.service.exclusion.ExclusionRuleService
+import com.hhassistant.service.resume.ResumeService
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
-import com.hhassistant.service.exclusion.ExclusionRuleService
-import com.hhassistant.service.resume.ResumeService
 
 /**
  * Validator for vacancy content by exclusion keywords/phrases and resume skills matching
@@ -149,9 +149,9 @@ class VacancyContentValidator(
                 val skillLower = skill.lowercase().trim()
                 // Check exact match or word match
                 vacancyText.contains(skillLower) ||
-                skillLower.split(" ").any { word ->
-                    word.length > 3 && vacancyText.contains(word)
-                }
+                    skillLower.split(" ").any { word ->
+                        word.length > 3 && vacancyText.contains(word)
+                    }
             }
 
             // If no matching skills found - vacancy is not relevant
