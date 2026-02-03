@@ -77,7 +77,9 @@ class SkillExtractionService(
 
         // Шаг 2: Если навыков недостаточно - дополнить через LLM из описания
         if (extractedSkills.size < minSkillsFromApi && !vacancy.description.isNullOrBlank()) {
-            log.info("🤖 [SkillExtraction] Only ${extractedSkills.size} skills from API, extracting additional skills from description via LLM...")
+            log.info(
+                "🤖 [SkillExtraction] Only ${extractedSkills.size} skills from API, extracting additional skills from description via LLM...",
+            )
             val llmSkills = extractSkillsFromDescription(vacancy)
             extractedSkills.addAll(llmSkills)
             log.info("✅ [SkillExtraction] Extracted ${llmSkills.size} additional skills from description via LLM")
@@ -95,7 +97,9 @@ class SkillExtractionService(
             .filter { it.isNotBlank() }
             .distinct()
 
-        log.info("📊 [SkillExtraction] Normalized ${normalizedSkills.size} unique skills: ${normalizedSkills.take(10)}...")
+        log.info(
+            "📊 [SkillExtraction] Normalized ${normalizedSkills.size} unique skills: ${normalizedSkills.take(10)}...",
+        )
 
         // Шаг 4: Сохранение навыков в БД
         val savedSkills = normalizedSkills.map { skillName ->
@@ -127,7 +131,9 @@ class SkillExtractionService(
         // Batch-сохранение всех новых связей одним запросом
         val skillsLinked = if (newVacancySkills.isNotEmpty()) {
             val saved = vacancySkillRepository.saveAll(newVacancySkills)
-            log.debug("💾 [SkillExtraction] Created ${saved.size} VacancySkill links for vacancy=${vacancy.id} using batch save")
+            log.debug(
+                "💾 [SkillExtraction] Created ${saved.size} VacancySkill links for vacancy=${vacancy.id} using batch save",
+            )
             saved.size
         } else {
             0
@@ -139,10 +145,14 @@ class SkillExtractionService(
             vacancyRepository.save(updatedVacancy)
             log.debug("💾 [SkillExtraction] Updated vacancy ${vacancy.id} with skills_extracted_at=$extractedAt")
         } else {
-            log.warn("⚠️ [SkillExtraction] No skills were linked for vacancy ${vacancy.id}, not setting skills_extracted_at")
+            log.warn(
+                "⚠️ [SkillExtraction] No skills were linked for vacancy ${vacancy.id}, not setting skills_extracted_at",
+            )
         }
 
-        log.info("✅ [SkillExtraction] Successfully extracted and saved ${savedSkills.size} skills for vacancy ${vacancy.id}")
+        log.info(
+            "✅ [SkillExtraction] Successfully extracted and saved ${savedSkills.size} skills for vacancy ${vacancy.id}",
+        )
         return savedSkills
     }
 
@@ -176,7 +186,10 @@ class SkillExtractionService(
             log.error("❌ [SkillExtraction] Circuit Breaker is OPEN for vacancy ${vacancy.id}: ${e.message}")
             emptyList()
         } catch (e: Exception) {
-            log.error("❌ [SkillExtraction] Failed to extract skills from description for vacancy ${vacancy.id}: ${e.message}", e)
+            log.error(
+                "❌ [SkillExtraction] Failed to extract skills from description for vacancy ${vacancy.id}: ${e.message}",
+                e,
+            )
             emptyList()
         }
     }
@@ -330,7 +343,9 @@ class SkillExtractionService(
                     vacancyDto.keySkills
                 } catch (e: HHAPIException.NotFoundException) {
                     // Вакансия не найдена на HH.ru - удаляем из БД
-                    log.warn("🗑️ [SkillExtraction] Vacancy ${vacancy.id} not found on HH.ru (404), deleting from database")
+                    log.warn(
+                        "🗑️ [SkillExtraction] Vacancy ${vacancy.id} not found on HH.ru (404), deleting from database",
+                    )
                     deleteVacancyAndSkills(vacancy.id)
                     errorCount++
                     continue
@@ -339,7 +354,9 @@ class SkillExtractionService(
                     errorCount++
                     continue
                 } catch (e: Exception) {
-                    log.debug("⚠️ [SkillExtraction] Could not fetch key_skills from API for vacancy ${vacancy.id}: ${e.message}")
+                    log.debug(
+                        "⚠️ [SkillExtraction] Could not fetch key_skills from API for vacancy ${vacancy.id}: ${e.message}",
+                    )
                     null
                 }
 
@@ -347,14 +364,18 @@ class SkillExtractionService(
                 extractAndSaveSkills(vacancy, keySkills)
                 processedCount++
 
-                log.info("✅ [SkillExtraction] Successfully extracted skills for vacancy ${vacancy.id} ($processedCount/${vacancies.size})")
+                log.info(
+                    "✅ [SkillExtraction] Successfully extracted skills for vacancy ${vacancy.id} ($processedCount/${vacancies.size})",
+                )
             } catch (e: Exception) {
                 errorCount++
                 log.error("❌ [SkillExtraction] Failed to extract skills for vacancy ${vacancy.id}: ${e.message}", e)
             }
         }
 
-        log.info("✅ [SkillExtraction] Completed: processed $processedCount, errors $errorCount out of ${vacancies.size} vacancies")
+        log.info(
+            "✅ [SkillExtraction] Completed: processed $processedCount, errors $errorCount out of ${vacancies.size} vacancies",
+        )
         return processedCount
     }
 

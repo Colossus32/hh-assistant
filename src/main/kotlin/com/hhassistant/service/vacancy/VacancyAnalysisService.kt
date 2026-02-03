@@ -81,7 +81,9 @@ class VacancyAnalysisService(
         // 2. Resume skills matching (если включено)
         val contentValidation = vacancyContentValidator.validate(vacancy)
         if (!contentValidation.isValid) {
-            log.warn("[Ollama] Vacancy ${vacancy.id} ('${vacancy.name}') rejected by content validator: ${contentValidation.rejectionReason}")
+            log.warn(
+                "[Ollama] Vacancy ${vacancy.id} ('${vacancy.name}') rejected by content validator: ${contentValidation.rejectionReason}",
+            )
 
             // Обновляем метрики
             metricsService.incrementVacanciesRejectedByValidator()
@@ -149,12 +151,16 @@ class VacancyAnalysisService(
         metricsService.recordVacancyAnalysisTime(analysisDuration)
         // Обновляем среднее время обработки
         analysisTimeService.updateAverageTime(analysisDuration)
-        log.info("[Ollama] Received analysis response from Ollama (took ${analysisDuration}ms, response length: ${analysisResponse.length} chars)")
+        log.info(
+            "[Ollama] Received analysis response from Ollama (took ${analysisDuration}ms, response length: ${analysisResponse.length} chars)",
+        )
 
         // Парсим ответ
         val analysisResult = parseAnalysisResponse(analysisResponse, vacancy.id)
         val extractedSkills = analysisResult.extractSkills()
-        log.debug("[Ollama] Parsed analysis result: skills=${extractedSkills.size}, relevanceScore=${analysisResult.relevanceScore}")
+        log.debug(
+            "[Ollama] Parsed analysis result: skills=${extractedSkills.size}, relevanceScore=${analysisResult.relevanceScore}",
+        )
 
         // Валидируем результат анализа
         val validatedResult = validateAnalysisResult(analysisResult)
@@ -162,7 +168,12 @@ class VacancyAnalysisService(
         // Определяем релевантность на основе relevance_score
         val isRelevant = validatedResult.isRelevantResult(minRelevanceScore)
         val validatedSkills = validatedResult.extractSkills()
-        log.info("[Ollama] Analysis result for '${vacancy.name}': isRelevant=$isRelevant, relevanceScore=${String.format("%.2f", validatedResult.relevanceScore * 100)}%, skills=${validatedSkills.size}")
+        log.info(
+            "[Ollama] Analysis result for '${vacancy.name}': isRelevant=$isRelevant, relevanceScore=${String.format(
+                "%.2f",
+                validatedResult.relevanceScore * 100,
+            )}%, skills=${validatedSkills.size}",
+        )
 
         // Сохраняем результат
         val analysis = VacancyAnalysis(
@@ -178,7 +189,12 @@ class VacancyAnalysisService(
         )
 
         val savedAnalysis = repository.save(analysis)
-        log.info("[Ollama] Saved analysis to database for vacancy ${vacancy.id} (isRelevant=$isRelevant, score=${String.format("%.2f", savedAnalysis.relevanceScore * 100)}%)")
+        log.info(
+            "[Ollama] Saved analysis to database for vacancy ${vacancy.id} (isRelevant=$isRelevant, score=${String.format(
+                "%.2f",
+                savedAnalysis.relevanceScore * 100,
+            )}%)",
+        )
 
         // Сохраняем навыки в БД, если вакансия релевантна (relevance_score >= minRelevanceScore)
         if (isRelevant && validatedSkills.isNotEmpty()) {
@@ -190,7 +206,9 @@ class VacancyAnalysisService(
                 // Не прерываем обработку из-за ошибки сохранения навыков
             }
         } else {
-            log.debug("[Ollama] Skipping skill extraction for vacancy ${vacancy.id} (isRelevant=$isRelevant, skills=${validatedSkills.size})")
+            log.debug(
+                "[Ollama] Skipping skill extraction for vacancy ${vacancy.id} (isRelevant=$isRelevant, skills=${validatedSkills.size})",
+            )
         }
 
         // Обновляем метрики
@@ -261,12 +279,16 @@ class VacancyAnalysisService(
                 objectMapper.readValue(sanitizedJson, AnalysisResult::class.java)
             } catch (e: JsonProcessingException) {
                 // Если не получилось распарсить после sanitize, пробуем еще раз с более агрессивной очисткой
-                log.warn("Failed to parse JSON after sanitization for vacancy $vacancyId, trying alternative parsing. Error: ${e.message}")
+                log.warn(
+                    "Failed to parse JSON after sanitization for vacancy $vacancyId, trying alternative parsing. Error: ${e.message}",
+                )
                 val alternativeJson = sanitizeJsonStringAlternative(jsonString)
                 try {
                     objectMapper.readValue(alternativeJson, AnalysisResult::class.java)
                 } catch (e2: Exception) {
-                    log.error("Failed to parse JSON even after alternative sanitization for vacancy $vacancyId. Original error: ${e.message}, Alternative error: ${e2.message}")
+                    log.error(
+                        "Failed to parse JSON even after alternative sanitization for vacancy $vacancyId. Original error: ${e.message}, Alternative error: ${e2.message}",
+                    )
                     throw OllamaException.ParsingException(
                         "Failed to parse JSON response from LLM for vacancy $vacancyId after all sanitization attempts: ${e.message}",
                         e,
@@ -357,7 +379,9 @@ class VacancyAnalysisService(
 
         // Если нашли несколько JSON объектов, логируем это
         if (jsonObjects.size > 1) {
-            log.warn("Found ${jsonObjects.size} JSON objects in response for vacancy $vacancyId, will try to parse each")
+            log.warn(
+                "Found ${jsonObjects.size} JSON objects in response for vacancy $vacancyId, will try to parse each",
+            )
         }
 
         // Пытаемся распарсить каждый JSON объект до первого успешного
@@ -366,7 +390,9 @@ class VacancyAnalysisService(
             try {
                 // Пробуем распарсить (без sanitize сначала, чтобы проверить валидность)
                 objectMapper.readTree(jsonCandidate)
-                log.debug("Successfully extracted JSON object (start: $start, end: $end, length: ${jsonCandidate.length})")
+                log.debug(
+                    "Successfully extracted JSON object (start: $start, end: $end, length: ${jsonCandidate.length})",
+                )
                 return jsonCandidate
             } catch (e: Exception) {
                 log.debug("JSON object at [$start:$end] is not valid, trying next...")
@@ -474,8 +500,12 @@ class VacancyAnalysisService(
      * @throws IllegalArgumentException если relevanceScore вне допустимого диапазона
      */
     private fun validateAnalysisResult(result: AnalysisResult): AnalysisResult {
-        require(result.relevanceScore in AppConstants.Validation.RELEVANCE_SCORE_MIN..AppConstants.Validation.RELEVANCE_SCORE_MAX) {
-            "Relevance score must be between ${AppConstants.Validation.RELEVANCE_SCORE_MIN} and ${AppConstants.Validation.RELEVANCE_SCORE_MAX}, got: ${result.relevanceScore}"
+        require(
+            result.relevanceScore in AppConstants.Validation.RELEVANCE_SCORE_MIN..AppConstants.Validation.RELEVANCE_SCORE_MAX,
+        ) {
+            "Relevance score must be between " +
+                "${AppConstants.Validation.RELEVANCE_SCORE_MIN} and " +
+                "${AppConstants.Validation.RELEVANCE_SCORE_MAX}, got: ${result.relevanceScore}"
         }
 
         // Получаем навыки из нового или старого формата

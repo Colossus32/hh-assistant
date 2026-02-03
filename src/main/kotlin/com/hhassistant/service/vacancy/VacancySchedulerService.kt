@@ -96,18 +96,26 @@ class VacancySchedulerService(
             return
         }
 
-        log.info("[Scheduler] Circuit Breaker is $circuitBreakerState, checking for skipped vacancies to retry (retry window: 48 hours)...")
+        log.info(
+            "[Scheduler] Circuit Breaker is $circuitBreakerState, checking for skipped/failed vacancies to retry (retry window: 48 hours)...",
+        )
 
         // Запускаем обработку асинхронно, не блокируя поток
         schedulerScope.launch {
             try {
                 val skippedVacancies = vacancyService.getSkippedVacanciesForRetry(limit = 10, retryWindowHours = 48)
                 if (skippedVacancies.isEmpty()) {
-                    log.debug("[Scheduler] No skipped vacancies to retry (within 48 hour window)")
+                    log.debug("[Scheduler] No skipped/failed vacancies to retry (within 48 hour window)")
                     return@launch
                 }
 
-                log.info("[Scheduler] Found ${skippedVacancies.size} skipped vacancies to retry (within 48 hour window), checking exclusion rules...")
+                val skippedCount = skippedVacancies.count { it.status == VacancyStatus.SKIPPED }
+                val failedCount = skippedVacancies.count { it.status == VacancyStatus.FAILED }
+                log.info(
+                    "[Scheduler] Found ${skippedVacancies.size} vacancies to retry " +
+                        "(SKIPPED: $skippedCount, FAILED: $failedCount) within 48 hour window, " +
+                        "checking exclusion rules...",
+                )
 
                 // Проверяем вакансии на бан-слова перед повторной обработкой
                 var validCount = 0
@@ -118,20 +126,27 @@ class VacancySchedulerService(
                         // Проверяем на бан-слова перед повторной обработкой
                         val validationResult = vacancyContentValidator.validate(vacancy)
                         if (!validationResult.isValid) {
-                            log.warn("[Scheduler] Retry: Vacancy ${vacancy.id} ('${vacancy.name}') contains exclusion rules: ${validationResult.rejectionReason}, deleting from database")
+                            log.warn(
+                                "[Scheduler] Retry: Vacancy ${vacancy.id} ('${vacancy.name}') " +
+                                    "contains exclusion rules: ${validationResult.rejectionReason}, " +
+                                    "deleting from database",
+                            )
 
                             // Удаляем вакансию из БД, так как она содержит бан-слова
                             try {
                                 skillExtractionService.deleteVacancyAndSkills(vacancy.id)
-                                log.info("[Scheduler] Retry: Deleted vacancy ${vacancy.id} from database due to exclusion rules")
+                                log.info(
+                                    "[Scheduler] Retry: Deleted vacancy ${vacancy.id} from database due to exclusion rules",
+                                )
                                 deletedCount++
                             } catch (e: Exception) {
                                 log.error("[Scheduler] Retry: Failed to delete vacancy ${vacancy.id}: ${e.message}", e)
                             }
                         } else {
                             // Вакансия прошла проверку, сбрасываем статус на NEW для повторной обработки
+                            val oldStatus = vacancy.status
                             vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.NEW))
-                            log.debug("[Scheduler] Reset vacancy ${vacancy.id} status from SKIPPED to NEW for retry")
+                            log.info("[Scheduler] Reset vacancy ${vacancy.id} status from $oldStatus to NEW for retry")
                             validCount++
                         }
                     } catch (e: Exception) {
@@ -139,7 +154,9 @@ class VacancySchedulerService(
                     }
                 }
 
-                log.info("[Scheduler] Retry: Reset $validCount vacancies to NEW status, deleted $deletedCount vacancies with exclusion rules")
+                log.info(
+                    "[Scheduler] Retry: Reset $validCount vacancies (SKIPPED/FAILED) to NEW status, deleted $deletedCount vacancies with exclusion rules",
+                )
             } catch (e: Exception) {
                 log.error("[Scheduler] Error retrying skipped vacancies: ${e.message}", e)
             }
@@ -196,7 +213,9 @@ class VacancySchedulerService(
                 val vacancyIds = queuedVacancies.map { it.id }
                 val enqueuedCount = vacancyProcessingQueueService.enqueueBatch(vacancyIds)
                 val skippedCount = vacancyIds.size - enqueuedCount
-                log.info("[Scheduler] Added $enqueuedCount QUEUED vacancies to processing queue ($skippedCount skipped as duplicates)")
+                log.info(
+                    "[Scheduler] Added $enqueuedCount QUEUED vacancies to processing queue ($skippedCount skipped as duplicates)",
+                )
             } catch (e: Exception) {
                 log.error("[Scheduler] Error processing QUEUED vacancies: ${e.message}", e)
             }
@@ -249,24 +268,40 @@ class VacancySchedulerService(
                 // Проверяем состояние Circuit Breaker перед запуском recovery
                 val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
                 if (circuitBreakerState == "OPEN") {
-                    log.info("[Scheduler] Recovery skill extraction skipped: Circuit Breaker is OPEN (total without skills: $totalCount, relevant: $relevantCount)")
+                    log.info(
+                        "[Scheduler] Recovery skill extraction skipped: Circuit Breaker is OPEN (total without skills: $totalCount, relevant: $relevantCount)",
+                    )
                     return@launch
                 }
 
                 // Проверяем, пуста ли очередь обработки новых вакансий (приоритет новым вакансиям)
                 if (!vacancyProcessingQueueService.isQueueEmpty()) {
-                    log.info("[Scheduler] Recovery skill extraction skipped: Vacancy processing queue is not empty (new vacancies have priority) (total without skills: $totalCount, relevant: $relevantCount)")
+                    log.info(
+                        "[Scheduler] Recovery skill extraction skipped: " +
+                            "Vacancy processing queue is not empty (new vacancies have priority) " +
+                            "(total without skills: $totalCount, relevant: $relevantCount)",
+                    )
                     return@launch
                 }
 
                 // Проверяем, не занята ли Ollama обработкой новых вакансий
                 val activeOllamaRequests = ollamaMonitoringService?.getActiveRequestsCount() ?: 0
                 if (activeOllamaRequests > 0) {
-                    log.info("[Scheduler] Recovery skill extraction skipped: Ollama is busy ($activeOllamaRequests active request(s)) (new vacancies have priority) (total without skills: $totalCount, relevant: $relevantCount)")
+                    log.info(
+                        "[Scheduler] Recovery skill extraction skipped: " +
+                            "Ollama is busy ($activeOllamaRequests active request(s)) " +
+                            "(new vacancies have priority) " +
+                            "(total without skills: $totalCount, relevant: $relevantCount)",
+                    )
                     return@launch
                 }
 
-                log.info("[Scheduler] Starting recovery skill extraction (Circuit Breaker: $circuitBreakerState, queue empty: true, Ollama idle: true, total without skills: $totalCount, relevant: $relevantCount)")
+                log.info(
+                    "[Scheduler] Starting recovery skill extraction " +
+                        "(Circuit Breaker: $circuitBreakerState, queue empty: true, " +
+                        "Ollama idle: true, total without skills: $totalCount, " +
+                        "relevant: $relevantCount)",
+                )
 
                 // Получаем одну вакансию без навыков из БД (приоритет релевантным)
                 val pageable = PageRequest.of(0, 1)
@@ -278,17 +313,25 @@ class VacancySchedulerService(
                 }
 
                 val vacancy = vacanciesWithoutSkills.first()
-                log.info("[Scheduler] Recovery: Found vacancy ${vacancy.id} without skills, checking for exclusion rules (remaining: ${totalCount - 1})")
+                log.info(
+                    "[Scheduler] Recovery: Found vacancy ${vacancy.id} without skills, checking for exclusion rules (remaining: ${totalCount - 1})",
+                )
 
                 // Проверяем вакансию на бан-слова перед добавлением в очередь
                 val validationResult = vacancyContentValidator.validate(vacancy)
                 if (!validationResult.isValid) {
-                    log.warn("[Scheduler] Recovery: Vacancy ${vacancy.id} ('${vacancy.name}') contains exclusion rules: ${validationResult.rejectionReason}, deleting from database")
+                    log.warn(
+                        "[Scheduler] Recovery: Vacancy ${vacancy.id} ('${vacancy.name}') " +
+                            "contains exclusion rules: ${validationResult.rejectionReason}, " +
+                            "deleting from database",
+                    )
 
                     // Удаляем вакансию из БД, так как она содержит бан-слова
                     try {
                         skillExtractionService.deleteVacancyAndSkills(vacancy.id)
-                        log.info("[Scheduler] Recovery: Deleted vacancy ${vacancy.id} from database due to exclusion rules")
+                        log.info(
+                            "[Scheduler] Recovery: Deleted vacancy ${vacancy.id} from database due to exclusion rules",
+                        )
                     } catch (e: Exception) {
                         log.error("[Scheduler] Recovery: Failed to delete vacancy ${vacancy.id}: ${e.message}", e)
                     }
@@ -296,12 +339,16 @@ class VacancySchedulerService(
                 }
 
                 // Вакансия прошла проверку на бан-слова, добавляем в очередь извлечения навыков
-                log.info("[Scheduler] Recovery: Vacancy ${vacancy.id} passed exclusion rules check, adding to skill extraction queue")
+                log.info(
+                    "[Scheduler] Recovery: Vacancy ${vacancy.id} passed exclusion rules check, adding to skill extraction queue",
+                )
                 val enqueued = skillExtractionQueueService.enqueue(vacancy.id)
                 if (enqueued) {
                     log.info("[Scheduler] Recovery: Added vacancy ${vacancy.id} to skill extraction queue")
                 } else {
-                    log.info("[Scheduler] Recovery: Vacancy ${vacancy.id} was not enqueued (already processing or has skills)")
+                    log.info(
+                        "[Scheduler] Recovery: Vacancy ${vacancy.id} was not enqueued (already processing or has skills)",
+                    )
                 }
             } catch (e: Exception) {
                 log.error("[Scheduler] Error in recovery skill extraction: ${e.message}", e)
@@ -346,7 +393,9 @@ class VacancySchedulerService(
     }
 
     private suspend fun analyzeVacancies(vacanciesToAnalyze: List<Vacancy>): List<VacancyAnalysis?> {
-        log.info("[Scheduler] Analyzing ${vacanciesToAnalyze.size} vacancies via Ollama (max concurrent: $maxConcurrentRequests)...")
+        log.info(
+            "[Scheduler] Analyzing ${vacanciesToAnalyze.size} vacancies via Ollama (max concurrent: $maxConcurrentRequests)...",
+        )
         val analysisResults = coroutineScope {
             vacanciesToAnalyze.map { vacancy ->
                 async {
@@ -446,10 +495,22 @@ class VacancySchedulerService(
                 // - Анализ вакансии на соответствие резюме
                 // - Если релевантна - отправка в Telegram и добавление в очередь навыков
                 if (analysis.isRelevant) {
-                    log.info(" [Scheduler] Vacancy ${vacancy.id} is relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%)")
-                    log.info("ℹ️ [Scheduler] Vacancy will be processed by event-driven pipeline (notification service -> skill extraction queue)")
+                    log.info(
+                        " [Scheduler] Vacancy ${vacancy.id} is relevant (score: ${String.format(
+                            "%.2f",
+                            analysis.relevanceScore * 100,
+                        )}%)",
+                    )
+                    log.info(
+                        "ℹ️ [Scheduler] Vacancy will be processed by event-driven pipeline (notification service -> skill extraction queue)",
+                    )
                 } else {
-                    log.debug("ℹ️ [Scheduler] Vacancy ${vacancy.id} is not relevant (score: ${String.format("%.2f", analysis.relevanceScore * 100)}%), skipping")
+                    log.debug(
+                        "ℹ️ [Scheduler] Vacancy ${vacancy.id} is not relevant (score: ${String.format(
+                            "%.2f",
+                            analysis.relevanceScore * 100,
+                        )}%), skipping",
+                    )
                 }
 
                 analysis
@@ -460,18 +521,25 @@ class VacancySchedulerService(
             if (e.message?.contains("Circuit Breaker is OPEN") == true) {
                 // Это не должно произойти, так как мы проверяем Circuit Breaker до анализа
                 // Но на всякий случай обрабатываем
-                log.warn(" [Scheduler] Circuit Breaker is OPEN (caught in exception handler), marking vacancy ${vacancy.id} as SKIPPED")
+                log.warn(
+                    " [Scheduler] Circuit Breaker is OPEN (caught in exception handler), marking vacancy ${vacancy.id} as SKIPPED",
+                )
                 try {
                     vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
                 } catch (updateError: Exception) {
-                    log.error(" [Scheduler] Failed to update status for vacancy ${vacancy.id} after Circuit Breaker error", updateError)
+                    log.error(
+                        " [Scheduler] Failed to update status for vacancy ${vacancy.id} after Circuit Breaker error",
+                        updateError,
+                    )
                 }
                 return null
             }
 
             log.error(" [Scheduler] Ollama error analyzing vacancy ${vacancy.id}: ${e.message}", e)
             // Критическая ошибка после всех retry - помечаем как FAILED
-            log.error(" [Scheduler] Critical error after retries, marking vacancy ${vacancy.id} as FAILED (dead letter queue)")
+            log.error(
+                " [Scheduler] Critical error after retries, marking vacancy ${vacancy.id} as FAILED (dead letter queue)",
+            )
             try {
                 vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
                 metricsService.incrementVacanciesFailed()
@@ -486,7 +554,10 @@ class VacancySchedulerService(
                 vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
                 metricsService.incrementVacanciesFailed()
             } catch (updateError: Exception) {
-                log.error(" [Scheduler] Failed to update status for vacancy ${vacancy.id} after processing error", updateError)
+                log.error(
+                    " [Scheduler] Failed to update status for vacancy ${vacancy.id} after processing error",
+                    updateError,
+                )
             }
             null
         } catch (e: Exception) {
@@ -496,7 +567,10 @@ class VacancySchedulerService(
                 vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
                 metricsService.incrementVacanciesFailed()
             } catch (updateError: Exception) {
-                log.error(" [Scheduler] Failed to update status for vacancy ${vacancy.id} after unexpected error", updateError)
+                log.error(
+                    " [Scheduler] Failed to update status for vacancy ${vacancy.id} after unexpected error",
+                    updateError,
+                )
             }
             null
         }

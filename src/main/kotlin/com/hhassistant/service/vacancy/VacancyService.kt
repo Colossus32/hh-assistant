@@ -75,7 +75,9 @@ class VacancyService(
 
         if (activeConfigs.isEmpty()) {
             log.warn(" [VacancyService] No active search configurations found")
-            log.warn(" [VacancyService] Configure search via DB (INSERT INTO search_configs) OR via application.yml (app.search.keywords-rotation)")
+            log.warn(
+                " [VacancyService] Configure search via DB (INSERT INTO search_configs) OR via application.yml (app.search.keywords-rotation)",
+            )
             return FetchResult(emptyList(), emptyList())
         }
 
@@ -88,10 +90,14 @@ class VacancyService(
         for (config in activeConfigs) {
             try {
                 val configId = config.id?.toString() ?: "YAML"
-                log.info(" [VacancyService] Processing search config ID=$configId: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}")
+                log.info(
+                    " [VacancyService] Processing search config ID=$configId: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}",
+                )
                 val vacancies = fetchVacanciesForConfig(config)
                 allNewVacancies.addAll(vacancies)
-                log.info(" [VacancyService] Config ID=$configId ('${config.keywords}'): found ${vacancies.size} new vacancies")
+                log.info(
+                    " [VacancyService] Config ID=$configId ('${config.keywords}'): found ${vacancies.size} new vacancies",
+                )
 
                 if (allNewVacancies.size >= maxVacanciesPerCycle) {
                     log.info(" [VacancyService] Reached max vacancies limit ($maxVacanciesPerCycle), stopping fetch")
@@ -99,7 +105,10 @@ class VacancyService(
                 }
             } catch (e: HHAPIException.UnauthorizedException) {
                 val configId = config.id?.toString() ?: "YAML"
-                log.error(" [VacancyService] HH.ru API unauthorized/forbidden error for config $configId: ${e.message}", e)
+                log.error(
+                    " [VacancyService] HH.ru API unauthorized/forbidden error for config $configId: ${e.message}",
+                    e,
+                )
                 log.error(" [VacancyService] This usually means: token expired, invalid, or lacks required permissions")
 
                 // Пытаемся автоматически обновить токен через refresh token
@@ -112,16 +121,23 @@ class VacancyService(
                     try {
                         val vacancies = fetchVacanciesForConfig(config)
                         allNewVacancies.addAll(vacancies)
-                        log.info(" [VacancyService] Config ID=$configId ('${config.keywords}'): found ${vacancies.size} new vacancies after token refresh")
+                        log.info(
+                            " [VacancyService] Config ID=$configId ('${config.keywords}'): found ${vacancies.size} new vacancies after token refresh",
+                        )
                         continue // Успешно, продолжаем с другими конфигурациями
                     } catch (retryException: Exception) {
-                        log.error(" [VacancyService] Request failed even after token refresh: ${retryException.message}", retryException)
+                        log.error(
+                            " [VacancyService] Request failed even after token refresh: ${retryException.message}",
+                            retryException,
+                        )
                         // Пробрасываем исходное исключение
                         throw e
                     }
                 } else {
                     log.warn(" [VacancyService] Token refresh failed or not available")
-                    log.warn(" [VacancyService] Please obtain a new token via OAuth: ${AppConstants.Urls.OAUTH_AUTHORIZE}")
+                    log.warn(
+                        " [VacancyService] Please obtain a new token via OAuth: ${AppConstants.Urls.OAUTH_AUTHORIZE}",
+                    )
                     // Пробрасываем исключение дальше, чтобы оно обработалось в Scheduler
                     throw e
                 }
@@ -144,7 +160,11 @@ class VacancyService(
         val newVacancies = allNewVacancies.take(maxVacanciesPerCycle)
         log.info(" [VacancyService] Total fetched and saved: ${newVacancies.size} new vacancies")
         if (newVacancies.isNotEmpty()) {
-            log.info(" [VacancyService] Sample vacancies: ${newVacancies.take(AppConstants.Indices.SAMPLE_VACANCIES_COUNT).joinToString(", ") { "${it.name} (${it.id})" }}")
+            log.info(
+                " [VacancyService] Sample vacancies: ${newVacancies.take(
+                    AppConstants.Indices.SAMPLE_VACANCIES_COUNT,
+                ).joinToString(", ") { "${it.name} (${it.id})" }}",
+            )
         }
 
         return FetchResult(newVacancies, searchKeywords)
@@ -174,15 +194,16 @@ class VacancyService(
     }
 
     /**
-     * Получает список вакансий со статусом SKIPPED для повторной обработки.
+     * Получает список вакансий со статусом SKIPPED или FAILED для повторной обработки.
      * Используется для восстановления вакансий, которые были пропущены из-за Circuit Breaker OPEN.
+     * FAILED вакансии включаются для recovery после проблем с Circuit Breaker.
      * Фильтрация выполняется на стороне БД через SQL запрос.
      * Ограничивает retry только вакансиями, которые были получены недавно (за последние 48 часов),
      * чтобы избежать бесконечного цикла retry для старых вакансий.
      *
      * @param limit Максимальное количество вакансий для возврата
      * @param retryWindowHours Окно времени для retry в часах (по умолчанию 48 часов)
-     * @return Список вакансий со статусом SKIPPED (исключая NOT_INTERESTED и старые вакансии)
+     * @return Список вакансий со статусом SKIPPED или FAILED (исключая старые вакансии)
      */
     fun getSkippedVacanciesForRetry(limit: Int = 10, retryWindowHours: Int = 48): List<Vacancy> {
         val cutoffTime = java.time.LocalDateTime.now().minusHours(retryWindowHours.toLong())
@@ -307,7 +328,9 @@ class VacancyService(
             !keywordsRotation.isNullOrEmpty() -> {
                 val currentKeyword = getNextRotationKeyword(keywordsRotation)
                 log.info(" [VacancyService] Using keyword rotation from application.yml")
-                log.info(" [VacancyService] Current rotation keyword: '$currentKeyword' (${keywordsRotation.size} keywords in rotation)")
+                log.info(
+                    " [VacancyService] Current rotation keyword: '$currentKeyword' (${keywordsRotation.size} keywords in rotation)",
+                )
                 listOf(searchConfigFactory.createFromYamlConfig(currentKeyword, searchConfig))
             }
             // Приоритет 2: Одно ключевое слово из application.yml (обратная совместимость)
@@ -367,7 +390,9 @@ class VacancyService(
                 .map { it.status }
                 .orElse(null)
             vacancyRepository.save(updatedVacancy)
-            log.info(" [VacancyService] Updated vacancy ${updatedVacancy.id} ('${updatedVacancy.name}') status: $oldStatus -> ${updatedVacancy.status}")
+            log.info(
+                " [VacancyService] Updated vacancy ${updatedVacancy.id} ('${updatedVacancy.name}') status: $oldStatus -> ${updatedVacancy.status}",
+            )
 
             // Инвалидируем кэш списков вакансий при изменении статуса
             invalidateVacancyListCache()
@@ -411,13 +436,17 @@ class VacancyService(
             .map { it.toEntity(formattingConfig) }
             .take(maxVacanciesPerCycle)
 
-        log.info(" [VacancyService] Found ${newVacancies.size} new vacancies (${vacancyDtos.size - newVacancies.size} already exist)")
+        log.info(
+            " [VacancyService] Found ${newVacancies.size} new vacancies (${vacancyDtos.size - newVacancies.size} already exist)",
+        )
 
         if (newVacancies.isNotEmpty()) {
             vacancyRepository.saveAll(newVacancies)
             log.info(" [VacancyService]  Saved ${newVacancies.size} new vacancies to database for config ID=$configId")
             newVacancies.forEach { vacancy ->
-                log.debug("   - Saved: ${vacancy.name} (ID: ${vacancy.id}, Employer: ${vacancy.employer}, Salary: ${vacancy.salary})")
+                log.debug(
+                    "   - Saved: ${vacancy.name} (ID: ${vacancy.id}, Employer: ${vacancy.employer}, Salary: ${vacancy.salary})",
+                )
             }
 
             // Инкрементально обновляем кэш ID вакансий (добавляем новые ID вместо полной инвалидации)
@@ -447,7 +476,9 @@ class VacancyService(
                 addAll(newVacancyIds)
             }
             vacancyIdsCache.put(cacheKey, updatedIds)
-            log.debug(" [VacancyService] Incrementally updated vacancy IDs cache: added ${newVacancyIds.size} new IDs (total: ${updatedIds.size})")
+            log.debug(
+                " [VacancyService] Incrementally updated vacancy IDs cache: added ${newVacancyIds.size} new IDs (total: ${updatedIds.size})",
+            )
         } else {
             // Кэш пуст - загружаем все ID из БД (это должно быть редко, только при старте приложения)
             log.debug(" [VacancyService] Cache is empty, loading all vacancy IDs from DB...")

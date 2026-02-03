@@ -23,7 +23,8 @@ class CircuitBreakerConfig {
     @Bean
     fun circuitBreakerRegistry(
         @Value("\${resilience.circuit-breaker.failure-rate-threshold:50}") failureRateThreshold: Float,
-        @Value("\${resilience.circuit-breaker.wait-duration-in-open-state-seconds:60}") waitDurationInOpenStateSeconds: Long,
+        @Value("\${resilience.circuit-breaker.wait-duration-in-open-state-seconds:60}") waitDurationInOpenStateSeconds:
+        Long,
         @Value("\${resilience.circuit-breaker.sliding-window-size:10}") slidingWindowSize: Int,
         @Value("\${resilience.circuit-breaker.minimum-number-of-calls:5}") minimumNumberOfCalls: Int,
     ): CircuitBreakerRegistry {
@@ -39,7 +40,12 @@ class CircuitBreakerConfig {
             )
             .build()
 
-        log.info("🔧 [Resilience] Circuit Breaker configured: failureRateThreshold=$failureRateThreshold%, waitDuration=${waitDurationInOpenStateSeconds}s, slidingWindow=$slidingWindowSize")
+        log.info(
+            "🔧 [Resilience] Circuit Breaker configured: " +
+                "failureRateThreshold=$failureRateThreshold%, " +
+                "waitDuration=${waitDurationInOpenStateSeconds}s, " +
+                "slidingWindow=$slidingWindowSize",
+        )
 
         return CircuitBreakerRegistry.of(config)
     }

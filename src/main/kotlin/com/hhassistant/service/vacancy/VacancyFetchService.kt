@@ -38,7 +38,8 @@ class VacancyFetchService(
     private val vacancyProcessingQueueService: VacancyProcessingQueueService,
     private val exclusionKeywordService: ExclusionKeywordService,
     @Value("\${app.max-vacancies-per-cycle:50}") private val maxVacanciesPerCycle: Int,
-    @Qualifier("vacancyIdsCache") private val vacancyIdsCache: com.github.benmanes.caffeine.cache.Cache<String, Set<String>>,
+    @Qualifier("vacancyIdsCache") private val vacancyIdsCache:
+    com.github.benmanes.caffeine.cache.Cache<String, Set<String>>,
 ) {
     private val log = KotlinLogging.logger {}
 
@@ -77,22 +78,34 @@ class VacancyFetchService(
         val activeConfigs = getActiveSearchConfigs()
 
         if (activeConfigs.isEmpty()) {
-            log.warn("[VacancyFetch] No active search configurations found. Configure via DB (INSERT INTO search_configs) OR via application.yml (app.search.keywords-rotation)")
+            log.warn(
+                "[VacancyFetch] No active search configurations found. " +
+                    "Configure via DB (INSERT INTO search_configs) OR " +
+                    "via application.yml (app.search.keywords-rotation)",
+            )
             return FetchResult(emptyList(), emptyList())
         }
 
         val searchKeywords = activeConfigs.map { it.keywords }
-        log.info("[VacancyFetch] Found ${activeConfigs.size} active search configuration(s): ${searchKeywords.joinToString(", ") { "'$it'" }}")
+        log.info(
+            "[VacancyFetch] Found ${activeConfigs.size} active search configuration(s): ${searchKeywords.joinToString(
+                ", ",
+            ) { "'$it'" }}",
+        )
 
         val allNewVacancies = mutableListOf<Vacancy>()
 
         for (config in activeConfigs) {
             try {
                 val configId = config.id?.toString() ?: "YAML"
-                log.debug("[VacancyFetch] Processing search config ID=$configId: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}")
+                log.debug(
+                    "[VacancyFetch] Processing search config ID=$configId: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}",
+                )
                 val vacancies = fetchVacanciesForConfig(config)
                 allNewVacancies.addAll(vacancies)
-                log.info("[VacancyFetch] Config ID=$configId ('${config.keywords}'): found ${vacancies.size} new vacancies")
+                log.info(
+                    "[VacancyFetch] Config ID=$configId ('${config.keywords}'): found ${vacancies.size} new vacancies",
+                )
 
                 if (allNewVacancies.size >= maxVacanciesPerCycle) {
                     log.info("[VacancyFetch] Reached max vacancies limit ($maxVacanciesPerCycle), stopping fetch")
@@ -109,7 +122,9 @@ class VacancyFetchService(
                     log.info("[VacancyFetch] Token refreshed successfully, retrying fetch...")
                     val vacancies = fetchVacanciesForConfig(config)
                     allNewVacancies.addAll(vacancies)
-                    log.info("[VacancyFetch] Config ID=$configId ('${config.keywords}'): found ${vacancies.size} new vacancies after token refresh")
+                    log.info(
+                        "[VacancyFetch] Config ID=$configId ('${config.keywords}'): found ${vacancies.size} new vacancies after token refresh",
+                    )
                 } catch (refreshError: Exception) {
                     log.error("[VacancyFetch] Failed to refresh token: ${refreshError.message}", refreshError)
                     notificationService.sendTokenExpiredAlert(e.message ?: "Unauthorized")
@@ -125,12 +140,16 @@ class VacancyFetchService(
 
         // Save all new vacancies to database with QUEUED status and add to processing queue
         if (allNewVacancies.isNotEmpty()) {
-            log.debug("[VacancyFetch] Saving ${allNewVacancies.size} new vacancies to database with QUEUED status using batch operations...")
+            log.debug(
+                "[VacancyFetch] Saving ${allNewVacancies.size} new vacancies to database with QUEUED status using batch operations...",
+            )
 
             // Сохраняем батчами для оптимизации (Hibernate batch будет автоматически разбивать на группы)
             val savedVacancies = saveVacanciesInBatches(allNewVacancies)
 
-            log.info("[VacancyFetch] Saved ${savedVacancies.size} vacancies to database with QUEUED status (using batch operations)")
+            log.info(
+                "[VacancyFetch] Saved ${savedVacancies.size} vacancies to database with QUEUED status (using batch operations)",
+            )
 
             // Инкрементально обновляем кэш ID вакансий (добавляем новые ID вместо полной инвалидации)
             updateVacancyIdsCacheIncrementally(savedVacancies.map { it.id })
@@ -141,7 +160,9 @@ class VacancyFetchService(
             val vacancyIds = savedVacancies.map { it.id }
             val enqueuedCount = vacancyProcessingQueueService.enqueueBatch(vacancyIds)
             val skippedCount = vacancyIds.size - enqueuedCount
-            log.info("[VacancyFetch] Added $enqueuedCount vacancies to processing queue ($skippedCount skipped as duplicates)")
+            log.info(
+                "[VacancyFetch] Added $enqueuedCount vacancies to processing queue ($skippedCount skipped as duplicates)",
+            )
         } else {
             log.debug("[VacancyFetch] No new vacancies found")
         }
@@ -188,7 +209,9 @@ class VacancyFetchService(
             vacancyRepository.findAllIds().toSet()
         }) ?: emptySet()
 
-        log.trace("[VacancyFetch] Searching vacancies with config: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}")
+        log.trace(
+            "[VacancyFetch] Searching vacancies with config: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}",
+        )
 
         val vacancyDtos = hhVacancyClient.searchVacancies(config)
 
@@ -203,7 +226,9 @@ class VacancyFetchService(
                 // Фильтр 1: Проверка опыта работы (более 6 лет)
                 if (vacancyDto.requiresMoreThan6YearsExperience()) {
                     excludedByExperience++
-                    log.trace("[VacancyFetch] Excluding vacancy ${vacancyDto.id} - experience: ${vacancyDto.experience?.name} (more than 6 years)")
+                    log.trace(
+                        "[VacancyFetch] Excluding vacancy ${vacancyDto.id} - experience: ${vacancyDto.experience?.name} (more than 6 years)",
+                    )
                     return@mapNotNull null
                 }
 
@@ -211,7 +236,9 @@ class VacancyFetchService(
                 val containsExclusionKeyword = exclusionKeywordService.containsExclusionKeyword(vacancyDto.name)
                 if (containsExclusionKeyword) {
                     excludedByKeywords++
-                    log.trace("[VacancyFetch] Excluding vacancy ${vacancyDto.id} - contains exclusion keyword in name: '${vacancyDto.name}'")
+                    log.trace(
+                        "[VacancyFetch] Excluding vacancy ${vacancyDto.id} - contains exclusion keyword in name: '${vacancyDto.name}'",
+                    )
                     return@mapNotNull null
                 }
 
@@ -225,9 +252,15 @@ class VacancyFetchService(
         val totalExcluded = excludedByExperience + excludedByKeywords
 
         if (totalExcluded > 0) {
-            log.debug("[VacancyFetch] Excluded $excludedByExperience vacancies (experience > 6 years), $excludedByKeywords vacancies (exclusion keywords), total excluded: $totalExcluded")
+            log.debug(
+                "[VacancyFetch] Excluded $excludedByExperience vacancies (experience > 6 years), " +
+                    "$excludedByKeywords vacancies (exclusion keywords), " +
+                    "total excluded: $totalExcluded",
+            )
         }
-        log.debug("[VacancyFetch] Found ${vacancyDtos.size} total vacancies, excluded $totalExcluded, ${newVacancies.size} new (not in DB)")
+        log.debug(
+            "[VacancyFetch] Found ${vacancyDtos.size} total vacancies, excluded $totalExcluded, ${newVacancies.size} new (not in DB)",
+        )
 
         return newVacancies
     }
@@ -255,10 +288,14 @@ class VacancyFetchService(
         vacancies.chunked(batchSize).forEachIndexed { index, batch ->
             val saved = vacancyRepository.saveAll(batch)
             allSaved.addAll(saved)
-            log.debug("[VacancyFetch] Saved batch ${index + 1}: ${saved.size} vacancies (total saved: ${allSaved.size}/${vacancies.size})")
+            log.debug(
+                "[VacancyFetch] Saved batch ${index + 1}: ${saved.size} vacancies (total saved: ${allSaved.size}/${vacancies.size})",
+            )
         }
 
-        log.info("[VacancyFetch] Saved ${allSaved.size} vacancies in ${(vacancies.size + batchSize - 1) / batchSize} batches")
+        log.info(
+            "[VacancyFetch] Saved ${allSaved.size} vacancies in ${(vacancies.size + batchSize - 1) / batchSize} batches",
+        )
         return allSaved
     }
 
@@ -278,7 +315,9 @@ class VacancyFetchService(
                 addAll(newVacancyIds)
             }
             vacancyIdsCache.put(cacheKey, updatedIds)
-            log.debug("[VacancyFetch] Incrementally updated vacancy IDs cache: added ${newVacancyIds.size} new IDs (total: ${updatedIds.size})")
+            log.debug(
+                "[VacancyFetch] Incrementally updated vacancy IDs cache: added ${newVacancyIds.size} new IDs (total: ${updatedIds.size})",
+            )
         } else {
             // Кэш пуст - загружаем все ID из БД (это должно быть редко, только при старте приложения)
             log.debug("[VacancyFetch] Cache is empty, loading all vacancy IDs from DB...")

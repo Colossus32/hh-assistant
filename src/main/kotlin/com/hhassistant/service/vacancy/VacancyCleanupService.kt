@@ -50,7 +50,7 @@ class VacancyCleanupService(
             var errorCount = 0
 
             // Обрабатываем вакансии батчами для избежания перегрузки API
-            allVacancies.chunked(batchSize).forEach { batch ->
+            allVacancies.chunked(batchSize).forEach batchLoop@{ batch ->
                 batch.forEach { vacancy ->
                     try {
                         checkedCount++
@@ -60,23 +60,30 @@ class VacancyCleanupService(
                             hhVacancyClient.getVacancyDetails(vacancy.id)
                             // Вакансия существует - ничего не делаем
                             if (checkedCount % 10 == 0) {
-                                log.debug("✅ [VacancyCleanup] Checked $checkedCount/${allVacancies.size} vacancies, deleted: $deletedCount")
+                                log.debug(
+                                    "✅ [VacancyCleanup] Checked $checkedCount/${allVacancies.size} vacancies, deleted: $deletedCount",
+                                )
                             }
                         } catch (e: HHAPIException.NotFoundException) {
                             // Вакансия не найдена (404) - удаляем из БД
-                            log.warn("🗑️ [VacancyCleanup] Vacancy ${vacancy.id} ('${vacancy.name}') not found on HH.ru (404), deleting from database")
+                            log.warn(
+                                "🗑️ [VacancyCleanup] Vacancy ${vacancy.id} ('${vacancy.name}') not found on HH.ru (404), deleting from database",
+                            )
                             deleteVacancyAndRelatedData(vacancy.id)
                             deletedCount++
                         } catch (e: HHAPIException.RateLimitException) {
                             log.warn("⏸️ [VacancyCleanup] Rate limit exceeded, pausing cleanup")
                             errorCount++
-                            return@forEach // Пропускаем остальные вакансии в батче
+                            return@batchLoop // Пропускаем остальные батчи
                         } catch (e: Exception) {
                             log.warn("⚠️ [VacancyCleanup] Error checking vacancy ${vacancy.id}: ${e.message}")
                             errorCount++
                         }
                     } catch (e: Exception) {
-                        log.error("❌ [VacancyCleanup] Unexpected error processing vacancy ${vacancy.id}: ${e.message}", e)
+                        log.error(
+                            "❌ [VacancyCleanup] Unexpected error processing vacancy ${vacancy.id}: ${e.message}",
+                            e,
+                        )
                         errorCount++
                     }
                 }
@@ -87,7 +94,9 @@ class VacancyCleanupService(
                 }
             }
 
-            log.info("✅ [VacancyCleanup] Cleanup completed: checked $checkedCount, deleted $deletedCount, errors $errorCount out of ${allVacancies.size} vacancies")
+            log.info(
+                "✅ [VacancyCleanup] Cleanup completed: checked $checkedCount, deleted $deletedCount, errors $errorCount out of ${allVacancies.size} vacancies",
+            )
         }
     }
 
