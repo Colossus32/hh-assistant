@@ -15,7 +15,9 @@ object WebClientRequestLoggingFilter {
             // Логируем информацию о запросе (без токена)
             val hhUserAgentHeader = request.headers().getFirst("HH-User-Agent")
             val userAgentHeader = request.headers().getFirst(HttpHeaders.USER_AGENT)
-            log.debug("🌐 [WebClient] Request to ${request.url()}: HH-User-Agent='$hhUserAgentHeader', User-Agent='$userAgentHeader'")
+            log.debug(
+                "🌐 [WebClient] Request to ${request.url()}: HH-User-Agent='$hhUserAgentHeader', User-Agent='$userAgentHeader'",
+            )
 
             val authHeader = request.headers().getFirst(HttpHeaders.AUTHORIZATION)
             if (authHeader != null) {
@@ -35,12 +37,18 @@ object WebClientRequestLoggingFilter {
                 log.info("   Header prefix: $tokenPrefix")
                 // Проверяем формат токена
                 if (!authHeader.startsWith("Bearer ")) {
-                    log.error("❌ [WebClient] Authorization header does not start with 'Bearer '! Format: ${authHeader.take(15)}...")
+                    log.error(
+                        "❌ [WebClient] Authorization header does not start with 'Bearer '! Format: ${authHeader.take(
+                            15,
+                        )}...",
+                    )
                 } else {
                     log.debug("✅ [WebClient] Authorization header format is correct (Bearer ...)")
                 }
             } else {
-                log.error("❌ [WebClient] Request to ${request.url()}: NO Authorization header! This will cause 403 Forbidden!")
+                log.error(
+                    "❌ [WebClient] Request to ${request.url()}: NO Authorization header! This will cause 403 Forbidden!",
+                )
                 log.error("   Check if HH_ACCESS_TOKEN is set in .env file")
             }
             reactor.core.publisher.Mono.just(request)

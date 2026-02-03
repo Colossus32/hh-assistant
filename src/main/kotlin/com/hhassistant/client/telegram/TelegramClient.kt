@@ -86,7 +86,9 @@ class TelegramClient(
             val sendDuration = System.currentTimeMillis() - sendStartTime
 
             if (response.ok) {
-                log.info("✅ [Telegram] Message sent successfully to chat $chatId (took ${sendDuration}ms, message_id: ${response.result?.messageId ?: "N/A"})")
+                log.info(
+                    "✅ [Telegram] Message sent successfully to chat $chatId (took ${sendDuration}ms, message_id: ${response.result?.messageId ?: "N/A"})",
+                )
                 true
             } else {
                 val errorMessage = "Failed to send message to Telegram: ${response.description} (code: ${response.errorCode})"
@@ -115,7 +117,9 @@ class TelegramClient(
             log.error("Error sending message to Telegram API: ${e.statusCode} - ${e.message}")
             log.error("Response body: $responseBody")
             log.error("Request message length: ${text.length} chars")
-            log.error("Request message preview: ${text.take(AppConstants.TextLimits.TELEGRAM_MESSAGE_PREVIEW_LENGTH)}...")
+            log.error(
+                "Request message preview: ${text.take(AppConstants.TextLimits.TELEGRAM_MESSAGE_PREVIEW_LENGTH)}...",
+            )
             throw mapToTelegramException(e, responseBody)
         } catch (e: Exception) {
             log.error("Unexpected error sending message to Telegram: ${e.message}", e)

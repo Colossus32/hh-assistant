@@ -52,8 +52,12 @@ class WebClientConfig(
             // ВАЖНО: HH-User-Agent обязателен, поэтому используем минимальный формат
             val defaultUserAgent = "HH-Assistant/1.0"
             builder = builder.defaultHeader("HH-User-Agent", defaultUserAgent)
-            log.warn("⚠️ [WebClient] HH-User-Agent не указан или содержит example.com - используем минимальный формат: $defaultUserAgent")
-            log.warn("⚠️ [WebClient] Для production установите HH_USER_AGENT в .env: 'HH-Assistant/1.0 (your@email.com)'")
+            log.warn(
+                "⚠️ [WebClient] HH-User-Agent не указан или содержит example.com - используем минимальный формат: $defaultUserAgent",
+            )
+            log.warn(
+                "⚠️ [WebClient] Для production установите HH_USER_AGENT в .env: 'HH-Assistant/1.0 (your@email.com)'",
+            )
         }
 
         builder = builder
@@ -70,7 +74,14 @@ class WebClientConfig(
             log.info("✅ [WebClient] HH.ru WebClient configured with Authorization header")
             log.info("   Token length: ${accessToken.length} chars")
             log.info("   Token prefix: ${accessToken.take(15)}...")
-            log.info("   Token type: ${if (accessToken.startsWith("APP")) "Application token" else if (accessToken.startsWith("USER")) "User token" else "Unknown"}")
+            log.info(
+                "   Token type: ${if (accessToken.startsWith(
+                        "APP",
+                    )
+                ) {
+                    "Application token"
+                } else if (accessToken.startsWith("USER")) "User token" else "Unknown"}",
+            )
             log.info("   Auth prefix: $authPrefix")
             log.info("   Full header will be: $authPrefix ${accessToken.take(15)}...")
         } else {

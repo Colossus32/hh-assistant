@@ -63,7 +63,11 @@ class HHVacancyClient(
      * @return Список найденных вакансий
      */
     @Loggable
-    suspend fun searchVacancies(config: SearchConfig, startFromPage: Int? = null, isRestart: Boolean = false): List<VacancyDto> {
+    suspend fun searchVacancies(
+        config: SearchConfig,
+        startFromPage: Int? = null,
+        isRestart: Boolean = false,
+    ): List<VacancyDto> {
         val experienceIds = searchConfig.experienceIds ?: listOf("between1And3", "between3And6")
 
         // Получаем уникальный ключ для этого SearchConfig
@@ -72,7 +76,11 @@ class HHVacancyClient(
         // Определяем стартовую страницу: используем переданную, сохраненную или 0
         val actualStartPage = startFromPage ?: lastProcessedPageCache.getOrDefault(configKey, 0)
 
-        log.debug("[HH.ru API] Searching vacancies: keywords='${config.keywords}', area=${config.area}, minSalary=${config.minSalary}, experience=$experienceIds, startFromPage=$actualStartPage (configKey=$configKey)")
+        log.debug(
+            "[HH.ru API] Searching vacancies: keywords='${config.keywords}', " +
+                "area=${config.area}, minSalary=${config.minSalary}, " +
+                "experience=$experienceIds, startFromPage=$actualStartPage (configKey=$configKey)",
+        )
 
         val allVacancies = mutableListOf<VacancyDto>()
         var currentPage = actualStartPage
@@ -89,7 +97,9 @@ class HHVacancyClient(
                 // Сохраняем totalFound из первой страницы для логирования
                 if (currentPage == actualStartPage) {
                     totalFound = pageResponse.found
-                    log.info("[HH.ru API] Page $currentPage: ${pageResponse.items.size} vacancies, total found: $totalFound")
+                    log.info(
+                        "[HH.ru API] Page $currentPage: ${pageResponse.items.size} vacancies, total found: $totalFound",
+                    )
                 }
 
                 // Проверяем признаки конца пагинации
@@ -101,7 +111,11 @@ class HHVacancyClient(
 
                         // Если начали не с 0 и это не перезапуск, значит были новые вакансии - начинаем сначала
                         if (currentPage > 0 && actualStartPage > 0 && !isRestart) {
-                            log.info("[HH.ru API] Empty page detected at $currentPage (started from $actualStartPage) - new vacancies may have appeared, restarting from page 0")
+                            log.info(
+                                "[HH.ru API] Empty page detected at $currentPage " +
+                                    "(started from $actualStartPage) - new vacancies may have appeared, " +
+                                    "restarting from page 0",
+                            )
                             // Сбрасываем кэш для этого конфига и перезапускаем с начала
                             lastProcessedPageCache.remove(configKey)
                             // Рекурсивно перезапускаем с начала
@@ -118,7 +132,9 @@ class HHVacancyClient(
 
                     // Неполная страница - последняя страница
                     pageResponse.items.size < perPage -> {
-                        log.info("[HH.ru API] Incomplete page $currentPage (${pageResponse.items.size} < $perPage) - last page detected")
+                        log.info(
+                            "[HH.ru API] Incomplete page $currentPage (${pageResponse.items.size} < $perPage) - last page detected",
+                        )
                         allVacancies.addAll(pageResponse.items)
                         hasMorePages = false
                         // Сохраняем текущую страницу как последнюю обработанную
@@ -133,7 +149,9 @@ class HHVacancyClient(
                     }
                 }
 
-                log.trace("[HH.ru API] Page $currentPage: ${pageResponse.items.size} vacancies (total so far: ${allVacancies.size})")
+                log.trace(
+                    "[HH.ru API] Page $currentPage: ${pageResponse.items.size} vacancies (total so far: ${allVacancies.size})",
+                )
 
                 // Адаптивная задержка между запросами на основе доступных токенов rate limit
                 if (hasMorePages) {
@@ -157,7 +175,9 @@ class HHVacancyClient(
         }
 
         val lastPage = if (hasMorePages && currentPage > actualStartPage) currentPage - 1 else currentPage
-        log.info("[HH.ru API] Total fetched: ${allVacancies.size} vacancies from pages $actualStartPage..$lastPage (total available: $totalFound, configKey=$configKey)")
+        log.info(
+            "[HH.ru API] Total fetched: ${allVacancies.size} vacancies from pages $actualStartPage..$lastPage (total available: $totalFound, configKey=$configKey)",
+        )
 
         // Если дошли до конца без ошибок, сохраняем последнюю страницу
         if (!hasMorePages && allVacancies.isNotEmpty()) {
