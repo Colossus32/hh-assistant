@@ -10,7 +10,6 @@ import com.hhassistant.config.PromptConfig
 import com.hhassistant.domain.entity.CoverLetterGenerationStatus
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
-import com.hhassistant.event.VacancyAnalyzedEvent
 import com.hhassistant.exception.OllamaException
 import com.hhassistant.repository.VacancyAnalysisRepository
 import com.hhassistant.service.resume.ResumeService
@@ -23,7 +22,6 @@ import io.github.resilience4j.retry.Retry
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
-import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 
 @Service
@@ -33,7 +31,6 @@ class VacancyAnalysisService(
     private val repository: VacancyAnalysisRepository,
     private val objectMapper: ObjectMapper,
     private val promptConfig: PromptConfig,
-    private val eventPublisher: ApplicationEventPublisher,
     private val vacancyContentValidator: VacancyContentValidator,
     private val metricsService: com.hhassistant.metrics.MetricsService,
     private val analysisTimeService: AnalysisTimeService,
@@ -203,9 +200,6 @@ class VacancyAnalysisService(
         } else {
             metricsService.incrementVacanciesSkipped()
         }
-
-        // Публикуем событие анализа вакансии
-        eventPublisher.publishEvent(VacancyAnalyzedEvent(this, vacancy, savedAnalysis))
 
         return savedAnalysis
     }

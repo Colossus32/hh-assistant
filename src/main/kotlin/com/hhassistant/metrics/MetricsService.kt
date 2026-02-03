@@ -43,15 +43,6 @@ class MetricsService(
         .tag("status", "failed")
         .register(meterRegistry)
 
-    // ========== Счетчики событий ==========
-    private val eventsPublishedCounter: Counter = Counter.builder("events.published")
-        .description("Total number of events published")
-        .register(meterRegistry)
-
-    private val eventsReceivedCounter: Counter = Counter.builder("events.received")
-        .description("Total number of events received")
-        .register(meterRegistry)
-
     // ========== Счетчики сопроводительных писем ==========
     private val coverLettersGeneratedCounter: Counter = Counter.builder("cover_letters.generated")
         .description("Total number of cover letters successfully generated")
@@ -130,24 +121,6 @@ class MetricsService(
 
     fun incrementVacanciesFailed() {
         vacanciesFailedCounter.increment()
-    }
-
-    fun incrementEventsPublished(eventType: String) {
-        eventsPublishedCounter.increment()
-        Counter.builder("events.published.by_type")
-            .description("Events published by type")
-            .tag("type", eventType)
-            .register(meterRegistry)
-            .increment()
-    }
-
-    fun incrementEventsReceived(eventType: String) {
-        eventsReceivedCounter.increment()
-        Counter.builder("events.received.by_type")
-            .description("Events received by type")
-            .tag("type", eventType)
-            .register(meterRegistry)
-            .increment()
     }
 
     fun incrementCoverLettersGenerated() {

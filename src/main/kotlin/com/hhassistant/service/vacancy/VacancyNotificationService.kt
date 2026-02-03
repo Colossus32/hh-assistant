@@ -5,18 +5,14 @@ import com.hhassistant.client.telegram.TelegramClient
 import com.hhassistant.config.AppConstants
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
-import com.hhassistant.event.VacancyReadyForTelegramEvent
 import com.hhassistant.exception.TelegramException
-import kotlinx.coroutines.runBlocking
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
-import org.springframework.context.event.EventListener
-import org.springframework.scheduling.annotation.Async
 import org.springframework.stereotype.Service
 
 /**
  * Сервис для отправки уведомлений о вакансиях в Telegram
- * Слушает VacancyReadyForTelegramEvent и отправляет сообщения
+ * Использует прямые вызовы методов вместо событий
  */
 @Service
 class VacancyNotificationService(
@@ -28,24 +24,31 @@ class VacancyNotificationService(
     private val log = KotlinLogging.logger {}
 
     /**
-     * Обрабатывает событие готовности вакансии к отправке в Telegram
+     * Отправляет вакансию в Telegram и обновляет статус
+     * Заменяет event-driven подход на прямой вызов
+     *
+     * @param vacancy Вакансия для отправки
+     * @param analysis Анализ вакансии
+     * @return true если сообщение успешно отправлено, false если Telegram отключен или не настроен
      */
-    @EventListener
-    @Async
-    fun handleVacancyReadyForTelegram(event: VacancyReadyForTelegramEvent) {
-        val vacancy = event.vacancy
-        val analysis = event.analysis
-
-        log.info("📱 [Notification] Processing VacancyReadyForTelegramEvent for vacancy ${vacancy.id}")
+    @Loggable
+    suspend fun sendVacancyToTelegram(
+        vacancy: Vacancy,
+        analysis: VacancyAnalysis,
+    ): Boolean {
+        log.info("📱 [Notification] Sending vacancy ${vacancy.id} to Telegram")
 
         try {
-            val sentAt = java.time.LocalDateTime.now()
-            val sentSuccessfully = runBlocking {
-                sendVacancyToTelegram(vacancy, analysis)
-            }
+            // Fix vacancy URL if it's in wrong format (API URL instead of browser URL)
+            val correctedVacancy = vacancy.copy(url = normalizeVacancyUrl(vacancy.url, vacancy.id))
+            val message = buildTelegramMessage(correctedVacancy, analysis)
+
+            // Send message and return result (true if sent, false if disabled/not configured)
+            val sentSuccessfully = telegramClient.sendMessage(message, null)
 
             // Update status and sent timestamp only if message was actually sent
             if (sentSuccessfully) {
+                val sentAt = java.time.LocalDateTime.now()
                 vacancyStatusService.updateVacancyStatus(vacancy.withSentToTelegramAt(sentAt))
                 metricsService.incrementNotificationsSent()
                 log.info("[Notification] Successfully sent vacancy ${vacancy.id} to Telegram at $sentAt")
@@ -53,36 +56,23 @@ class VacancyNotificationService(
                 log.warn("[Notification] Message sending returned false for vacancy ${vacancy.id} (Telegram may be disabled or not configured)")
                 // Don't update status - vacancy remains in ANALYZED state
             }
+
+            return sentSuccessfully
         } catch (e: TelegramException.RateLimitException) {
             metricsService.incrementNotificationsFailed()
             log.warn("⚠️ [Notification] Rate limit exceeded for Telegram, skipping vacancy ${vacancy.id} (will retry later)")
             // Не обновляем статус, попробуем отправить в следующий раз
+            throw e
         } catch (e: TelegramException) {
             metricsService.incrementNotificationsFailed()
             log.error("❌ [Notification] Telegram error for vacancy ${vacancy.id}: ${e.message}", e)
             // Вакансия уже проанализирована, но не отправлена
+            throw e
         } catch (e: Exception) {
             metricsService.incrementNotificationsFailed()
             log.error("❌ [Notification] Unexpected error sending vacancy ${vacancy.id} to Telegram: ${e.message}", e)
+            throw e
         }
-    }
-
-    /**
-     * Sends vacancy to Telegram
-     *
-     * @return true if message was successfully sent, false if Telegram is disabled or not configured
-     * @throws TelegramException if sending failed (rate limit, invalid chat, etc.)
-     */
-    @Loggable
-    suspend fun sendVacancyToTelegram(
-        vacancy: Vacancy,
-        analysis: VacancyAnalysis,
-    ): Boolean {
-        // Fix vacancy URL if it's in wrong format (API URL instead of browser URL)
-        val correctedVacancy = vacancy.copy(url = normalizeVacancyUrl(vacancy.url, vacancy.id))
-        val message = buildTelegramMessage(correctedVacancy, analysis)
-        // Send message and return result (true if sent, false if disabled/not configured)
-        return telegramClient.sendMessage(message, null)
     }
 
     /**

@@ -112,14 +112,14 @@ class VacancySchedulerService(
                 // Проверяем вакансии на бан-слова перед повторной обработкой
                 var validCount = 0
                 var deletedCount = 0
-                
+
                 skippedVacancies.forEach { vacancy ->
                     try {
                         // Проверяем на бан-слова перед повторной обработкой
                         val validationResult = vacancyContentValidator.validate(vacancy)
                         if (!validationResult.isValid) {
                             log.warn("[Scheduler] Retry: Vacancy ${vacancy.id} ('${vacancy.name}') contains exclusion rules: ${validationResult.rejectionReason}, deleting from database")
-                            
+
                             // Удаляем вакансию из БД, так как она содержит бан-слова
                             try {
                                 skillExtractionService.deleteVacancyAndSkills(vacancy.id)
@@ -284,7 +284,7 @@ class VacancySchedulerService(
                 val validationResult = vacancyContentValidator.validate(vacancy)
                 if (!validationResult.isValid) {
                     log.warn("[Scheduler] Recovery: Vacancy ${vacancy.id} ('${vacancy.name}') contains exclusion rules: ${validationResult.rejectionReason}, deleting from database")
-                    
+
                     // Удаляем вакансию из БД, так как она содержит бан-слова
                     try {
                         skillExtractionService.deleteVacancyAndSkills(vacancy.id)
@@ -437,7 +437,7 @@ class VacancySchedulerService(
                     return null
                 }
 
-                // Обновляем статус вакансии через VacancyStatusService (публикует VacancyStatusChangedEvent)
+                // Обновляем статус вакансии через VacancyStatusService
                 val newStatus = if (analysis.isRelevant) VacancyStatus.ANALYZED else VacancyStatus.SKIPPED
                 vacancyStatusService.updateVacancyStatus(vacancy.withStatus(newStatus))
                 log.debug(" [Scheduler] Updated vacancy ${vacancy.id} status to: $newStatus")

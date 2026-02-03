@@ -334,11 +334,11 @@ class VacancyProcessingQueueService(
                 }
             } else {
                 val reason = when {
-                    analysis.relevanceScore == 0.0 && analysis.reasoning.contains("отклонена") -> 
+                    analysis.relevanceScore == 0.0 && analysis.reasoning.contains("отклонена") ->
                         "rejected by exclusion rules: ${analysis.reasoning}"
-                    analysis.relevanceScore == 0.0 -> 
+                    analysis.relevanceScore == 0.0 ->
                         "relevance score is 0%"
-                    else -> 
+                    else ->
                         "relevance score ${String.format("%.2f", analysis.relevanceScore * 100)}% is below threshold"
                 }
                 log.info("ℹ️ [VacancyProcessingQueue] Vacancy ${vacancy.id} ('${vacancy.name}') is not relevant ($reason), skipping Telegram")

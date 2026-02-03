@@ -7,7 +7,6 @@ import com.hhassistant.client.hh.dto.toEntity
 import com.hhassistant.config.VacancyServiceConfig
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.domain.entity.Vacancy
-import com.hhassistant.event.VacancyFetchedEvent
 import com.hhassistant.exception.HHAPIException
 import com.hhassistant.repository.SearchConfigRepository
 import com.hhassistant.repository.VacancyRepository
@@ -18,13 +17,12 @@ import com.hhassistant.service.util.TokenRefreshService
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
-import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Сервис для получения вакансий от HH.ru API
- * Публикует VacancyFetchedEvent после успешного получения
+ * Использует прямые вызовы вместо событий
  */
 @Service
 class VacancyFetchService(
@@ -36,7 +34,6 @@ class VacancyFetchService(
     private val searchConfigFactory: SearchConfigFactory,
     private val searchConfig: VacancyServiceConfig,
     private val formattingConfig: com.hhassistant.config.FormattingConfig,
-    private val eventPublisher: ApplicationEventPublisher,
     private val metricsService: com.hhassistant.metrics.MetricsService,
     private val vacancyProcessingQueueService: VacancyProcessingQueueService,
     private val exclusionKeywordService: ExclusionKeywordService,
@@ -68,7 +65,6 @@ class VacancyFetchService(
 
     /**
      * Загружает новые вакансии из HH.ru API и сохраняет их в БД.
-     * Публикует VacancyFetchedEvent после успешного получения.
      *
      * @return Результат загрузки с вакансиями и ключевыми словами
      */
@@ -146,18 +142,6 @@ class VacancyFetchService(
             val enqueuedCount = vacancyProcessingQueueService.enqueueBatch(vacancyIds)
             val skippedCount = vacancyIds.size - enqueuedCount
             log.info("[VacancyFetch] Added $enqueuedCount vacancies to processing queue ($skippedCount skipped as duplicates)")
-
-            // Publish event for each group of vacancies by keywords
-            val vacanciesByKeywords = allNewVacancies.groupBy {
-                activeConfigs.find { config ->
-                    it.name.contains(config.keywords, ignoreCase = true) ||
-                        it.description?.contains(config.keywords, ignoreCase = true) == true
-                }?.keywords ?: searchKeywords.firstOrNull() ?: "unknown"
-            }
-
-            vacanciesByKeywords.forEach { (keywords, vacancies) ->
-                eventPublisher.publishEvent(VacancyFetchedEvent(this, vacancies, keywords))
-            }
         } else {
             log.debug("[VacancyFetch] No new vacancies found")
         }

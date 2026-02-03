@@ -7,6 +7,7 @@ import com.hhassistant.dto.ApiResponse
 import com.hhassistant.dto.VacancyListResponse
 import com.hhassistant.service.exclusion.ExclusionKeywordService
 import com.hhassistant.service.exclusion.ExclusionRuleService
+import com.hhassistant.service.skill.SkillExtractionQueueService
 import com.hhassistant.service.skill.SkillExtractionService
 import com.hhassistant.service.skill.SkillStatisticsService
 import com.hhassistant.service.util.AnalysisTimeService
@@ -33,6 +34,7 @@ class TelegramCommandHandler(
     @Qualifier("internalApiWebClient") private val webClient: WebClient,
     private val skillExtractionService: SkillExtractionService,
     private val skillStatisticsService: SkillStatisticsService,
+    private val skillExtractionQueueService: SkillExtractionQueueService,
     private val vacancyService: VacancyService,
     private val exclusionRuleService: ExclusionRuleService,
     private val exclusionKeywordService: ExclusionKeywordService,
@@ -236,7 +238,8 @@ class TelegramCommandHandler(
      */
     private suspend fun handleVacanciesCommand(): String {
         return try {
-            val url = "$apiBaseUrl/api/vacancies/unviewed"
+            // Используем относительный URL для внутренних запросов (работает в Docker)
+            val url = "/api/vacancies/unviewed"
             val response = webClient.get()
                 .uri(url)
                 .retrieve()
@@ -278,7 +281,8 @@ class TelegramCommandHandler(
      */
     private suspend fun handleAllVacanciesCommand(): String {
         return try {
-            val url = "$apiBaseUrl/api/vacancies/all"
+            // Используем относительный URL для внутренних запросов (работает в Docker)
+            val url = "/api/vacancies/all"
             val response = webClient.get()
                 .uri(url)
                 .retrieve()
@@ -360,41 +364,60 @@ class TelegramCommandHandler(
                 }
             }
 
-            // Шаг 2: Проверяем, есть ли вакансии без навыков и запускаем обработку в фоне
+            // Шаг 2: Проверяем, есть ли вакансии без навыков и добавляем их в очередь (низкий приоритет)
             val allVacancies = vacancyService.findAllVacancies()
             val vacanciesWithoutSkills = skillExtractionService.getVacanciesWithoutSkills(allVacancies)
 
             if (vacanciesWithoutSkills.isNotEmpty()) {
-                log.info("📊 [TelegramCommand] Found ${vacanciesWithoutSkills.size} vacancies without skills, processing in background...")
+                log.info("📊 [TelegramCommand] Found ${vacanciesWithoutSkills.size} vacancies without skills, adding to queue...")
 
-                // Запускаем обработку в фоне
-                backgroundScope.launch {
-                    try {
-                        log.info("🔄 [TelegramCommand] Starting background skill extraction for ${vacanciesWithoutSkills.size} vacancies")
-                        val processedCount = skillExtractionService.extractSkillsForAllVacancies(vacanciesWithoutSkills)
-                        log.info("✅ [TelegramCommand] Background extraction completed: processed $processedCount vacancies")
+                // Добавляем вакансии в очередь извлечения навыков (низкий приоритет)
+                // Это гарантирует, что приоритет будет у новых вакансий и их анализа
+                val vacancyIds = vacanciesWithoutSkills.map { it.id }
+                val enqueuedCount = skillExtractionQueueService.enqueueBatch(vacancyIds)
 
-                        // Отправляем уведомление о завершении обработки
-                        val updatedStats = skillStatisticsService.getTopSkills(limit)
-                        val updatedTotal = skillStatisticsService.getTotalAnalyzedVacancies()
+                log.info("📥 [TelegramCommand] Added $enqueuedCount vacancies to skill extraction queue")
 
-                        if (updatedStats.isNotEmpty() && updatedTotal > totalAnalyzedVacancies) {
-                            val updateMessage = buildString {
-                                appendLine("✅ <b>Обработка завершена!</b>")
-                                appendLine()
-                                appendLine("Обработано вакансий: <b>$processedCount</b>")
-                                appendLine("Обновлено вакансий: <b>${updatedTotal - totalAnalyzedVacancies}</b>")
-                                appendLine()
-                                appendLine("💡 Используйте /skills для обновленной статистики")
+                // Запускаем мониторинг очереди в фоне для отправки уведомления о завершении
+                if (enqueuedCount > 0) {
+                    backgroundScope.launch {
+                        try {
+                            // Ждем, пока очередь обработается (проверяем каждые 5 секунд)
+                            var lastQueueSize = skillExtractionQueueService.getQueueSize()
+                            var checkCount = 0
+                            val maxChecks = 120 // Максимум 10 минут ожидания (120 * 5 сек)
+
+                            while (checkCount < maxChecks && skillExtractionQueueService.getQueueSize() > 0) {
+                                kotlinx.coroutines.delay(5000) // 5 секунд
+                                checkCount++
+
+                                val currentQueueSize = skillExtractionQueueService.getQueueSize()
+                                // Если очередь уменьшилась, значит идет обработка
+                                if (currentQueueSize < lastQueueSize) {
+                                    log.debug("🔄 [TelegramCommand] Queue processing: $currentQueueSize items remaining")
+                                }
+                                lastQueueSize = currentQueueSize
                             }
-                            telegramClient.sendMessage(chatId, updateMessage)
+
+                            // После завершения обработки отправляем уведомление
+                            val updatedStats = skillStatisticsService.getTopSkills(limit)
+                            val updatedTotal = skillStatisticsService.getTotalAnalyzedVacancies()
+
+                            if (updatedStats.isNotEmpty() && updatedTotal > totalAnalyzedVacancies) {
+                                val updateMessage = buildString {
+                                    appendLine("✅ <b>Обработка завершена!</b>")
+                                    appendLine()
+                                    appendLine("Добавлено в очередь: <b>$enqueuedCount</b> вакансий")
+                                    appendLine("Обновлено вакансий: <b>${updatedTotal - totalAnalyzedVacancies}</b>")
+                                    appendLine()
+                                    appendLine("💡 Используйте /skills для обновленной статистики")
+                                }
+                                telegramClient.sendMessage(chatId, updateMessage)
+                            }
+                        } catch (e: Exception) {
+                            log.error("❌ [TelegramCommand] Error monitoring queue: ${e.message}", e)
+                            // Не отправляем ошибку пользователю, так как обработка все равно идет в фоне
                         }
-                    } catch (e: Exception) {
-                        log.error("❌ [TelegramCommand] Error in background skill extraction: ${e.message}", e)
-                        telegramClient.sendMessage(
-                            chatId,
-                            "❌ <b>Ошибка при обработке вакансий:</b>\n${e.message ?: "Неизвестная ошибка"}",
-                        )
                     }
                 }
 
@@ -402,8 +425,9 @@ class TelegramCommandHandler(
                 return buildString {
                     appendLine(currentStatsMessage)
                     appendLine()
-                    appendLine("🔄 <i>Обработка ${vacanciesWithoutSkills.size} вакансий без навыков запущена в фоне...</i>")
+                    appendLine("🔄 <i>Обработка $enqueuedCount вакансий без навыков запущена в фоне...</i>")
                     appendLine("💡 Вы получите уведомление по завершении")
+                    appendLine("⚡ Приоритет обработки: новые вакансии и их анализ")
                 }
             }
 
@@ -581,7 +605,8 @@ class TelegramCommandHandler(
         }
 
         return try {
-            val url = "$apiBaseUrl/api/vacancies/$vacancyId/mark-applied"
+            // Используем относительный URL для внутренних запросов (работает в Docker)
+            val url = "/api/vacancies/$vacancyId/mark-applied"
             val response = webClient.post()
                 .uri(url)
                 .retrieve()
@@ -615,7 +640,8 @@ class TelegramCommandHandler(
         }
 
         return try {
-            val url = "$apiBaseUrl/api/vacancies/$vacancyId/mark-not-interested"
+            // Используем относительный URL для внутренних запросов (работает в Docker)
+            val url = "/api/vacancies/$vacancyId/mark-not-interested"
             val response = webClient.post()
                 .uri(url)
                 .retrieve()
