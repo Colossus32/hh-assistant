@@ -45,9 +45,12 @@ services:
       SPRING_DATASOURCE_PASSWORD: hh_pass
       
       # Ollama configuration (accessing local Ollama from Docker container)
+      # Автоматически определяется OllamaUrlAutoConfigurer при старте приложения
+      # Если в .env указан localhost, он будет автоматически заменен на host.docker.internal
+      # Можно явно указать другой URL через .env файл
       # On Windows/Mac: host.docker.internal works out of the box
-      # On Linux: you may need to add extra_hosts or use network_mode: host
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      # On Linux: extra_hosts уже настроен ниже
+      # OLLAMA_BASE_URL не нужно указывать здесь - определяется автоматически
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
       
       # HH.ru API configuration
@@ -77,9 +80,9 @@ services:
     networks:
       - hh-network
     restart: unless-stopped
-    # Для Linux может потребоваться добавить extra_hosts для доступа к host.docker.internal
-    # extra_hosts:
-    #   - "host.docker.internal:host-gateway"
+    # Для доступа к host.docker.internal (работает на Windows/Mac, на Linux может потребоваться)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   postgres_data:
