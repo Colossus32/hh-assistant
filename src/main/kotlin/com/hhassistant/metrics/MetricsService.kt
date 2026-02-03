@@ -38,11 +38,6 @@ class MetricsService(
         .description("Total number of vacancies rejected by content validator")
         .register(meterRegistry)
 
-    private val vacanciesFailedCounter: Counter = Counter.builder("vacancies.failed")
-        .description("Total number of vacancies that failed processing (dead letter queue)")
-        .tag("status", "failed")
-        .register(meterRegistry)
-
     // ========== Счетчики сопроводительных писем ==========
     private val coverLettersGeneratedCounter: Counter = Counter.builder("cover_letters.generated")
         .description("Total number of cover letters successfully generated")
@@ -117,10 +112,6 @@ class MetricsService(
 
     fun incrementVacanciesRejectedByValidator() {
         vacanciesRejectedByValidatorCounter.increment()
-    }
-
-    fun incrementVacanciesFailed() {
-        vacanciesFailedCounter.increment()
     }
 
     fun incrementCoverLettersGenerated() {

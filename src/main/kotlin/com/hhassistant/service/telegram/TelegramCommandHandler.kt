@@ -79,9 +79,7 @@ class TelegramCommandHandler(
                 text == "/skills_now" -> handleSkillsNowCommand(chatId, text)
                 text == "/extract-relevant-skills" -> handleExtractRelevantSkillsCommand(chatId)
                 text.startsWith("/exclusion_add_keyword ") -> handleAddExclusionKeyword(text)
-                text.startsWith("/exclusion_add_phrase ") -> handleAddExclusionPhrase(text)
                 text.startsWith("/exclusion_remove_keyword ") -> handleRemoveExclusionKeyword(text)
-                text.startsWith("/exclusion_remove_phrase ") -> handleRemoveExclusionPhrase(text)
                 text == "/exclusion_list" -> handleListExclusions()
                 text.startsWith("/sent_status ") -> handleSentStatusCommand(text)
                 text == "/sent_status" -> handleSentStatusCommand(text)
@@ -605,19 +603,13 @@ class TelegramCommandHandler(
             appendLine("<b>/extract-relevant-skills</b> - Извлечь навыки из релевантных вакансий без навыков")
             appendLine("   Находит релевантные вакансии, для которых еще не извлечены навыки, и извлекает их")
             appendLine()
-            appendLine("<b>/exclusion_list</b> - Показать все правила исключения (ключевые слова и фразы)")
+            appendLine("<b>/exclusion_list</b> - Показать все правила исключения (ключевые слова)")
             appendLine()
             appendLine("<b>/exclusion_add_keyword &lt;слово&gt;</b> - Добавить ключевое слово для исключения")
             appendLine("   Пример: /exclusion_add_keyword remote")
             appendLine()
-            appendLine("<b>/exclusion_add_phrase &lt;фраза&gt;</b> - Добавить фразу для исключения")
-            appendLine("   Пример: /exclusion_add_phrase без опыта работы")
-            appendLine()
             appendLine("<b>/exclusion_remove_keyword &lt;слово&gt;</b> - Удалить ключевое слово из исключений")
             appendLine("   Пример: /exclusion_remove_keyword remote")
-            appendLine()
-            appendLine("<b>/exclusion_remove_phrase &lt;фраза&gt;</b> - Удалить фразу из исключений")
-            appendLine("   Пример: /exclusion_remove_phrase без опыта работы")
             appendLine()
             appendLine("<b>/sent_status [vacancy_id]</b> - Проверить, была ли вакансия отправлена в Telegram")
             appendLine("   Пример: /sent_status (сводка) или /sent_status 12345678 (конкретная вакансия)")
@@ -709,13 +701,10 @@ class TelegramCommandHandler(
         text: String,
         commandPrefix: String,
         isAdd: Boolean,
-        isKeyword: Boolean,
     ): String {
         val param = text.removePrefix(commandPrefix).trim()
         if (param.isEmpty()) {
-            val type = if (isKeyword) "слово" else "фраза"
-            val example = if (isKeyword) "remote" else "без опыта работы"
-            return "❌ Использование: $commandPrefix &lt;$type&gt;\nПример: $commandPrefix $example"
+            return "❌ Использование: $commandPrefix &lt;слово&gt;\nПример: $commandPrefix remote"
         }
         if (param.length > MAX_EXCLUSION_PARAM_LENGTH) {
             return "❌ Слишком длинное значение (максимум $MAX_EXCLUSION_PARAM_LENGTH символов)"
@@ -723,37 +712,24 @@ class TelegramCommandHandler(
 
         return try {
             if (isAdd) {
-                if (isKeyword) {
-                    val added = exclusionKeywordService.addKeyword(param)
-                    if (added) {
-                        "✅ Добавлено ключевое слово для исключения: '$param'\nВсего слов-блокеров: ${exclusionKeywordService.getKeywordsCount()}"
-                    } else {
-                        "⚠️ Ключевое слово '$param' уже существует или содержит пробелы (используйте /exclusion_add_phrase для фраз)"
-                    }
+                val added = exclusionKeywordService.addKeyword(param)
+                if (added) {
+                    "✅ Добавлено ключевое слово для исключения: '$param'\nВсего слов-блокеров: ${exclusionKeywordService.getKeywordsCount()}"
                 } else {
-                    exclusionRuleService.addPhrase(param)
-                    "✅ Добавлена фраза для исключения: '$param'\n(Фразы используются только для LLM анализа)"
+                    "⚠️ Ключевое слово '$param' уже существует"
                 }
             } else {
-                val removed = if (isKeyword) {
-                    exclusionKeywordService.removeKeyword(param)
-                } else {
-                    exclusionRuleService.removePhrase(param)
-                }
+                val removed = exclusionKeywordService.removeKeyword(param)
                 if (removed) {
-                    val type = if (isKeyword) "ключевое слово" else "фраза"
-                    val countInfo = if (isKeyword) "\nВсего слов-блокеров: ${exclusionKeywordService.getKeywordsCount()}" else ""
-                    "✅ Удалено $type из исключений: '$param'$countInfo"
+                    "✅ Удалено ключевое слово из исключений: '$param'\nВсего слов-блокеров: ${exclusionKeywordService.getKeywordsCount()}"
                 } else {
-                    val type = if (isKeyword) "ключевое слово" else "фраза"
-                    "⚠️ $type '$param' не найдено"
+                    "⚠️ Ключевое слово '$param' не найдено"
                 }
             }
         } catch (e: Exception) {
             val action = if (isAdd) "добавлении" else "удалении"
-            val type = if (isKeyword) "ключевого слова" else "фразы"
-            log.error("[TelegramCommand] Error $action exclusion $type: ${e.message}", e)
-            "❌ Ошибка при $action $type: ${e.message ?: "Неизвестная ошибка"}"
+            log.error("[TelegramCommand] Error $action exclusion keyword: ${e.message}", e)
+            "❌ Ошибка при $action ключевого слова: ${e.message ?: "Неизвестная ошибка"}"
         }
     }
 
@@ -761,28 +737,14 @@ class TelegramCommandHandler(
      * Обрабатывает команду /exclusion_add_keyword <word>
      */
     private fun handleAddExclusionKeyword(text: String): String {
-        return handleExclusionCommand(text, "/exclusion_add_keyword ", isAdd = true, isKeyword = true)
-    }
-
-    /**
-     * Обрабатывает команду /exclusion_add_phrase <phrase>
-     */
-    private fun handleAddExclusionPhrase(text: String): String {
-        return handleExclusionCommand(text, "/exclusion_add_phrase ", isAdd = true, isKeyword = false)
+        return handleExclusionCommand(text, "/exclusion_add_keyword ", isAdd = true)
     }
 
     /**
      * Обрабатывает команду /exclusion_remove_keyword <word>
      */
     private fun handleRemoveExclusionKeyword(text: String): String {
-        return handleExclusionCommand(text, "/exclusion_remove_keyword ", isAdd = false, isKeyword = true)
-    }
-
-    /**
-     * Обрабатывает команду /exclusion_remove_phrase <phrase>
-     */
-    private fun handleRemoveExclusionPhrase(text: String): String {
-        return handleExclusionCommand(text, "/exclusion_remove_phrase ", isAdd = false, isKeyword = false)
+        return handleExclusionCommand(text, "/exclusion_remove_keyword ", isAdd = false)
     }
 
     /**
@@ -791,8 +753,6 @@ class TelegramCommandHandler(
     private fun handleListExclusions(): String {
         return try {
             val keywords = exclusionKeywordService.getAllKeywords().sorted()
-            val rules = exclusionRuleService.listAll()
-            val phrases = rules["phrases"] ?: emptyList<String>()
 
             buildString {
                 appendLine("📋 <b>Правила исключения</b>")
@@ -803,13 +763,6 @@ class TelegramCommandHandler(
                     appendLine("   (нет)")
                 } else {
                     keywords.forEach { appendLine("   • $it") }
-                }
-                appendLine()
-                appendLine("<b>Фразы (${phrases.size}):</b>")
-                if (phrases.isEmpty()) {
-                    appendLine("   (нет)")
-                } else {
-                    phrases.forEach { appendLine("   • $it") }
                 }
             }
         } catch (e: Exception) {

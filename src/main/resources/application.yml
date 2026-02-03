@@ -94,7 +94,6 @@ app:
       - "QA"
       - "Android"
       - "Fullstack"
-    exclusion-phrases:  # Список запрещенных фраз (проверяется как целая фраза)
       - "без опыта работы"
       - "опыт не требуется"
       - "для начинающих"
@@ -115,6 +114,14 @@ app:
   ollama-monitoring:
     enabled: true  # Enable Ollama status monitoring
     interval-seconds: 5  # Interval between status checks (in seconds)
+    recovery:
+      enabled: true  # Enable recovery of failed/skipped vacancies when idle
+      interval-seconds: 10  # Interval between recovery attempts (in seconds)
+      pause-when-empty-minutes: 30  # Pause recovery when no vacancies to recover (in minutes)
+    skipped-validation:
+      enabled: true  # Enable parallel validation of skipped vacancies while LLM is processing
+      batch-size: 20  # Number of skipped vacancies to process per batch
+      interval-seconds: 5  # Interval between validation batches (in seconds)
   prompts:
     # Системный промпт для анализа вакансий (максимально оптимизирован для скорости)
     # Требует только skills и relevance_score - без reasoning для ускорения
@@ -203,8 +210,14 @@ ollama:
   # Оптимизированные temperature для анализа вакансий
   analysis:
     temperature: 0.3  # Низкая temperature для детерминированного анализа
-  timeout-seconds: 90  # Таймаут для анализа вакансий через Ollama (обычно 10-30 секунд)
+  timeout-seconds: 90  # Таймаут для HTTP запросов к Ollama (responseTimeout и ReadTimeoutHandler)
   max-in-memory-size-mb: 10
+  # Таймауты на уровне корутин для разных типов задач (защита от "задумавшихся" запросов)
+  timeouts:
+    vacancy-analysis: 120  # Таймаут для анализа вакансий (секунды) - может быть дольше из-за сложности
+    skill-extraction: 120   # Таймаут для извлечения навыков (секунды)
+    log-analysis: 180      # Таймаут для анализа логов (секунды) - может быть очень долгим из-за больших объемов
+    other: 90              # Таймаут для других задач (секунды)
 
 telegram:
   api:
