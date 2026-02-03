@@ -298,6 +298,12 @@ class VacancyProcessingQueueService(
             log.debug("🤖 [VacancyProcessingQueue] Analyzing vacancy ${vacancy.id} via Ollama")
             val analysis = vacancyAnalysisService.analyzeVacancy(vacancy)
 
+            // Если анализ вернул null - вакансия была отклонена валидатором и удалена из БД
+            if (analysis == null) {
+                log.info(" [VacancyProcessingQueue] Vacancy ${vacancy.id} was rejected by validator and deleted from database")
+                return
+            }
+
             // Шаг 2: Обновляем статус вакансии
             val newStatus = if (analysis.isRelevant) {
                 VacancyStatus.ANALYZED

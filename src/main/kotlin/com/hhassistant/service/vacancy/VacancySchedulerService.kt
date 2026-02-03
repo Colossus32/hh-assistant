@@ -431,6 +431,12 @@ class VacancySchedulerService(
             analysisSemaphore.withPermit {
                 val analysis = vacancyAnalysisService.analyzeVacancy(vacancy)
 
+                // Если анализ вернул null - вакансия была отклонена валидатором и удалена из БД
+                if (analysis == null) {
+                    log.info(" [Scheduler] Vacancy ${vacancy.id} was rejected by validator and deleted from database")
+                    return null
+                }
+
                 // Обновляем статус вакансии через VacancyStatusService (публикует VacancyStatusChangedEvent)
                 val newStatus = if (analysis.isRelevant) VacancyStatus.ANALYZED else VacancyStatus.SKIPPED
                 vacancyStatusService.updateVacancyStatus(vacancy.withStatus(newStatus))

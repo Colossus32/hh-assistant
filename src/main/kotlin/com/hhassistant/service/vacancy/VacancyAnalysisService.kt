@@ -13,6 +13,9 @@ import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.event.VacancyAnalyzedEvent
 import com.hhassistant.exception.OllamaException
 import com.hhassistant.repository.VacancyAnalysisRepository
+import com.hhassistant.service.resume.ResumeService
+import com.hhassistant.service.skill.SkillExtractionService
+import com.hhassistant.service.util.AnalysisTimeService
 import io.github.resilience4j.circuitbreaker.CircuitBreaker
 import io.github.resilience4j.kotlin.circuitbreaker.executeSuspendFunction
 import io.github.resilience4j.kotlin.retry.executeSuspendFunction
@@ -22,9 +25,6 @@ import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
-import com.hhassistant.service.resume.ResumeService
-import com.hhassistant.service.util.AnalysisTimeService
-import com.hhassistant.service.skill.SkillExtractionService
 
 @Service
 class VacancyAnalysisService(
@@ -56,11 +56,11 @@ class VacancyAnalysisService(
      * Анализирует вакансию на релевантность для кандидата с использованием LLM.
      *
      * @param vacancy Вакансия для анализа
-     * @return Результат анализа с оценкой релевантности и обоснованием
+     * @return Результат анализа с оценкой релевантности и обоснованием, или null если вакансия была отклонена валидатором и удалена из БД
      * @throws OllamaException если не удалось связаться с LLM или получить ответ
      */
     @Loggable
-    suspend fun analyzeVacancy(vacancy: Vacancy): VacancyAnalysis {
+    suspend fun analyzeVacancy(vacancy: Vacancy): VacancyAnalysis? {
         // Проверяем, не анализировалась ли вакансия ранее
         repository.findByVacancyId(vacancy.id)?.let {
             log.debug("Vacancy ${vacancy.id} already analyzed, returning existing analysis")
@@ -84,28 +84,24 @@ class VacancyAnalysisService(
         // 2. Resume skills matching (если включено)
         val contentValidation = vacancyContentValidator.validate(vacancy)
         if (!contentValidation.isValid) {
-            log.info("[Ollama] Vacancy ${vacancy.id} rejected by content validator: ${contentValidation.rejectionReason}")
+            log.warn("[Ollama] Vacancy ${vacancy.id} ('${vacancy.name}') rejected by content validator: ${contentValidation.rejectionReason}")
 
             // Обновляем метрики
             metricsService.incrementVacanciesRejectedByValidator()
             metricsService.incrementVacanciesSkipped()
 
-            // Создаем анализ с результатом "не релевантна" без обращения к LLM
-            val rejectedAnalysis = VacancyAnalysis(
-                vacancyId = vacancy.id,
-                isRelevant = false,
-                relevanceScore = 0.0,
-                reasoning = "Вакансия отклонена: ${contentValidation.rejectionReason}",
-                matchedSkills = "[]",
-                suggestedCoverLetter = null,
-                coverLetterGenerationStatus = CoverLetterGenerationStatus.NOT_ATTEMPTED,
-                coverLetterAttempts = 0,
-                coverLetterLastAttemptAt = null,
-            )
+            // Удаляем вакансию из БД, так как она содержит бан-слова
+            // Не сохраняем анализ - такие вакансии нам не нужны
+            try {
+                skillExtractionService.deleteVacancyAndSkills(vacancy.id)
+                log.info("[Ollama] Deleted vacancy ${vacancy.id} from database due to exclusion rules")
+            } catch (e: Exception) {
+                log.error("[Ollama] Failed to delete vacancy ${vacancy.id}: ${e.message}", e)
+            }
 
-            val savedAnalysis = repository.save(rejectedAnalysis)
-            eventPublisher.publishEvent(VacancyAnalyzedEvent(this, vacancy, savedAnalysis))
-            return savedAnalysis
+            // Возвращаем null, чтобы показать, что вакансия была удалена
+            // Это предотвратит дальнейшую обработку
+            return null
         }
 
         // Загружаем резюме для формирования промпта
