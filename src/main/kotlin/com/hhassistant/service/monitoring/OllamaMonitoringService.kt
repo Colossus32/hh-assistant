@@ -1,12 +1,12 @@
 package com.hhassistant.service.monitoring
 
+import com.hhassistant.repository.VacancyRepository
 import com.hhassistant.service.vacancy.VacancyAnalysisService
 import jakarta.annotation.PreDestroy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import mu.KotlinLogging
@@ -35,6 +35,7 @@ enum class OllamaTaskType {
 @Service
 class OllamaMonitoringService(
     @Lazy private val vacancyAnalysisService: VacancyAnalysisService,
+    private val vacancyRepository: VacancyRepository,
     @Value("\${app.ollama-monitoring.enabled:true}") private val enabled: Boolean,
     @Value("\${app.ollama-monitoring.interval-seconds:5}") private val intervalSeconds: Int,
 ) {
@@ -151,7 +152,14 @@ class OllamaMonitoringService(
             else -> "IDLE (no active requests)"
         }
 
-        log.info("[OllamaMonitoring] Status: $status | Circuit Breaker: $circuitBreakerState | Active requests: $activeCount")
+        // Получаем статистику по вакансиям из базы данных
+        val pendingCount = vacancyRepository.countPendingVacancies()
+        val failedCount = vacancyRepository.countFailedVacancies()
+        val skippedCount = vacancyRepository.countSkippedVacancies()
+
+        log.info(
+            "[OllamaMonitoring] Status: $status | Circuit Breaker: $circuitBreakerState | Active requests: $activeCount | Pending: $pendingCount | Failed: $failedCount | Skipped: $skippedCount",
+        )
     }
 
     /**
