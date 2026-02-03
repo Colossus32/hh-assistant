@@ -109,12 +109,9 @@ class VacancySchedulerService(
                     return@launch
                 }
 
-                val skippedCount = skippedVacancies.count { it.status == VacancyStatus.SKIPPED }
-                val failedCount = skippedVacancies.count { it.status == VacancyStatus.FAILED }
                 log.info(
-                    "[Scheduler] Found ${skippedVacancies.size} vacancies to retry " +
-                        "(SKIPPED: $skippedCount, FAILED: $failedCount) within 48 hour window, " +
-                        "checking exclusion rules...",
+                    "[Scheduler] Found ${skippedVacancies.size} SKIPPED vacancies to retry " +
+                        "within 48 hour window, checking exclusion rules...",
                 )
 
                 // Проверяем вакансии на бан-слова перед повторной обработкой
@@ -155,7 +152,7 @@ class VacancySchedulerService(
                 }
 
                 log.info(
-                    "[Scheduler] Retry: Reset $validCount vacancies (SKIPPED/FAILED) to NEW status, deleted $deletedCount vacancies with exclusion rules",
+                    "[Scheduler] Retry: Reset $validCount SKIPPED vacancies to NEW status, deleted $deletedCount vacancies with exclusion rules",
                 )
             } catch (e: Exception) {
                 log.error("[Scheduler] Error retrying skipped vacancies: ${e.message}", e)
@@ -536,23 +533,23 @@ class VacancySchedulerService(
             }
 
             log.error(" [Scheduler] Ollama error analyzing vacancy ${vacancy.id}: ${e.message}", e)
-            // Критическая ошибка после всех retry - помечаем как FAILED
-            log.error(
-                " [Scheduler] Critical error after retries, marking vacancy ${vacancy.id} as FAILED (dead letter queue)",
+            // Критическая ошибка после всех retry - помечаем как SKIPPED для повторной обработки
+            log.warn(
+                " [Scheduler] Critical error after retries, marking vacancy ${vacancy.id} as SKIPPED for retry",
             )
             try {
-                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
-                metricsService.incrementVacanciesFailed()
+                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
+                metricsService.incrementVacanciesSkipped()
             } catch (updateError: Exception) {
                 log.error(" [Scheduler] Failed to update status for vacancy ${vacancy.id} after error", updateError)
             }
             null
         } catch (e: VacancyProcessingException) {
             log.error(" [Scheduler] Error processing vacancy ${vacancy.id}: ${e.message}", e)
-            // Помечаем как FAILED для проблемных вакансий
+            // Помечаем как SKIPPED для проблемных вакансий
             try {
-                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
-                metricsService.incrementVacanciesFailed()
+                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
+                metricsService.incrementVacanciesSkipped()
             } catch (updateError: Exception) {
                 log.error(
                     " [Scheduler] Failed to update status for vacancy ${vacancy.id} after processing error",
@@ -562,10 +559,10 @@ class VacancySchedulerService(
             null
         } catch (e: Exception) {
             log.error(" [Scheduler] Unexpected error processing vacancy ${vacancy.id}: ${e.message}", e)
-            // Помечаем как FAILED для неожиданных ошибок
+            // Помечаем как SKIPPED для неожиданных ошибок
             try {
-                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
-                metricsService.incrementVacanciesFailed()
+                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
+                metricsService.incrementVacanciesSkipped()
             } catch (updateError: Exception) {
                 log.error(
                     " [Scheduler] Failed to update status for vacancy ${vacancy.id} after unexpected error",

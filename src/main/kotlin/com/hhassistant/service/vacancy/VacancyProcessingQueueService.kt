@@ -173,7 +173,6 @@ class VacancyProcessingQueueService(
                     VacancyStatus.SENT_TO_USER,
                     VacancyStatus.SKIPPED,
                     VacancyStatus.NOT_INTERESTED,
-                    VacancyStatus.FAILED,
                 )
             ) {
                 log.debug(
@@ -452,7 +451,11 @@ class VacancyProcessingQueueService(
             log.error(" [VacancyProcessingQueue] Ollama error processing vacancy ${vacancy.id}: ${e.message}", e)
             // Проверяем, является ли это ошибкой Circuit Breaker OPEN
             val isCircuitBreakerOpen = e.message?.contains("Circuit Breaker is OPEN") == true
+            // Проверяем, является ли это ошибкой rate limit
+            val isRateLimit = e.message?.contains("Rate limit exceeded") == true ||
+                e.message?.contains("marked as SKIPPED for retry later") == true
             val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
+
             if (isCircuitBreakerOpen || circuitBreakerState == "OPEN") {
                 // Если Circuit Breaker OPEN, помечаем как SKIPPED для повторной обработки позже
                 log.warn(
@@ -466,11 +469,17 @@ class VacancyProcessingQueueService(
                         updateError,
                     )
                 }
+            } else if (isRateLimit) {
+                // Rate limit - уже помечено как SKIPPED в VacancyAnalysisService, просто логируем
+                log.info(
+                    " [VacancyProcessingQueue] Rate limit error for vacancy ${vacancy.id}, " +
+                        "already marked as SKIPPED for retry later",
+                )
             } else {
-                // Для других ошибок Ollama помечаем как FAILED
+                // Для других ошибок Ollama помечаем как SKIPPED для повторной обработки
                 try {
-                    vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
-                    metricsService.incrementVacanciesFailed()
+                    vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
+                    metricsService.incrementVacanciesSkipped()
                 } catch (updateError: Exception) {
                     log.error(
                         " [VacancyProcessingQueue] Failed to update status for vacancy ${vacancy.id} after error",
@@ -481,8 +490,8 @@ class VacancyProcessingQueueService(
         } catch (e: VacancyProcessingException) {
             log.error(" [VacancyProcessingQueue] Error processing vacancy ${vacancy.id}: ${e.message}", e)
             try {
-                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
-                metricsService.incrementVacanciesFailed()
+                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
+                metricsService.incrementVacanciesSkipped()
             } catch (updateError: Exception) {
                 log.error(
                     " [VacancyProcessingQueue] Failed to update status for vacancy ${vacancy.id} after processing error",
@@ -492,8 +501,8 @@ class VacancyProcessingQueueService(
         } catch (e: Exception) {
             log.error(" [VacancyProcessingQueue] Unexpected error processing vacancy ${vacancy.id}: ${e.message}", e)
             try {
-                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.FAILED))
-                metricsService.incrementVacanciesFailed()
+                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
+                metricsService.incrementVacanciesSkipped()
             } catch (updateError: Exception) {
                 log.error(
                     " [VacancyProcessingQueue] Failed to update status for vacancy ${vacancy.id} after unexpected error",
@@ -531,7 +540,94 @@ class VacancyProcessingQueueService(
     fun shutdown() {
         log.info(" [VacancyProcessingQueue] Shutting down queue...")
         isRunning.set(false)
+
+        // Проверяем, есть ли активные запросы к LLM
+        val activeRequests = ollamaMonitoringService?.getActiveRequestsCount() ?: 0
+        if (activeRequests > 0) {
+            log.warn(
+                "[VacancyProcessingQueue] Shutting down with $activeRequests active LLM requests. " +
+                    "Marking processing vacancies as SKIPPED for recovery on next startup",
+            )
+
+            // Помечаем все вакансии в процессе обработки как SKIPPED
+            markProcessingVacanciesAsSkipped()
+        } else {
+            log.info("[VacancyProcessingQueue] No active LLM requests, safe shutdown")
+        }
+
         queueScope.cancel()
         queueChannel.close()
+    }
+
+    /**
+     * Помечает все вакансии в процессе обработки как SKIPPED
+     * Вызывается при закрытии приложения, если есть активные запросы к LLM
+     */
+    private fun markProcessingVacanciesAsSkipped() {
+        runBlocking {
+            try {
+                // Получаем все вакансии, которые сейчас обрабатываются
+                val processingVacancyIds = processingVacancies.keys.toList()
+                val queuedVacancyIds = queue.map { it.vacancyId }
+
+                // Объединяем списки и убираем дубликаты
+                val allVacancyIds = (processingVacancyIds + queuedVacancyIds).distinct()
+
+                if (allVacancyIds.isEmpty()) {
+                    log.info("[VacancyProcessingQueue] No vacancies to mark as SKIPPED")
+                    return@runBlocking
+                }
+
+                log.info(
+                    "[VacancyProcessingQueue] Marking ${allVacancyIds.size} vacancies as SKIPPED " +
+                        "(processing: ${processingVacancyIds.size}, queued: ${queuedVacancyIds.size})",
+                )
+
+                var markedCount = 0
+                var errorCount = 0
+
+                // Помечаем каждую вакансию как SKIPPED
+                for (vacancyId in allVacancyIds) {
+                    try {
+                        val vacancy = vacancyRepository.findById(vacancyId).orElse(null)
+                        if (vacancy == null) {
+                            log.debug("[VacancyProcessingQueue] Vacancy $vacancyId not found, skipping")
+                            continue
+                        }
+
+                        // Помечаем только NEW и QUEUED вакансии как SKIPPED
+                        if (vacancy.status in listOf(VacancyStatus.NEW, VacancyStatus.QUEUED)) {
+                            vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
+                            markedCount++
+                            log.debug(
+                                "[VacancyProcessingQueue] Marked vacancy $vacancyId as SKIPPED " +
+                                    "(was: ${vacancy.status})",
+                            )
+                        } else {
+                            log.debug(
+                                "[VacancyProcessingQueue] Vacancy $vacancyId already has status ${vacancy.status}, " +
+                                    "not marking as SKIPPED",
+                            )
+                        }
+                    } catch (e: Exception) {
+                        errorCount++
+                        log.error(
+                            "[VacancyProcessingQueue] Failed to mark vacancy $vacancyId as SKIPPED: ${e.message}",
+                            e,
+                        )
+                    }
+                }
+
+                log.info(
+                    "[VacancyProcessingQueue] Shutdown complete: marked $markedCount vacancies as SKIPPED, " +
+                        "$errorCount errors",
+                )
+            } catch (e: Exception) {
+                log.error(
+                    "[VacancyProcessingQueue] Error marking vacancies as SKIPPED during shutdown: ${e.message}",
+                    e,
+                )
+            }
+        }
     }
 }
