@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: migrate-failed-vacancies-to-skipped
+      author: system
+      changes:
+        - sql:
+            sql: |
+              -- Миграция: изменение всех вакансий со статусом FAILED на SKIPPED
+              -- Это связано с упрощением статусов - теперь используется только SKIPPED
+              UPDATE vacancies
+              SET status = 'SKIPPED'
+              WHERE status = 'FAILED'
+            rollback: |
+              -- Откат миграции невозможен точно, так как мы не знаем, какие вакансии были FAILED
+              -- Статус FAILED удален из кода, поэтому откат не рекомендуется
+              -- Если необходимо, можно вручную восстановить статус для конкретных вакансий
+              -- UPDATE vacancies SET status = 'FAILED' WHERE id IN (...)
+

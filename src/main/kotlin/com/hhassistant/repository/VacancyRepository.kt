@@ -30,19 +30,18 @@ interface VacancyRepository : JpaRepository<Vacancy, String> {
     fun findAllIds(): List<String>
 
     /**
-     * Получает список вакансий со статусом SKIPPED или FAILED для повторной обработки.
+     * Получает список вакансий со статусом SKIPPED для повторной обработки.
      * Выполняется на стороне БД с лимитом через Pageable.
      * Ограничивает retry только вакансиями, которые были получены недавно (за последние 48 часов),
      * чтобы избежать бесконечного цикла retry для старых вакансий.
-     * FAILED вакансии включаются для recovery после проблем с Circuit Breaker.
      *
      * @param pageable Пагинация для ограничения количества результатов
-     * @return Список вакансий со статусом SKIPPED или FAILED, отсортированных по fetchedAt
+     * @return Список вакансий со статусом SKIPPED, отсортированных по fetchedAt
      */
     @Query(
         """
         SELECT v FROM Vacancy v 
-        WHERE v.status IN ('SKIPPED', 'FAILED')
+        WHERE v.status = 'SKIPPED'
         AND v.fetchedAt >= :cutoffTime
         ORDER BY v.fetchedAt ASC
     """,
@@ -102,12 +101,6 @@ interface VacancyRepository : JpaRepository<Vacancy, String> {
      */
     @Query("SELECT COUNT(v) FROM Vacancy v WHERE v.status IN ('NEW', 'QUEUED')")
     fun countPendingVacancies(): Long
-
-    /**
-     * Подсчитывает количество вакансий со статусом FAILED
-     */
-    @Query("SELECT COUNT(v) FROM Vacancy v WHERE v.status = 'FAILED'")
-    fun countFailedVacancies(): Long
 
     /**
      * Подсчитывает количество вакансий со статусом SKIPPED
