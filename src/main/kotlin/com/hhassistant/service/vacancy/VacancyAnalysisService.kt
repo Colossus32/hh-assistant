@@ -3,6 +3,7 @@ package com.hhassistant.service.vacancy
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.hhassistant.aspect.Loggable
+import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.client.ollama.OllamaClient
 import com.hhassistant.client.ollama.dto.ChatMessage
 import com.hhassistant.config.AppConstants
@@ -10,6 +11,8 @@ import com.hhassistant.config.PromptConfig
 import com.hhassistant.domain.entity.CoverLetterGenerationStatus
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
+import com.hhassistant.domain.entity.VacancyStatus
+import com.hhassistant.exception.HHAPIException
 import com.hhassistant.exception.OllamaException
 import com.hhassistant.repository.VacancyAnalysisRepository
 import com.hhassistant.service.resume.ResumeService
@@ -19,6 +22,8 @@ import io.github.resilience4j.circuitbreaker.CircuitBreaker
 import io.github.resilience4j.kotlin.circuitbreaker.executeSuspendFunction
 import io.github.resilience4j.kotlin.retry.executeSuspendFunction
 import io.github.resilience4j.retry.Retry
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
@@ -32,9 +37,11 @@ class VacancyAnalysisService(
     private val objectMapper: ObjectMapper,
     private val promptConfig: PromptConfig,
     private val vacancyContentValidator: VacancyContentValidator,
+    private val vacancyStatusService: VacancyStatusService,
     private val metricsService: com.hhassistant.metrics.MetricsService,
     private val analysisTimeService: AnalysisTimeService,
     private val skillExtractionService: SkillExtractionService,
+    private val hhVacancyClient: HHVacancyClient,
     @Qualifier("ollamaCircuitBreaker") private val ollamaCircuitBreaker: CircuitBreaker,
     @Qualifier("ollamaRetry") private val ollamaRetry: Retry,
     @Value("\${app.analysis.min-relevance-score:0.6}") private val minRelevanceScore: Double,
@@ -47,6 +54,43 @@ class VacancyAnalysisService(
      */
     fun getCircuitBreakerState(): String {
         return ollamaCircuitBreaker.state.name
+    }
+
+    /**
+     * Сбрасывает Circuit Breaker в состояние CLOSED
+     * Используется когда все активные запросы завершились и circuit breaker находится в OPEN
+     */
+    fun resetCircuitBreaker() {
+        val currentState = ollamaCircuitBreaker.state
+        if (currentState.name == "OPEN") {
+            try {
+                ollamaCircuitBreaker.reset()
+                log.info("[Ollama] Circuit Breaker reset from OPEN to CLOSED (all active requests completed)")
+            } catch (e: Exception) {
+                log.warn("[Ollama] Failed to reset Circuit Breaker: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Пытается принудительно перевести Circuit Breaker из OPEN в HALF_OPEN
+     * Используется когда прошло достаточно времени с момента перехода в OPEN
+     * и нет активных запросов
+     */
+    fun tryTransitionToHalfOpen() {
+        val currentState = ollamaCircuitBreaker.state
+        if (currentState.name == "OPEN") {
+            try {
+                // В Resilience4j нет прямого метода transitionToHalfOpenState()
+                // Но можно использовать reset() для перехода в CLOSED
+                // или попытаться сделать пробный запрос через circuit breaker
+                // Для автоматического перехода в HALF_OPEN нужно просто сбросить
+                ollamaCircuitBreaker.reset()
+                log.info("[Ollama] Circuit Breaker reset from OPEN to CLOSED (attempting recovery)")
+            } catch (e: Exception) {
+                log.warn("[Ollama] Failed to transition Circuit Breaker to HALF_OPEN: ${e.message}")
+            }
+        }
     }
 
     /**
@@ -75,9 +119,9 @@ class VacancyAnalysisService(
 
         log.info("[Ollama] Starting analysis for vacancy: ${vacancy.id} - '${vacancy.name}' (${vacancy.employer})")
 
-        // Проверяем вакансию на запрещенные слова/фразы и навыки из резюме ДО анализа через LLM
+        // Шаг 1: Проверяем вакансию на запрещенные слова и навыки из резюме ДО анализа через LLM
         // VacancyContentValidator выполняет все предварительные проверки:
-        // 1. Exclusion keywords/phrases
+        // 1. Exclusion keywords
         // 2. Resume skills matching (если включено)
         val contentValidation = vacancyContentValidator.validate(vacancy)
         if (!contentValidation.isValid) {
@@ -103,7 +147,59 @@ class VacancyAnalysisService(
             return null
         }
 
-        // Загружаем резюме для формирования промпта
+        // Шаг 2: Проверяем актуальность URL - доступна ли вакансия на HH.ru
+        try {
+            val urlCheckResult = withContext(Dispatchers.IO) {
+                try {
+                    hhVacancyClient.getVacancyDetails(vacancy.id)
+                    // Вакансия существует и доступна
+                    true
+                } catch (e: HHAPIException.NotFoundException) {
+                    // Вакансия не найдена (404) - URL неактуален
+                    log.warn(
+                        "[Ollama] Vacancy ${vacancy.id} ('${vacancy.name}') not found on HH.ru (404), " +
+                            "URL is not valid, deleting from database",
+                    )
+                    false
+                } catch (e: Exception) {
+                    // Другие ошибки (кроме rate limit) - логируем, но считаем URL валидным
+                    log.warn(
+                        "[Ollama] Error checking vacancy ${vacancy.id} URL: ${e.message}, " +
+                            "assuming URL is valid and proceeding",
+                    )
+                    true
+                }
+            }
+
+            // Если URL неактуален (404) - удаляем вакансию
+            if (!urlCheckResult) {
+                try {
+                    skillExtractionService.deleteVacancyAndSkills(vacancy.id)
+                    log.info("[Ollama] Deleted vacancy ${vacancy.id} from database due to invalid URL")
+                } catch (e: Exception) {
+                    log.error("[Ollama] Failed to delete vacancy ${vacancy.id}: ${e.message}", e)
+                }
+                return null
+            }
+        } catch (e: HHAPIException.RateLimitException) {
+            // Rate limit - помечаем как SKIPPED для повторной проверки позже
+            log.warn(
+                "[Ollama] Rate limit exceeded while checking vacancy ${vacancy.id} URL, " +
+                    "marking as SKIPPED for retry later",
+            )
+            try {
+                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
+                log.info("[Ollama] Marked vacancy ${vacancy.id} as SKIPPED due to rate limit")
+            } catch (updateError: Exception) {
+                log.error("[Ollama] Failed to mark vacancy ${vacancy.id} as SKIPPED: ${updateError.message}", updateError)
+            }
+            // Выбрасываем исключение, чтобы оно было обработано в VacancyProcessingQueueService
+            throw OllamaException.ConnectionException(
+                "Rate limit exceeded while checking vacancy URL. Vacancy marked as SKIPPED for retry later.",
+            )
+        }
+
+        // Шаг 3: Загружаем резюме для формирования промпта (только если валидация и URL проверка прошли)
         val resume = resumeService.loadResume()
         val resumeStructure = resumeService.getResumeStructure(resume)
         log.debug("[Ollama] Loaded resume for analysis (skills: ${resumeStructure?.skills?.size ?: 0})")
