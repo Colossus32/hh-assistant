@@ -8,7 +8,10 @@ import com.hhassistant.client.ollama.dto.OllamaGenerateRequest
 import com.hhassistant.client.ollama.dto.OllamaGenerateResponse
 import com.hhassistant.service.monitoring.OllamaMonitoringService
 import com.hhassistant.service.monitoring.OllamaTaskType
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.reactor.awaitSingle
+import kotlinx.coroutines.withTimeout
+import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
@@ -16,6 +19,7 @@ import org.springframework.context.annotation.Lazy
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.bodyToMono
+import java.time.Duration
 
 @Component
 class OllamaClient(
@@ -23,8 +27,13 @@ class OllamaClient(
     @Value("\${ollama.model}") private val model: String,
     @Value("\${ollama.temperature}") private val defaultTemperature: Double,
     @Value("\${ollama.analysis.temperature:\${ollama.temperature}}") private val analysisTemperature: Double,
+    @Value("\${ollama.timeouts.vacancy-analysis:120}") private val vacancyAnalysisTimeoutSeconds: Long,
+    @Value("\${ollama.timeouts.skill-extraction:60}") private val skillExtractionTimeoutSeconds: Long,
+    @Value("\${ollama.timeouts.log-analysis:180}") private val logAnalysisTimeoutSeconds: Long,
+    @Value("\${ollama.timeouts.other:90}") private val otherTimeoutSeconds: Long,
     @Autowired(required = false) @Lazy private val ollamaMonitoringService: OllamaMonitoringService?,
 ) {
+    private val log = KotlinLogging.logger {}
 
     @Loggable
     suspend fun generate(
@@ -42,24 +51,49 @@ class OllamaClient(
         temperature: Double? = null,
         taskType: OllamaTaskType,
     ): String {
+        val timeoutSeconds = getTimeoutForTaskType(taskType)
         ollamaMonitoringService?.incrementActiveRequests(taskType)
+        val requestStartTime = System.currentTimeMillis()
+
         try {
-            val request = OllamaGenerateRequest(
-                model = model,
-                prompt = prompt,
-                system = systemPrompt,
-                temperature = temperature ?: defaultTemperature,
-                stream = false,
+            return withTimeout(Duration.ofSeconds(timeoutSeconds).toMillis()) {
+                val request = OllamaGenerateRequest(
+                    model = model,
+                    prompt = prompt,
+                    system = systemPrompt,
+                    temperature = temperature ?: defaultTemperature,
+                    stream = false,
+                )
+
+                val response = webClient.post()
+                    .uri("/api/generate")
+                    .bodyValue(request)
+                    .retrieve()
+                    .bodyToMono<OllamaGenerateResponse>()
+                    .awaitSingle()
+
+                val duration = System.currentTimeMillis() - requestStartTime
+                if (duration > timeoutSeconds * 1000 * 0.8) {
+                    log.warn(
+                        "[Ollama] Request took ${duration}ms (${duration / 1000.0}s), " +
+                            "close to timeout ${timeoutSeconds}s for task type: $taskType",
+                    )
+                }
+
+                response.response
+            }
+        } catch (e: TimeoutCancellationException) {
+            val duration = System.currentTimeMillis() - requestStartTime
+            log.error(
+                "[Ollama] Request timeout after ${duration}ms (${duration / 1000.0}s) " +
+                    "for task type: $taskType (timeout: ${timeoutSeconds}s). " +
+                    "Ollama took too long to respond. This may indicate overload or model processing issues.",
             )
-
-            val response = webClient.post()
-                .uri("/api/generate")
-                .bodyValue(request)
-                .retrieve()
-                .bodyToMono<OllamaGenerateResponse>()
-                .awaitSingle()
-
-            return response.response
+            throw RuntimeException(
+                "Ollama request timeout after ${timeoutSeconds}s for task type: $taskType. " +
+                    "The service may be overloaded or the model is processing too slowly.",
+                e,
+            )
         } finally {
             ollamaMonitoringService?.decrementActiveRequests(taskType)
         }
@@ -79,22 +113,48 @@ class OllamaClient(
         temperature: Double? = null,
         taskType: OllamaTaskType,
     ): String {
+        val timeoutSeconds = getTimeoutForTaskType(taskType)
         ollamaMonitoringService?.incrementActiveRequests(taskType)
-        try {
-            val request = OllamaChatRequest(
-                model = model,
-                messages = messages,
-                temperature = temperature ?: defaultTemperature,
-                stream = false,
-            )
+        val requestStartTime = System.currentTimeMillis()
 
-            val response = webClient.post()
-                .uri("/api/chat")
-                .bodyValue(request)
-                .retrieve()
-                .bodyToMono<OllamaChatResponse>()
-                .awaitSingle()
-            return response.message.content
+        try {
+            return withTimeout(Duration.ofSeconds(timeoutSeconds).toMillis()) {
+                val request = OllamaChatRequest(
+                    model = model,
+                    messages = messages,
+                    temperature = temperature ?: defaultTemperature,
+                    stream = false,
+                )
+
+                val response = webClient.post()
+                    .uri("/api/chat")
+                    .bodyValue(request)
+                    .retrieve()
+                    .bodyToMono<OllamaChatResponse>()
+                    .awaitSingle()
+
+                val duration = System.currentTimeMillis() - requestStartTime
+                if (duration > timeoutSeconds * 1000 * 0.8) {
+                    log.warn(
+                        "[Ollama] Request took ${duration}ms (${duration / 1000.0}s), " +
+                            "close to timeout ${timeoutSeconds}s for task type: $taskType",
+                    )
+                }
+
+                response.message.content
+            }
+        } catch (e: TimeoutCancellationException) {
+            val duration = System.currentTimeMillis() - requestStartTime
+            log.error(
+                "[Ollama] Request timeout after ${duration}ms (${duration / 1000.0}s) " +
+                    "for task type: $taskType (timeout: ${timeoutSeconds}s). " +
+                    "Ollama took too long to respond. This may indicate overload or model processing issues.",
+            )
+            throw RuntimeException(
+                "Ollama request timeout after ${timeoutSeconds}s for task type: $taskType. " +
+                    "The service may be overloaded or the model is processing too slowly.",
+                e,
+            )
         } finally {
             ollamaMonitoringService?.decrementActiveRequests(taskType)
         }
@@ -106,5 +166,17 @@ class OllamaClient(
     @Loggable
     suspend fun chatForAnalysis(messages: List<ChatMessage>): String {
         return chat(messages, temperature = analysisTemperature, taskType = OllamaTaskType.VACANCY_ANALYSIS)
+    }
+
+    /**
+     * Получает таймаут для указанного типа задачи
+     */
+    private fun getTimeoutForTaskType(taskType: OllamaTaskType): Long {
+        return when (taskType) {
+            OllamaTaskType.VACANCY_ANALYSIS -> vacancyAnalysisTimeoutSeconds
+            OllamaTaskType.SKILL_EXTRACTION -> skillExtractionTimeoutSeconds
+            OllamaTaskType.LOG_ANALYSIS -> logAnalysisTimeoutSeconds
+            OllamaTaskType.OTHER -> otherTimeoutSeconds
+        }
     }
 }

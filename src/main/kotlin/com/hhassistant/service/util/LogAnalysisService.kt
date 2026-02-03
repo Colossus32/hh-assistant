@@ -4,11 +4,15 @@ import com.hhassistant.client.ollama.OllamaClient
 import com.hhassistant.client.ollama.dto.ChatMessage
 import com.hhassistant.client.telegram.TelegramClient
 import com.hhassistant.config.AppConstants
+import io.netty.handler.timeout.ReadTimeoutException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
+import org.springframework.web.reactive.function.client.WebClientRequestException
 import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -37,6 +41,8 @@ class LogAnalysisService(
     @Value("\${app.log-analysis.batch-size:500}") private val batchSize: Int,
     @Value("\${app.log-analysis.max-batches:10}") private val maxBatches: Int,
     @Value("\${app.log-analysis.summary-first:true}") private val summaryFirst: Boolean,
+    @Value("\${app.log-analysis.retry.max-attempts:3}") private val retryMaxAttempts: Int,
+    @Value("\${app.log-analysis.retry.initial-delay-ms:2000}") private val retryInitialDelayMs: Long,
 ) {
     private val log = KotlinLogging.logger {}
 
@@ -174,13 +180,16 @@ class LogAnalysisService(
         val problematicBatches = mutableListOf<Pair<Int, List<String>>>()
 
         // Шаг 1: Создаем саммари каждого батча
+        var timeoutErrorsCount = 0
+        val maxTimeoutErrors = batches.size / 2 // Если больше половины батчей падают с таймаутами, прекращаем
+
         for ((index, batch) in batches.withIndex()) {
             try {
                 log.info(
                     " [LogAnalysis] Creating summary for batch ${index + 1}/${batches.size} (${batch.size} lines)...",
                 )
 
-                val summary = createBatchSummary(batch, index + 1, batches.size)
+                val summary = createBatchSummaryWithRetry(batch, index + 1, batches.size)
                 batchSummaries.add("=== Батч ${index + 1} ===\n$summary")
 
                 // Если в саммари есть упоминания об ошибках, сохраняем батч для детального анализа
@@ -195,8 +204,32 @@ class LogAnalysisService(
                     )
                 }
             } catch (e: Exception) {
-                log.error(" [LogAnalysis] Error creating summary for batch ${index + 1}: ${e.message}", e)
-                batchSummaries.add("=== Батч ${index + 1} ===\nОшибка при создании саммари: ${e.message}")
+                val errorInfo = extractErrorInfo(e)
+                log.error(
+                    " [LogAnalysis] Error creating summary for batch ${index + 1}: ${errorInfo.message} (type: ${errorInfo.type})",
+                    e,
+                )
+
+                // Если это таймаут, увеличиваем счетчик
+                if (errorInfo.isTimeout) {
+                    timeoutErrorsCount++
+                    if (timeoutErrorsCount > maxTimeoutErrors) {
+                        log.warn(
+                            " [LogAnalysis] Too many timeout errors ($timeoutErrorsCount/$batches.size). " +
+                                "Skipping remaining batches to avoid further timeouts.",
+                        )
+                        batchSummaries.add(
+                            "=== Батч ${index + 1} ===\n⚠️ Таймаут при создании саммари. " +
+                                "Ollama API не отвечает в течение заданного времени. " +
+                                "Возможно, сервис перегружен (проверьте pending запросы).",
+                        )
+                        break // Прекращаем обработку оставшихся батчей
+                    }
+                }
+
+                batchSummaries.add(
+                    "=== Батч ${index + 1} ===\n⚠️ Ошибка при создании саммари: ${errorInfo.message}",
+                )
             }
         }
 
@@ -213,6 +246,43 @@ class LogAnalysisService(
             analysisText = finalAnalysis,
             logLinesCount = batches.sumOf { it.size },
         )
+    }
+
+    /**
+     * Создает саммари одного батча логов с retry логикой
+     */
+    private suspend fun createBatchSummaryWithRetry(
+        batch: List<String>,
+        batchNumber: Int,
+        totalBatches: Int,
+    ): String {
+        var lastException: Exception? = null
+        var delayMs = retryInitialDelayMs
+
+        for (attempt in 1..retryMaxAttempts) {
+            try {
+                return createBatchSummary(batch, batchNumber, totalBatches)
+            } catch (e: Exception) {
+                lastException = e
+                val errorInfo = extractErrorInfo(e)
+
+                // Если это не таймаут или это последняя попытка, пробрасываем ошибку
+                if (!errorInfo.isTimeout || attempt == retryMaxAttempts) {
+                    throw e
+                }
+
+                // Для таймаутов делаем retry с экспоненциальной задержкой
+                log.warn(
+                    " [LogAnalysis] Timeout creating summary for batch $batchNumber (attempt $attempt/$retryMaxAttempts). " +
+                        "Retrying in ${delayMs}ms...",
+                )
+                delay(delayMs)
+                delayMs *= 2 // Экспоненциальная задержка
+            }
+        }
+
+        // Не должно сюда дойти, но на всякий случай
+        throw lastException ?: RuntimeException("Failed to create summary after $retryMaxAttempts attempts")
     }
 
     /**
@@ -242,18 +312,13 @@ class LogAnalysisService(
             === КОНЕЦ БАТЧА ===
         """.trimIndent()
 
-        return try {
-            ollamaClient.chat(
-                listOf(
-                    ChatMessage(role = "system", content = systemPrompt),
-                    ChatMessage(role = "user", content = userPrompt),
-                ),
-                taskType = com.hhassistant.service.monitoring.OllamaTaskType.LOG_ANALYSIS,
-            )
-        } catch (e: Exception) {
-            log.error(" [LogAnalysis] Error creating summary for batch $batchNumber: ${e.message}", e)
-            "Ошибка при создании саммари: ${e.message}"
-        }
+        return ollamaClient.chat(
+            listOf(
+                ChatMessage(role = "system", content = systemPrompt),
+                ChatMessage(role = "user", content = userPrompt),
+            ),
+            taskType = com.hhassistant.service.monitoring.OllamaTaskType.LOG_ANALYSIS,
+        )
     }
 
     /**
@@ -319,7 +384,11 @@ class LogAnalysisService(
                 taskType = com.hhassistant.service.monitoring.OllamaTaskType.LOG_ANALYSIS,
             )
         } catch (e: Exception) {
-            log.error(" [LogAnalysis] Error analyzing summaries: ${e.message}", e)
+            val errorInfo = extractErrorInfo(e)
+            log.error(
+                " [LogAnalysis] Error analyzing summaries: ${errorInfo.message} (type: ${errorInfo.type})",
+                e,
+            )
             throw e
         }
     }
@@ -333,15 +402,39 @@ class LogAnalysisService(
 
         val batchAnalyses = mutableListOf<String>()
 
+        var timeoutErrorsCount = 0
+        val maxTimeoutErrors = batches.size / 2
+
         for ((index, batch) in batches.withIndex()) {
             try {
                 log.info(" [LogAnalysis] Analyzing batch ${index + 1}/${batches.size} (${batch.size} lines)...")
 
-                val batchAnalysis = analyzeSingleBatch(batch, index + 1, batches.size)
+                val batchAnalysis = analyzeSingleBatchWithRetry(batch, index + 1, batches.size)
                 batchAnalyses.add("=== Анализ батча ${index + 1} ===\n$batchAnalysis")
             } catch (e: Exception) {
-                log.error(" [LogAnalysis] Error analyzing batch ${index + 1}: ${e.message}", e)
-                batchAnalyses.add("=== Анализ батча ${index + 1} ===\nОшибка: ${e.message}")
+                val errorInfo = extractErrorInfo(e)
+                log.error(
+                    " [LogAnalysis] Error analyzing batch ${index + 1}: ${errorInfo.message} (type: ${errorInfo.type})",
+                    e,
+                )
+
+                // Если это таймаут, увеличиваем счетчик
+                if (errorInfo.isTimeout) {
+                    timeoutErrorsCount++
+                    if (timeoutErrorsCount > maxTimeoutErrors) {
+                        log.warn(
+                            " [LogAnalysis] Too many timeout errors ($timeoutErrorsCount/${batches.size}). " +
+                                "Skipping remaining batches to avoid further timeouts.",
+                        )
+                        batchAnalyses.add(
+                            "=== Анализ батча ${index + 1} ===\n⚠️ Таймаут при анализе. " +
+                                "Ollama API не отвечает в течение заданного времени.",
+                        )
+                        break
+                    }
+                }
+
+                batchAnalyses.add("=== Анализ батча ${index + 1} ===\n⚠️ Ошибка: ${errorInfo.message}")
             }
         }
 
@@ -358,6 +451,42 @@ class LogAnalysisService(
             analysisText = combinedAnalysis,
             logLinesCount = batches.sumOf { it.size },
         )
+    }
+
+    /**
+     * Анализирует один батч логов с retry логикой
+     */
+    private suspend fun analyzeSingleBatchWithRetry(
+        batch: List<String>,
+        batchNumber: Int,
+        totalBatches: Int,
+    ): String {
+        var lastException: Exception? = null
+        var delayMs = retryInitialDelayMs
+
+        for (attempt in 1..retryMaxAttempts) {
+            try {
+                return analyzeSingleBatch(batch, batchNumber, totalBatches)
+            } catch (e: Exception) {
+                lastException = e
+                val errorInfo = extractErrorInfo(e)
+
+                // Если это не таймаут или это последняя попытка, пробрасываем ошибку
+                if (!errorInfo.isTimeout || attempt == retryMaxAttempts) {
+                    throw e
+                }
+
+                // Для таймаутов делаем retry с экспоненциальной задержкой
+                log.warn(
+                    " [LogAnalysis] Timeout analyzing batch $batchNumber (attempt $attempt/$retryMaxAttempts). " +
+                        "Retrying in ${delayMs}ms...",
+                )
+                delay(delayMs)
+                delayMs *= 2 // Экспоненциальная задержка
+            }
+        }
+
+        throw lastException ?: RuntimeException("Failed to analyze batch after $retryMaxAttempts attempts")
     }
 
     /**
@@ -388,18 +517,13 @@ class LogAnalysisService(
             === КОНЕЦ ЛОГОВ ===
         """.trimIndent()
 
-        return try {
-            ollamaClient.chat(
-                listOf(
-                    ChatMessage(role = "system", content = systemPrompt),
-                    ChatMessage(role = "user", content = userPrompt),
-                ),
-                taskType = com.hhassistant.service.monitoring.OllamaTaskType.LOG_ANALYSIS,
-            )
-        } catch (e: Exception) {
-            log.error(" [LogAnalysis] Error analyzing batch $batchNumber: ${e.message}", e)
-            "Ошибка при анализе: ${e.message}"
-        }
+        return ollamaClient.chat(
+            listOf(
+                ChatMessage(role = "system", content = systemPrompt),
+                ChatMessage(role = "user", content = userPrompt),
+            ),
+            taskType = com.hhassistant.service.monitoring.OllamaTaskType.LOG_ANALYSIS,
+        )
     }
 
     /**
@@ -438,7 +562,11 @@ class LogAnalysisService(
                 taskType = com.hhassistant.service.monitoring.OllamaTaskType.LOG_ANALYSIS,
             )
         } catch (e: Exception) {
-            log.error(" [LogAnalysis] Error combining batch analyses: ${e.message}", e)
+            val errorInfo = extractErrorInfo(e)
+            log.error(
+                " [LogAnalysis] Error combining batch analyses: ${errorInfo.message} (type: ${errorInfo.type})",
+                e,
+            )
             combinedText // Возвращаем просто объединенный текст, если не удалось обработать
         }
     }
@@ -475,6 +603,74 @@ class LogAnalysisService(
             }
         } catch (e: Exception) {
             log.error(" [LogAnalysis] Error sending analysis report: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Информация об ошибке для улучшенного логирования
+     */
+    private data class ErrorInfo(
+        val type: String,
+        val message: String,
+        val isTimeout: Boolean,
+    )
+
+    /**
+     * Извлекает информацию об ошибке для улучшенного логирования
+     */
+    private fun extractErrorInfo(e: Exception): ErrorInfo {
+        return when {
+            e is TimeoutCancellationException -> {
+                ErrorInfo(
+                    type = "TimeoutCancellationException",
+                    message = "Таймаут корутины при запросе к Ollama API. " +
+                        "Запрос был отменен из-за превышения таймаута на уровне корутин. " +
+                        "Ollama 'задумался' и не ответил в течение заданного времени. " +
+                        "Это может указывать на перегрузку сервиса или слишком медленную обработку модели.",
+                    isTimeout = true,
+                )
+            }
+            e is ReadTimeoutException || e.cause is ReadTimeoutException -> {
+                ErrorInfo(
+                    type = "ReadTimeoutException",
+                    message = "Таймаут чтения при запросе к Ollama API. " +
+                        "Сервис не ответил в течение заданного времени. " +
+                        "Возможно, Ollama перегружен или модель обрабатывает запрос слишком долго.",
+                    isTimeout = true,
+                )
+            }
+            e is WebClientRequestException -> {
+                val isTimeout = e.cause is ReadTimeoutException ||
+                    e.cause is TimeoutCancellationException ||
+                    e.message?.contains("timeout", ignoreCase = true) == true ||
+                    e.message?.contains("ReadTimeout", ignoreCase = true) == true ||
+                    e.message?.contains("TimeoutCancellation", ignoreCase = true) == true
+
+                ErrorInfo(
+                    type = "WebClientRequestException",
+                    message = if (isTimeout) {
+                        "Таймаут при запросе к Ollama API: ${e.message ?: "неизвестная ошибка"}"
+                    } else {
+                        "Ошибка запроса к Ollama API: ${e.message ?: "неизвестная ошибка"}"
+                    },
+                    isTimeout = isTimeout,
+                )
+            }
+            e.message?.contains("timeout", ignoreCase = true) == true ||
+                e.message?.contains("TimeoutCancellation", ignoreCase = true) == true -> {
+                ErrorInfo(
+                    type = "Timeout (generic)",
+                    message = "Таймаут: ${e.message}",
+                    isTimeout = true,
+                )
+            }
+            else -> {
+                ErrorInfo(
+                    type = e.javaClass.simpleName,
+                    message = e.message ?: "Неизвестная ошибка",
+                    isTimeout = false,
+                )
+            }
         }
     }
 }
