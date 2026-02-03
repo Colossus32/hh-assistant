@@ -144,8 +144,15 @@ class WebClientConfig(
 
     @Bean
     @Qualifier("internalApiWebClient")
-    fun internalApiWebClient(): WebClient {
+    fun internalApiWebClient(
+        @Value("\${server.port:8080}") serverPort: Int,
+    ): WebClient {
+        // Для внутренних запросов всегда используем localhost с портом сервера
+        // Это работает как локально, так и в Docker (внутри контейнера)
+        val baseUrl = "http://localhost:$serverPort"
+        log.info("🔧 [WebClient] Configuring Internal API WebClient with base URL: $baseUrl")
         return WebClient.builder()
+            .baseUrl(baseUrl)
             .build()
     }
 

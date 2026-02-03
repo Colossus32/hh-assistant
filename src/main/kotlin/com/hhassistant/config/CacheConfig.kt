@@ -75,7 +75,7 @@ class CacheConfig {
     /**
      * Основной CacheManager для Spring Cache
      * Настраивает кэши по умолчанию для всех @Cacheable методов
-     * 
+     *
      * Кэши для exclusion rules (exclusionKeywords, exclusionPhrases, exclusionCaseSensitive)
      * создаются автоматически при первом использовании и используют эти настройки.
      * Они инвалидируются через @CacheEvict при добавлении/удалении правил.
