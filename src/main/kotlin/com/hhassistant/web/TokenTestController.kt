@@ -54,7 +54,15 @@ class TokenTestController(
         // Пытаемся получить вакансии
         return try {
             log.info("🔍 [TokenTest] Attempting to fetch vacancies with keywords: '$keywords'")
-            log.info("🔍 [TokenTest] Using token from config: ${if (tokenFromConfig.isNotBlank()) "✅ Present (${tokenFromConfig.length} chars, prefix: ${tokenFromConfig.take(10)})" else "❌ Missing"}")
+            log.info(
+                "🔍 [TokenTest] Using token from config: ${if (tokenFromConfig.isNotBlank()) {
+                    "✅ Present (${tokenFromConfig.length} chars, prefix: ${tokenFromConfig.take(
+                        10,
+                    )})"
+                } else {
+                    "❌ Missing"
+                }}",
+            )
 
             val searchConfig = SearchConfig(
                 keywords = keywords,

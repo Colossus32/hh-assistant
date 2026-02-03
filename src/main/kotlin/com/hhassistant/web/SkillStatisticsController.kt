@@ -102,7 +102,9 @@ class SkillStatisticsController(
                 totalVacanciesAnalyzed = totalVacancies.toInt(),
             )
 
-            log.info("✅ [SkillStatistics API] Returning overall statistics: $totalSkills skills, $totalVacancies vacancies")
+            log.info(
+                "✅ [SkillStatistics API] Returning overall statistics: $totalSkills skills, $totalVacancies vacancies",
+            )
             ResponseEntity.ok(response)
         } catch (e: Exception) {
             log.error("❌ [SkillStatistics API] Error getting overall statistics: ${e.message}", e)

@@ -331,7 +331,9 @@ class VacancyManagementController(
             val updatedVacancy = vacancyStatusService.updateVacancyStatusById(vacancyId, newStatus)
 
             if (updatedVacancy != null) {
-                log.info("✅ [VacancyManagement] Successfully marked vacancy $vacancyId as $statusDescription (status: $oldStatus -> $newStatus)")
+                log.info(
+                    "✅ [VacancyManagement] Successfully marked vacancy $vacancyId as $statusDescription (status: $oldStatus -> $newStatus)",
+                )
                 ResponseEntity.ok(
                     mapOf(
                         "success" to true,
