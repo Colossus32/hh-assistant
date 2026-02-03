@@ -19,7 +19,9 @@ interface VacancyAnalysisRepository : JpaRepository<VacancyAnalysis, Long> {
     /**
      * Находит анализы, которые находятся в очереди ретраев и еще не достигли максимального количества попыток
      */
-    @Query("SELECT va FROM VacancyAnalysis va WHERE va.coverLetterGenerationStatus = :status AND va.coverLetterAttempts < :maxAttempts")
+    @Query(
+        "SELECT va FROM VacancyAnalysis va WHERE va.coverLetterGenerationStatus = :status AND va.coverLetterAttempts < :maxAttempts",
+    )
     fun findByCoverLetterGenerationStatusAndCoverLetterAttemptsLessThan(
         status: CoverLetterGenerationStatus,
         maxAttempts: Int,
