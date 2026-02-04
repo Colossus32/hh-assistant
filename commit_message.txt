@@ -17,3 +17,6 @@ Benefits:
 - Priorities: analysis first, then skill extraction
 - Simpler: fewer components, clearer logic
 - Non-blocking: coroutine-based processing, Telegram commands work
+
+
+
