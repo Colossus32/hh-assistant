@@ -38,6 +38,26 @@ class MetricsService(
         .description("Total number of vacancies rejected by content validator")
         .register(meterRegistry)
 
+    // ========== Счетчики recovery ==========
+    private val recoveryAttemptsCounter: Counter = Counter.builder("vacancies.recovery.attempts")
+        .description("Total number of recovery attempts for skipped vacancies")
+        .register(meterRegistry)
+
+    private val recoveryRecoveredCounter: Counter = Counter.builder("vacancies.recovery.recovered")
+        .description("Total number of vacancies successfully recovered (reset to NEW)")
+        .tag("status", "recovered")
+        .register(meterRegistry)
+
+    private val recoveryDeletedCounter: Counter = Counter.builder("vacancies.recovery.deleted")
+        .description("Total number of vacancies deleted during recovery (exclusion rules)")
+        .tag("status", "deleted")
+        .register(meterRegistry)
+
+    private val recoverySkippedCounter: Counter = Counter.builder("vacancies.recovery.skipped")
+        .description("Total number of vacancies skipped during recovery (already analyzed and not relevant)")
+        .tag("status", "skipped")
+        .register(meterRegistry)
+
     // ========== Счетчики сопроводительных писем ==========
     private val coverLettersGeneratedCounter: Counter = Counter.builder("cover_letters.generated")
         .description("Total number of cover letters successfully generated")
@@ -112,6 +132,22 @@ class MetricsService(
 
     fun incrementVacanciesRejectedByValidator() {
         vacanciesRejectedByValidatorCounter.increment()
+    }
+
+    fun incrementRecoveryAttempts() {
+        recoveryAttemptsCounter.increment()
+    }
+
+    fun incrementRecoveryRecovered(count: Int = 1) {
+        recoveryRecoveredCounter.increment(count.toDouble())
+    }
+
+    fun incrementRecoveryDeleted(count: Int = 1) {
+        recoveryDeletedCounter.increment(count.toDouble())
+    }
+
+    fun incrementRecoverySkipped(count: Int = 1) {
+        recoverySkippedCounter.increment(count.toDouble())
     }
 
     fun incrementCoverLettersGenerated() {
