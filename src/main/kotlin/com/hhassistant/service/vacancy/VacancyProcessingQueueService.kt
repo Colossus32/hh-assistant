@@ -191,7 +191,7 @@ class VacancyProcessingQueueService(
                 val correctStatus = if (existingAnalysis.isRelevant) {
                     VacancyStatus.ANALYZED
                 } else {
-                    VacancyStatus.SKIPPED
+                    VacancyStatus.NOT_SUITABLE
                 }
                 try {
                     if (vacancy.status != correctStatus) {
@@ -210,6 +210,8 @@ class VacancyProcessingQueueService(
                     VacancyStatus.ANALYZED,
                     VacancyStatus.SENT_TO_USER,
                     VacancyStatus.SKIPPED,
+                    VacancyStatus.NOT_SUITABLE,
+                    VacancyStatus.IN_ARCHIVE,
                     VacancyStatus.NOT_INTERESTED,
                 )
             ) {
@@ -375,7 +377,7 @@ class VacancyProcessingQueueService(
                         val correctStatus = if (existingAnalysis.isRelevant) {
                             VacancyStatus.ANALYZED
                         } else {
-                            VacancyStatus.SKIPPED
+                            VacancyStatus.NOT_SUITABLE
                         }
                         try {
                             if (vacancy.status != correctStatus) {
@@ -498,13 +500,17 @@ class VacancyProcessingQueueService(
 
         try {
             // Шаг 1: Анализ через Ollama на соответствие резюме
+            // Внутри analyzeVacancy сначала проверяется URL (IN_ARCHIVE при 404),
+            // затем валидация контента (удаление при бан-словах)
             log.debug("🤖 [VacancyProcessingQueue] Analyzing vacancy ${vacancy.id} via Ollama")
             val analysis = vacancyAnalysisService.analyzeVacancy(vacancy)
 
-            // Если анализ вернул null - вакансия была отклонена валидатором и удалена из БД
+            // Если анализ вернул null - вакансия была:
+            // 1. Помечена как IN_ARCHIVE (404 на HH.ru)
+            // 2. Отклонена валидатором и удалена из БД (бан-слова)
             if (analysis == null) {
                 log.info(
-                    " [VacancyProcessingQueue] Vacancy ${vacancy.id} was rejected by validator and deleted from database",
+                    " [VacancyProcessingQueue] Vacancy ${vacancy.id} was rejected (IN_ARCHIVE or deleted by validator)",
                 )
                 return
             }
@@ -513,7 +519,7 @@ class VacancyProcessingQueueService(
             val newStatus = if (analysis.isRelevant) {
                 VacancyStatus.ANALYZED
             } else {
-                VacancyStatus.SKIPPED
+                VacancyStatus.NOT_SUITABLE
             }
             vacancyStatusService.updateVacancyStatus(vacancy.withStatus(newStatus))
             log.debug("📝 [VacancyProcessingQueue] Updated vacancy ${vacancy.id} status to: $newStatus")

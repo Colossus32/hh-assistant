@@ -213,6 +213,22 @@ class VacancyService(
     }
 
     /**
+     * Получает список старых вакансий со статусом SKIPPED, которые вышли за пределы окна времени для retry.
+     * Используется для финальной обработки старых вакансий (восстановление/терминальный статус/удаление).
+     *
+     * @param limit Максимальное количество вакансий для возврата
+     * @param retryWindowHours Окно времени для retry в часах (по умолчанию 48 часов)
+     * @return Список старых вакансий со статусом SKIPPED
+     */
+    fun getOldSkippedVacancies(limit: Int = 100, retryWindowHours: Int = 48): List<Vacancy> {
+        val cutoffTime = java.time.LocalDateTime.now().minusHours(retryWindowHours.toLong())
+        return vacancyRepository.findOldSkippedVacancies(
+            org.springframework.data.domain.PageRequest.of(0, limit),
+            cutoffTime,
+        )
+    }
+
+    /**
      * Получает список вакансий, которые еще не были просмотрены пользователем.
      * Включает вакансии со статусами: NEW, ANALYZED, SENT_TO_USER
      * Исключает: SKIPPED, APPLIED, NOT_INTERESTED

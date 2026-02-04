@@ -23,6 +23,8 @@ import io.github.resilience4j.kotlin.circuitbreaker.executeSuspendFunction
 import io.github.resilience4j.kotlin.retry.executeSuspendFunction
 import io.github.resilience4j.retry.Retry
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
@@ -45,8 +47,14 @@ class VacancyAnalysisService(
     @Qualifier("ollamaCircuitBreaker") private val ollamaCircuitBreaker: CircuitBreaker,
     @Qualifier("ollamaRetry") private val ollamaRetry: Retry,
     @Value("\${app.analysis.min-relevance-score:0.6}") private val minRelevanceScore: Double,
+    @Value("\${app.analysis.max-concurrent-url-checks:2}") private val maxConcurrentUrlChecks: Int,
 ) {
     private val log = KotlinLogging.logger {}
+
+    // Семафор для ограничения параллелизма проверок URL
+    // Ограничивает количество одновременных HTTP запросов к HH.ru API для проверки валидности URL
+    // Работает в паре с RateLimitService для предотвращения перегрузки API
+    private val urlCheckSemaphore = Semaphore(maxConcurrentUrlChecks)
 
     /**
      * Получает анализ вакансии по ID, если он существует
@@ -130,7 +138,64 @@ class VacancyAnalysisService(
 
         log.info("[Ollama] Starting analysis for vacancy: ${vacancy.id} - '${vacancy.name}' (${vacancy.employer})")
 
-        // Шаг 1: Проверяем вакансию на запрещенные слова и навыки из резюме ДО анализа через LLM
+        // Шаг 1: Проверяем актуальность URL - доступна ли вакансия на HH.ru (самая первая проверка)
+        // Используем семафор для ограничения параллелизма проверок URL и Dispatchers.IO для распараллеливания HTTP запросов
+        // Это предотвращает перегрузку HH.ru API и работает в паре с RateLimitService
+        try {
+            val urlCheckResult = urlCheckSemaphore.withPermit {
+                withContext(Dispatchers.IO) {
+                    try {
+                        hhVacancyClient.getVacancyDetails(vacancy.id)
+                        // Вакансия существует и доступна
+                        true
+                    } catch (e: HHAPIException.NotFoundException) {
+                        // Вакансия не найдена (404) - помечаем как IN_ARCHIVE
+                        log.warn(
+                            "[URL Check] Vacancy ${vacancy.id} ('${vacancy.name}') not found on HH.ru (404), " +
+                                "marking as IN_ARCHIVE",
+                        )
+                        false
+                    } catch (e: Exception) {
+                        // Другие ошибки (кроме rate limit) - логируем, но считаем URL валидным
+                        log.warn(
+                            "[URL Check] Error checking vacancy ${vacancy.id} URL: ${e.message}, " +
+                                "assuming URL is valid and proceeding",
+                        )
+                        true
+                    }
+                }
+            }
+
+            // Если URL неактуален (404) - помечаем как IN_ARCHIVE
+            if (!urlCheckResult) {
+                try {
+                    vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.IN_ARCHIVE))
+                    log.info("[URL Check] Marked vacancy ${vacancy.id} as IN_ARCHIVE due to 404")
+                } catch (e: Exception) {
+                    log.error("[URL Check] Failed to mark vacancy ${vacancy.id} as IN_ARCHIVE: ${e.message}", e)
+                }
+                // Возвращаем null, чтобы показать, что вакансия недоступна
+                return null
+            }
+        } catch (e: HHAPIException.RateLimitException) {
+            // Rate limit - помечаем как SKIPPED для повторной проверки позже
+            log.warn(
+                "[URL Check] Rate limit exceeded while checking vacancy ${vacancy.id} URL, " +
+                    "marking as SKIPPED for retry later",
+            )
+            try {
+                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
+                log.info("[URL Check] Marked vacancy ${vacancy.id} as SKIPPED due to rate limit")
+            } catch (updateError: Exception) {
+                log.error("[URL Check] Failed to mark vacancy ${vacancy.id} as SKIPPED: ${updateError.message}", updateError)
+            }
+            // Выбрасываем исключение, чтобы оно было обработано в VacancyProcessingQueueService
+            throw OllamaException.ConnectionException(
+                "Rate limit exceeded while checking vacancy URL. Vacancy marked as SKIPPED for retry later.",
+            )
+        }
+
+        // Шаг 2: Проверяем вакансию на запрещенные слова и навыки из резюме ДО анализа через LLM
         // VacancyContentValidator выполняет все предварительные проверки:
         // 1. Exclusion keywords
         // 2. Resume skills matching (если включено)
@@ -158,82 +223,7 @@ class VacancyAnalysisService(
             return null
         }
 
-        // Шаг 2: Проверяем город вакансии через LLM - если не российский, сразу отклоняем
-        val cityValidation = validateCityLocation(vacancy)
-        if (!cityValidation.isRussianCity) {
-            log.warn(
-                "[Ollama] Vacancy ${vacancy.id} ('${vacancy.name}') rejected: city '${cityValidation.city}' is not Russian",
-            )
-
-            // Обновляем метрики
-            metricsService.incrementVacanciesRejectedByValidator()
-            metricsService.incrementVacanciesSkipped()
-
-            // Удаляем вакансию из БД, так как она не в России
-            try {
-                skillExtractionService.deleteVacancyAndSkills(vacancy.id)
-                log.info("[Ollama] Deleted vacancy ${vacancy.id} from database due to non-Russian city")
-            } catch (e: Exception) {
-                log.error("[Ollama] Failed to delete vacancy ${vacancy.id}: ${e.message}", e)
-            }
-
-            // Возвращаем null, чтобы показать, что вакансия была удалена
-            return null
-        }
-
-        // Шаг 3: Проверяем актуальность URL - доступна ли вакансия на HH.ru
-        try {
-            val urlCheckResult = withContext(Dispatchers.IO) {
-                try {
-                    hhVacancyClient.getVacancyDetails(vacancy.id)
-                    // Вакансия существует и доступна
-                    true
-                } catch (e: HHAPIException.NotFoundException) {
-                    // Вакансия не найдена (404) - URL неактуален
-                    log.warn(
-                        "[Ollama] Vacancy ${vacancy.id} ('${vacancy.name}') not found on HH.ru (404), " +
-                            "URL is not valid, deleting from database",
-                    )
-                    false
-                } catch (e: Exception) {
-                    // Другие ошибки (кроме rate limit) - логируем, но считаем URL валидным
-                    log.warn(
-                        "[Ollama] Error checking vacancy ${vacancy.id} URL: ${e.message}, " +
-                            "assuming URL is valid and proceeding",
-                    )
-                    true
-                }
-            }
-
-            // Если URL неактуален (404) - удаляем вакансию
-            if (!urlCheckResult) {
-                try {
-                    skillExtractionService.deleteVacancyAndSkills(vacancy.id)
-                    log.info("[Ollama] Deleted vacancy ${vacancy.id} from database due to invalid URL")
-                } catch (e: Exception) {
-                    log.error("[Ollama] Failed to delete vacancy ${vacancy.id}: ${e.message}", e)
-                }
-                return null
-            }
-        } catch (e: HHAPIException.RateLimitException) {
-            // Rate limit - помечаем как SKIPPED для повторной проверки позже
-            log.warn(
-                "[Ollama] Rate limit exceeded while checking vacancy ${vacancy.id} URL, " +
-                    "marking as SKIPPED for retry later",
-            )
-            try {
-                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
-                log.info("[Ollama] Marked vacancy ${vacancy.id} as SKIPPED due to rate limit")
-            } catch (updateError: Exception) {
-                log.error("[Ollama] Failed to mark vacancy ${vacancy.id} as SKIPPED: ${updateError.message}", updateError)
-            }
-            // Выбрасываем исключение, чтобы оно было обработано в VacancyProcessingQueueService
-            throw OllamaException.ConnectionException(
-                "Rate limit exceeded while checking vacancy URL. Vacancy marked as SKIPPED for retry later.",
-            )
-        }
-
-        // Шаг 4: Загружаем резюме для формирования промпта (только если валидация и URL проверка прошли)
+        // Шаг 3: Загружаем резюме для формирования промпта (только если валидация и URL проверка прошли)
         val resume = resumeService.loadResume()
         val resumeStructure = resumeService.getResumeStructure(resume)
         log.debug("[Ollama] Loaded resume for analysis (skills: ${resumeStructure?.skills?.size ?: 0})")
@@ -680,136 +670,6 @@ class VacancyAnalysisService(
         // Используем существующий сервис для сохранения навыков
         skillExtractionService.extractAndSaveSkills(vacancy, keySkills)
     }
-
-    /**
-     * Проверяет город вакансии через LLM и определяет, является ли он российским.
-     * Если город не российский - вакансия должна быть отклонена.
-     *
-     * @param vacancy Вакансия для проверки
-     * @return CityValidationResult с информацией о городе
-     */
-    private suspend fun validateCityLocation(vacancy: Vacancy): CityValidationResult {
-        try {
-            log.debug("[CityValidation] Checking city for vacancy ${vacancy.id}: '${vacancy.area}'")
-
-            // Формируем промпт для проверки города
-            val cityPrompt = promptConfig.cityValidationTemplate
-                .replace("{area}", vacancy.area)
-
-            // Отправляем запрос к LLM
-            val validationStartTime = System.currentTimeMillis()
-            val validationResponse = try {
-                ollamaRetry.executeSuspendFunction {
-                    ollamaCircuitBreaker.executeSuspendFunction {
-                        ollamaClient.chat(
-                            listOf(
-                                ChatMessage(
-                                    role = "system",
-                                    content = promptConfig.cityValidationSystem,
-                                ),
-                                ChatMessage(
-                                    role = "user",
-                                    content = cityPrompt,
-                                ),
-                            ),
-                            taskType = com.hhassistant.service.monitoring.OllamaTaskType.OTHER,
-                        )
-                    }
-                }
-            } catch (e: io.github.resilience4j.circuitbreaker.CallNotPermittedException) {
-                log.warn("[CityValidation] Circuit Breaker is OPEN, assuming city is Russian to avoid blocking")
-                // Если Circuit Breaker открыт, считаем город российским, чтобы не блокировать обработку
-                return CityValidationResult(isRussianCity = true, city = vacancy.area)
-            } catch (e: Exception) {
-                log.warn("[CityValidation] Failed to validate city for vacancy ${vacancy.id}: ${e.message}, assuming Russian")
-                // При ошибке считаем город российским, чтобы не блокировать обработку
-                return CityValidationResult(isRussianCity = true, city = vacancy.area)
-            }
-            val validationDuration = System.currentTimeMillis() - validationStartTime
-            log.debug(
-                "[CityValidation] Received city validation response (took ${validationDuration}ms, response length: ${validationResponse.length} chars)",
-            )
-
-            // Парсим ответ
-            val validationResult = parseCityValidationResponse(validationResponse, vacancy.id)
-            log.info(
-                "[CityValidation] City validation result for vacancy ${vacancy.id}: city='${validationResult.city}', isRussian=${validationResult.isRussianCity}",
-            )
-
-            return validationResult
-        } catch (e: Exception) {
-            log.error("[CityValidation] Unexpected error validating city for vacancy ${vacancy.id}: ${e.message}", e)
-            // При ошибке считаем город российским, чтобы не блокировать обработку
-            return CityValidationResult(isRussianCity = true, city = vacancy.area)
-        }
-    }
-
-    /**
-     * Парсит ответ LLM о проверке города.
-     *
-     * @param response Ответ от LLM
-     * @param vacancyId ID вакансии (для логирования)
-     * @return CityValidationResult
-     */
-    private fun parseCityValidationResponse(response: String, vacancyId: String): CityValidationResult {
-        return try {
-            // Извлекаем JSON из markdown блоков если есть
-            val cleanedResponse = extractJsonFromMarkdown(response)
-
-            // Извлекаем JSON объект
-            val jsonString = extractJsonObject(cleanedResponse, vacancyId)
-
-            // Очищаем JSON
-            val sanitizedJson = sanitizeJsonString(jsonString)
-
-            // Парсим JSON
-            val parsed = try {
-                objectMapper.readValue(sanitizedJson, CityValidationResult::class.java)
-            } catch (e: JsonProcessingException) {
-                log.warn(
-                    "Failed to parse city validation JSON after sanitization for vacancy $vacancyId, trying alternative parsing. Error: ${e.message}",
-                )
-                val alternativeJson = sanitizeJsonStringAlternative(jsonString)
-                try {
-                    objectMapper.readValue(alternativeJson, CityValidationResult::class.java)
-                } catch (e2: Exception) {
-                    log.error(
-                        "Failed to parse city validation JSON even after alternative sanitization " +
-                            "for vacancy $vacancyId. Original error: ${e.message}, Alternative error: ${e2.message}",
-                    )
-                    throw OllamaException.ParsingException(
-                        "Failed to parse city validation JSON response from LLM for vacancy $vacancyId: ${e.message}",
-                        e,
-                    )
-                }
-            }
-            parsed
-        } catch (e: JsonProcessingException) {
-            log.error("Invalid JSON from LLM for city validation vacancy $vacancyId: ${e.message}. Response: ${response.take(500)}", e)
-            throw OllamaException.ParsingException(
-                "Failed to parse city validation JSON response from LLM for vacancy $vacancyId: ${e.message}",
-                e,
-            )
-        } catch (e: OllamaException) {
-            throw e
-        } catch (e: Exception) {
-            log.error("Unexpected error parsing city validation response for vacancy $vacancyId: ${e.message}", e)
-            throw OllamaException.ParsingException(
-                "Unexpected error parsing city validation LLM response for vacancy $vacancyId: ${e.message}",
-                e,
-            )
-        }
-    }
-
-    /**
-     * Результат проверки города вакансии
-     */
-    data class CityValidationResult(
-        @com.fasterxml.jackson.annotation.JsonProperty("is_russian_city")
-        val isRussianCity: Boolean,
-        @com.fasterxml.jackson.annotation.JsonProperty("city")
-        val city: String,
-    )
 
     /**
      * Результат анализа вакансии (оптимизированный формат)

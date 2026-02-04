@@ -21,7 +21,6 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import mu.KotlinLogging
@@ -47,6 +46,7 @@ class VacancySchedulerService(
     private val skillExtractionQueueService: SkillExtractionQueueService,
     private val vacancyRepository: com.hhassistant.repository.VacancyRepository,
     private val vacancyContentValidator: VacancyContentValidator,
+    private val vacancyRecoveryService: VacancyRecoveryService,
     @Autowired(required = false) private val ollamaMonitoringService: OllamaMonitoringService?,
     @Value("\${app.analysis.max-concurrent-requests:3}") private val maxConcurrentRequests: Int,
 ) {
@@ -87,6 +87,7 @@ class VacancySchedulerService(
      * Периодически проверяет и восстанавливает вакансии со статусом SKIPPED,
      * которые были пропущены из-за Circuit Breaker OPEN.
      * Запускается каждые 5 минут, когда Circuit Breaker закрыт.
+     * Использует унифицированный VacancyRecoveryService для обработки.
      * Обработка выполняется асинхронно, не блокируя поток.
      */
     @Scheduled(cron = "\${app.schedule.skipped-retry:0 */5 * * * *}")
@@ -101,79 +102,13 @@ class VacancySchedulerService(
             "[Scheduler] Circuit Breaker is $circuitBreakerState, checking for skipped/failed vacancies to retry (retry window: 48 hours)...",
         )
 
-        // Запускаем обработку асинхронно, не блокируя поток
-        schedulerScope.launch {
-            try {
-                val skippedVacancies = vacancyService.getSkippedVacanciesForRetry(limit = 10, retryWindowHours = 48)
-                if (skippedVacancies.isEmpty()) {
-                    log.debug("[Scheduler] No skipped/failed vacancies to retry (within 48 hour window)")
-                    return@launch
-                }
-
-                log.info(
-                    "[Scheduler] Found ${skippedVacancies.size} SKIPPED vacancies to retry " +
-                        "within 48 hour window, checking exclusion rules...",
-                )
-
-                // Проверяем вакансии на бан-слова перед повторной обработкой
-                var validCount = 0
-                var deletedCount = 0
-
-                skippedVacancies.forEach { vacancy ->
-                    try {
-                        // ВАЖНО: Проверяем, не была ли вакансия уже проанализирована
-                        // Если анализ существует и вакансия нерелевантна - не сбрасываем статус,
-                        // чтобы избежать бесконечного цикла обработки нерелевантных вакансий
-                        val existingAnalysis = runBlocking {
-                            vacancyAnalysisService.findByVacancyId(vacancy.id)
-                        }
-                        if (existingAnalysis != null && !existingAnalysis.isRelevant) {
-                            log.info(
-                                "[Scheduler] Retry: Vacancy ${vacancy.id} already analyzed and not relevant " +
-                                    "(score: ${String.format("%.2f", existingAnalysis.relevanceScore * 100)}%), " +
-                                    "skipping retry to avoid infinite loop",
-                            )
-                            return@forEach
-                        }
-
-                        // Проверяем на бан-слова перед повторной обработкой
-                        val validationResult = vacancyContentValidator.validate(vacancy)
-                        if (!validationResult.isValid) {
-                            log.warn(
-                                "[Scheduler] Retry: Vacancy ${vacancy.id} ('${vacancy.name}') " +
-                                    "contains exclusion rules: ${validationResult.rejectionReason}, " +
-                                    "deleting from database",
-                            )
-
-                            // Удаляем вакансию из БД, так как она содержит бан-слова
-                            try {
-                                skillExtractionService.deleteVacancyAndSkills(vacancy.id)
-                                log.info(
-                                    "[Scheduler] Retry: Deleted vacancy ${vacancy.id} from database due to exclusion rules",
-                                )
-                                deletedCount++
-                            } catch (e: Exception) {
-                                log.error("[Scheduler] Retry: Failed to delete vacancy ${vacancy.id}: ${e.message}", e)
-                            }
-                        } else {
-                            // Вакансия прошла проверку, сбрасываем статус на NEW для повторной обработки
-                            // (только если не было анализа или анализ был релевантным, но вакансия была пропущена по другой причине)
-                            val oldStatus = vacancy.status
-                            vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.NEW))
-                            log.info("[Scheduler] Reset vacancy ${vacancy.id} status from $oldStatus to NEW for retry")
-                            validCount++
-                        }
-                    } catch (e: Exception) {
-                        log.error("[Scheduler] Failed to process vacancy ${vacancy.id} for retry: ${e.message}", e)
-                    }
-                }
-
-                log.info(
-                    "[Scheduler] Retry: Reset $validCount SKIPPED vacancies to NEW status, deleted $deletedCount vacancies with exclusion rules",
-                )
-            } catch (e: Exception) {
-                log.error("[Scheduler] Error retrying skipped vacancies: ${e.message}", e)
-            }
+        // Используем унифицированный VacancyRecoveryService
+        // Ограничиваем batch size для scheduled задачи (меньше чем для автоматического recovery)
+        vacancyRecoveryService.recoverFailedAndSkippedVacancies { recoveredCount, deletedCount ->
+            log.info(
+                "[Scheduler] Retry completed - Reset $recoveredCount SKIPPED vacancies to NEW status, " +
+                    "deleted $deletedCount vacancies with exclusion rules",
+            )
         }
     }
 
