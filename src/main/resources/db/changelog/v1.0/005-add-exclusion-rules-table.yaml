@@ -83,3 +83,6 @@ databaseChangeLog:
                 ('internship', 'PHRASE', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
               ON CONFLICT (text, type) DO NOTHING;
             rollback: DELETE FROM exclusion_rules WHERE type = 'PHRASE';
+
+
+

@@ -71,15 +71,15 @@ app:
   vacancy-processing:
     queue:
       enabled: true  # Enable/disable vacancy processing queue (high priority - analysis)
-      max-concurrent: 3  # Maximum concurrent vacancy analysis operations
+      max-concurrent: 1  # Maximum concurrent vacancy analysis operations (limited to 1 for weak LLM models)
       batch-size: 10  # Number of vacancies to process per batch
   skill-extraction:
     queue:
       enabled: true  # Enable/disable skill extraction queue (low priority)
-      max-concurrent: 2  # Maximum concurrent skill extraction operations
+      max-concurrent: 1  # Maximum concurrent skill extraction operations (limited to 1 for weak LLM models)
   analysis:
     min-relevance-score: 0.6  # Minimum score to consider vacancy relevant
-    max-concurrent-requests: 3  # Maximum concurrent requests to LLM for analysis
+    max-concurrent-requests: 1  # Maximum concurrent requests to LLM for analysis (limited to 1 for weak LLM models)
     # Ключевые слова и фразы, при наличии которых вакансия автоматически отклоняется (до анализа LLM)
     exclusion-keywords:  # Список запрещенных слов (проверяется в названии, описании, работодателе)
       - "стажер"
@@ -202,6 +202,31 @@ app:
       Если описание вакансии на английском - используй английский. Во всех остальных случаях - ТОЛЬКО русский язык.
       
       Начни писать письмо прямо сейчас, без дополнительных комментариев.
+    # Системный промпт для проверки города вакансии
+    city-validation-system: |
+      Ты - эксперт по географии. Твоя задача - определить, является ли указанный город российским.
+      
+      Верни результат в формате JSON:
+      {
+          "is_russian_city": true,
+          "city": "Москва"
+      }
+      
+      Требования:
+      - is_russian_city: true если город находится в России, false если в другой стране
+      - city: нормализованное название города (если указан регион, верни только город)
+      - Учитывай, что города могут быть указаны как "Москва", "Москва, Россия", "Moscow, Russia" и т.д.
+      - Российские города: Москва, Санкт-Петербург, Новосибирск, Екатеринбург, Казань, Нижний Новгород, Челябинск и т.д.
+      - НЕ российские: Киев, Минск, Алматы, Ташкент, Вильнюс, Рига, Таллин и т.д.
+      - Отвечай ТОЛЬКО валидным JSON, без дополнительных комментариев
+    # Шаблон промпта для проверки города вакансии
+    # Переменные: {area}
+    city-validation-template: |
+      Определи, является ли следующий город российским:
+      
+      Город: {area}
+      
+      Верни результат в формате JSON: {"is_russian_city": true/false, "city": "название города"}
 
 ollama:
   base-url: ${OLLAMA_BASE_URL:http://localhost:11434}  # Автоматически определяется: localhost для локального запуска, host.docker.internal для Docker
@@ -294,8 +319,9 @@ logging:
     org.springframework.web: INFO
     org.hibernate: WARN
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
-    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+    # Добавляем traceId и vacancyId в паттерн логов для трассировки
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%X{traceId:-}] [%X{vacancyId:-}] - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] [%X{traceId:-}] [%X{vacancyId:-}] %-5level %logger{36} - %msg%n"
   file:
     name: logs/hh-assistant.log
 

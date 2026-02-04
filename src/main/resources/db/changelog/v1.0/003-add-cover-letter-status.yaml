@@ -23,3 +23,6 @@ databaseChangeLog:
                   type: TIMESTAMP
                   constraints:
                     nullable: true
+
+
+
