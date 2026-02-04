@@ -691,8 +691,9 @@ class TelegramCommandHandler(
             appendLine()
             appendLine("<b>/exclusion_list</b> - Показать все правила исключения (ключевые слова)")
             appendLine()
-            appendLine("<b>/exclusion_add_keyword &lt;слово&gt;</b> - Добавить ключевое слово для исключения")
+            appendLine("<b>/exclusion_add_keyword &lt;слово или слова через пробел&gt;</b> - Добавить ключевое слово(а) для исключения")
             appendLine("   Пример: /exclusion_add_keyword remote")
+            appendLine("   Пример: /exclusion_add_keyword стажер junior intern")
             appendLine()
             appendLine("<b>/exclusion_remove_keyword &lt;слово&gt;</b> - Удалить ключевое слово из исключений")
             appendLine("   Пример: /exclusion_remove_keyword remote")
@@ -793,7 +794,12 @@ class TelegramCommandHandler(
     ): String {
         val param = text.removePrefix(commandPrefix).trim()
         if (param.isEmpty()) {
-            return "❌ Использование: $commandPrefix &lt;слово&gt;\nПример: $commandPrefix remote"
+            val example = if (isAdd) {
+                "$commandPrefix remote\n   или несколько слов: $commandPrefix стажер junior intern"
+            } else {
+                "$commandPrefix remote"
+            }
+            return "❌ Использование: $commandPrefix &lt;слово или слова через пробел&gt;\nПример: $example"
         }
         if (param.length > MAX_EXCLUSION_PARAM_LENGTH) {
             return "❌ Слишком длинное значение (максимум $MAX_EXCLUSION_PARAM_LENGTH символов)"
@@ -801,11 +807,20 @@ class TelegramCommandHandler(
 
         return try {
             if (isAdd) {
-                val added = exclusionKeywordService.addKeyword(param)
-                if (added) {
-                    "✅ Добавлено ключевое слово для исключения: '$param'\nВсего слов-блокеров: ${exclusionKeywordService.getKeywordsCount()}"
-                } else {
-                    "⚠️ Ключевое слово '$param' уже существует"
+                val result = exclusionKeywordService.addKeyword(param)
+                when {
+                    result.added > 0 && result.skipped == 0 -> {
+                        "✅ Добавлено ключевое слово для исключения: '$param'\nВсего слов-блокеров: ${result.total}"
+                    }
+                    result.added > 0 && result.skipped > 0 -> {
+                        "✅ Добавлено ${result.added} слово(а), пропущено ${result.skipped} (уже существуют)\nВсего слов-блокеров: ${result.total}"
+                    }
+                    result.added == 0 && result.skipped > 0 -> {
+                        "⚠️ Все слова уже существуют (пропущено ${result.skipped})\nВсего слов-блокеров: ${result.total}"
+                    }
+                    else -> {
+                        "⚠️ Не удалось добавить слова"
+                    }
                 }
             } else {
                 val removed = exclusionKeywordService.removeKeyword(param)

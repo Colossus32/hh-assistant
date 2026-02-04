@@ -116,53 +116,85 @@ class ExclusionKeywordService(
     }
 
     /**
-     * Добавляет новое слово-блокер
-     * @param keyword Слово для добавления
+     * Результат добавления ключевых слов
+     */
+    data class AddKeywordsResult(
+        val added: Int, // Количество добавленных слов
+        val skipped: Int, // Количество пропущенных слов (уже существуют)
+        val total: Int, // Общее количество слов в базе
+    )
+
+    /**
+     * Добавляет одно или несколько слов-блокеров
+     * Если в строке есть пробелы, парсит её и добавляет каждое слово отдельно
+     * Слова, которые уже есть в базе, пропускаются
+     * @param keywords Строка с одним или несколькими словами через пробел
      * @param caseSensitive Учитывать ли регистр (по умолчанию false)
-     * @return true если слово добавлено, false если уже существует
+     * @return Результат добавления с количеством добавленных и пропущенных слов
      */
     @Transactional
     @CacheEvict(value = [KEYWORDS_CACHE], allEntries = true)
-    fun addKeyword(keyword: String, caseSensitive: Boolean = false): Boolean {
-        val normalizedKeyword = keyword.trim().lowercase()
-        if (normalizedKeyword.isEmpty()) {
-            log.warn("[ExclusionKeywordService] Attempted to add empty keyword")
-            return false
+    fun addKeyword(keywords: String, caseSensitive: Boolean = false): AddKeywordsResult {
+        val trimmed = keywords.trim()
+        if (trimmed.isEmpty()) {
+            log.warn("[ExclusionKeywordService] Attempted to add empty keywords")
+            return AddKeywordsResult(added = 0, skipped = 0, total = exclusionKeywords.size)
         }
 
-        // Проверяем, не является ли это фразой (содержит пробелы)
-        if (normalizedKeyword.contains(" ")) {
-            log.warn(
-                "[ExclusionKeywordService] Attempted to add phrase as keyword: '$keyword'. Keywords should not contain spaces.",
+        // Парсим строку по пробелам (поддерживаем множественные пробелы)
+        val words = trimmed.split(Regex("\\s+"))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct() // Убираем дубликаты в одной строке
+
+        if (words.isEmpty()) {
+            log.warn("[ExclusionKeywordService] No valid keywords found after parsing")
+            return AddKeywordsResult(added = 0, skipped = 0, total = exclusionKeywords.size)
+        }
+
+        var addedCount = 0
+        var skippedCount = 0
+        val addedKeywords = mutableListOf<String>()
+
+        // Добавляем каждое слово отдельно
+        for (word in words) {
+            val normalizedKeyword = word.lowercase()
+
+            // Проверяем, существует ли уже в БД (поиск без учета регистра)
+            val existing = exclusionRuleRepository.findByType(ExclusionRule.ExclusionRuleType.KEYWORD)
+                .firstOrNull { it.text.lowercase() == normalizedKeyword }
+
+            if (existing != null) {
+                log.debug("[ExclusionKeywordService] Keyword '$word' already exists in database, skipping")
+                skippedCount++
+                // Обновляем Set на всякий случай
+                exclusionKeywords.add(normalizedKeyword)
+                continue
+            }
+
+            // Сохраняем в БД (сохраняем оригинальное написание слова)
+            val rule = ExclusionRule(
+                text = word,
+                type = ExclusionRule.ExclusionRuleType.KEYWORD,
+                caseSensitive = caseSensitive,
             )
-            return false
-        }
+            exclusionRuleRepository.save(rule)
 
-        // Проверяем, существует ли уже в БД
-        val existing = exclusionRuleRepository.findByTextAndType(keyword, ExclusionRule.ExclusionRuleType.KEYWORD)
-        if (existing != null) {
-            log.debug("[ExclusionKeywordService] Keyword '$keyword' already exists in database")
-            // Обновляем Set на всякий случай
+            // Обновляем in-memory Set
             exclusionKeywords.add(normalizedKeyword)
-            return false
+            addedKeywords.add(word)
+            addedCount++
         }
 
-        // Сохраняем в БД
-        val rule = ExclusionRule(
-            text = keyword,
-            type = ExclusionRule.ExclusionRuleType.KEYWORD,
-            caseSensitive = caseSensitive,
-        )
-        exclusionRuleRepository.save(rule)
-
-        // Обновляем in-memory Set
-        exclusionKeywords.add(normalizedKeyword)
-
-        // Перестраиваем Trie с новым ключевым словом
+        // Перестраиваем Trie со всеми ключевыми словами
         rebuildTrie(exclusionKeywords.toList())
 
-        log.info("[ExclusionKeywordService] Added exclusion keyword: '$keyword' (total: ${exclusionKeywords.size})")
-        return true
+        log.info(
+            "[ExclusionKeywordService] Added $addedCount exclusion keyword(s): ${addedKeywords.joinToString(", ")} " +
+                "(skipped $skippedCount, total: ${exclusionKeywords.size})",
+        )
+
+        return AddKeywordsResult(added = addedCount, skipped = skippedCount, total = exclusionKeywords.size)
     }
 
     /**
