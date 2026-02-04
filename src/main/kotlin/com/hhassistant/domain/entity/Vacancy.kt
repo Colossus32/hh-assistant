@@ -74,9 +74,21 @@ data class Vacancy(
     fun isNotInterested(): Boolean = status == VacancyStatus.NOT_INTERESTED
 
     /**
-     * Проверяет, можно ли обрабатывать вакансию (не помечена как неинтересная)
+     * Проверяет, была ли вакансия помечена как неподходящая (не релевантна по результатам LLM анализа)
      */
-    fun canBeProcessed(): Boolean = status != VacancyStatus.NOT_INTERESTED
+    fun isNotSuitable(): Boolean = status == VacancyStatus.NOT_SUITABLE
+
+    /**
+     * Проверяет, находится ли вакансия в архиве (недоступна на HH.ru)
+     */
+    fun isInArchive(): Boolean = status == VacancyStatus.IN_ARCHIVE
+
+    /**
+     * Проверяет, можно ли обрабатывать вакансию (не помечена как неинтересная, неподходящая или в архиве)
+     */
+    fun canBeProcessed(): Boolean = status != VacancyStatus.NOT_INTERESTED &&
+        status != VacancyStatus.NOT_SUITABLE &&
+        status != VacancyStatus.IN_ARCHIVE
 
     /**
      * Проверяет, находится ли вакансия в очереди на обработку
@@ -114,7 +126,9 @@ enum class VacancyStatus {
     QUEUED, // В очереди на обработку (добавлена в очередь, но еще не обработана)
     ANALYZED, // Проанализирована LLM
     SENT_TO_USER, // Отправлена в Telegram
-    SKIPPED, // Не релевантна или не удалось обработать (можно восстановить)
+    SKIPPED, // Не удалось обработать (технические ошибки, можно восстановить)
+    NOT_SUITABLE, // Не подходит по результатам LLM анализа (финальный статус, не обрабатывать повторно)
+    IN_ARCHIVE, // Вакансия недоступна на HH.ru (404, удалена или в архиве)
     APPLIED, // Откликнулся на вакансию
     NOT_INTERESTED, // Неинтересная вакансия (не удалять, но не показывать повторно)
 }

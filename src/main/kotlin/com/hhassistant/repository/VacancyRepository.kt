@@ -49,6 +49,24 @@ interface VacancyRepository : JpaRepository<Vacancy, String> {
     fun findSkippedVacanciesForRetry(pageable: Pageable, cutoffTime: java.time.LocalDateTime): List<Vacancy>
 
     /**
+     * Получает список старых вакансий со статусом SKIPPED, которые вышли за пределы окна времени для retry.
+     * Используется для финальной обработки старых вакансий (восстановление/терминальный статус/удаление).
+     *
+     * @param pageable Пагинация для ограничения количества результатов
+     * @param cutoffTime Время отсечки (вакансии старше этого времени)
+     * @return Список старых вакансий со статусом SKIPPED, отсортированных по fetchedAt
+     */
+    @Query(
+        """
+        SELECT v FROM Vacancy v 
+        WHERE v.status = 'SKIPPED'
+        AND v.fetchedAt < :cutoffTime
+        ORDER BY v.fetchedAt ASC
+    """,
+    )
+    fun findOldSkippedVacancies(pageable: Pageable, cutoffTime: java.time.LocalDateTime): List<Vacancy>
+
+    /**
      * Получает список вакансий, для которых еще не извлечены навыки.
      * Использует поле skills_extracted_at для быстрой проверки без запросов к vacancy_skills.
      *
