@@ -229,7 +229,8 @@ class OllamaMonitoringService(
         val skippedCount = vacancyRepository.countSkippedVacancies()
 
         log.info(
-            "[OllamaMonitoring] Status: $status | Circuit Breaker: $circuitBreakerState | Active requests: $activeCount | Pending: $pendingCount | Skipped: $skippedCount",
+            "[OllamaMonitoring] Status: $status | " +
+                "Circuit Breaker: $circuitBreakerState | Active requests: $activeCount | Pending: $pendingCount | Skipped: $skippedCount",
         )
 
         // Если circuit breaker OPEN, активных запросов 0, и прошло достаточно времени - пытаемся перевести в HALF_OPEN

@@ -21,6 +21,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import mu.KotlinLogging
@@ -120,6 +121,21 @@ class VacancySchedulerService(
 
                 skippedVacancies.forEach { vacancy ->
                     try {
+                        // ВАЖНО: Проверяем, не была ли вакансия уже проанализирована
+                        // Если анализ существует и вакансия нерелевантна - не сбрасываем статус,
+                        // чтобы избежать бесконечного цикла обработки нерелевантных вакансий
+                        val existingAnalysis = runBlocking {
+                            vacancyAnalysisService.findByVacancyId(vacancy.id)
+                        }
+                        if (existingAnalysis != null && !existingAnalysis.isRelevant) {
+                            log.info(
+                                "[Scheduler] Retry: Vacancy ${vacancy.id} already analyzed and not relevant " +
+                                    "(score: ${String.format("%.2f", existingAnalysis.relevanceScore * 100)}%), " +
+                                    "skipping retry to avoid infinite loop",
+                            )
+                            return@forEach
+                        }
+
                         // Проверяем на бан-слова перед повторной обработкой
                         val validationResult = vacancyContentValidator.validate(vacancy)
                         if (!validationResult.isValid) {
@@ -141,6 +157,7 @@ class VacancySchedulerService(
                             }
                         } else {
                             // Вакансия прошла проверку, сбрасываем статус на NEW для повторной обработки
+                            // (только если не было анализа или анализ был релевантным, но вакансия была пропущена по другой причине)
                             val oldStatus = vacancy.status
                             vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.NEW))
                             log.info("[Scheduler] Reset vacancy ${vacancy.id} status from $oldStatus to NEW for retry")

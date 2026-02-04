@@ -11,6 +11,7 @@ import com.hhassistant.service.skill.SkillExtractionQueueService
 import com.hhassistant.service.skill.SkillExtractionService
 import com.hhassistant.service.skill.SkillStatisticsService
 import com.hhassistant.service.util.AnalysisTimeService
+import com.hhassistant.service.vacancy.VacancyProcessingQueueService
 import com.hhassistant.service.vacancy.VacancyService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +36,7 @@ class TelegramCommandHandler(
     private val skillExtractionService: SkillExtractionService,
     private val skillStatisticsService: SkillStatisticsService,
     private val skillExtractionQueueService: SkillExtractionQueueService,
+    private val vacancyProcessingQueueService: VacancyProcessingQueueService,
     private val vacancyService: VacancyService,
     private val exclusionRuleService: ExclusionRuleService,
     private val exclusionKeywordService: ExclusionKeywordService,
@@ -83,6 +85,7 @@ class TelegramCommandHandler(
                 text == "/exclusion_list" -> handleListExclusions()
                 text.startsWith("/sent_status ") -> handleSentStatusCommand(text)
                 text == "/sent_status" -> handleSentStatusCommand(text)
+                text == "/queue" -> handleQueueCommand(chatId)
                 text == "/help" -> handleHelpCommand(chatId)
                 text.matches(Regex("/mark-applied-\\d+")) -> handleMarkAppliedCommand(text)
                 text.matches(Regex("/mark-not-interested-\\d+")) -> handleMarkNotInterestedCommand(text)
@@ -153,6 +156,7 @@ class TelegramCommandHandler(
             appendLine("   /stats - Статистика по вакансиям")
             appendLine("   /vacancies - Список непросмотренных вакансий")
             appendLine("   /vacancies_all - Список всех вакансий (включая просмотренные)")
+            appendLine("   /queue - Вакансии в очереди на обработку")
             appendLine("   /skills [N] - Топ навыков (статистика сразу, обработка в фоне)")
             appendLine("   /skills_now [N] - Текущий топ навыков (без обработки)")
             appendLine("   /help - Справка")
@@ -574,6 +578,88 @@ class TelegramCommandHandler(
     }
 
     /**
+     * Обрабатывает команду /queue - показывает вакансии в очереди на обработку
+     */
+    private suspend fun handleQueueCommand(chatId: String): String {
+        log.info("📋 [TelegramCommand] Processing /queue command for chat $chatId")
+
+        return try {
+            val queueItems = vacancyProcessingQueueService.getQueueItems()
+            val queueSize = vacancyProcessingQueueService.getQueueSize()
+
+            if (queueSize == 0) {
+                return "📭 <b>Очередь на обработку пуста</b>\n\nНет вакансий, ожидающих обработки."
+            }
+
+            // Если вакансий много, разбиваем на несколько сообщений
+            val maxItemsPerMessage = 15 // Примерно 15 вакансий на сообщение
+            val messages = mutableListOf<String>()
+
+            // Первое сообщение - заголовок
+            val header = buildString {
+                appendLine("📋 <b>Очередь на обработку</b>")
+                appendLine()
+                appendLine("Всего вакансий в очереди: <b>$queueSize</b>")
+                appendLine()
+            }
+
+            // Разбиваем вакансии на части
+            val chunks = queueItems.chunked(maxItemsPerMessage)
+
+            for ((chunkIndex, chunk) in chunks.withIndex()) {
+                val message = buildString {
+                    if (chunkIndex == 0) {
+                        append(header)
+                    } else {
+                        appendLine("📋 <b>Очередь на обработку (продолжение ${chunkIndex + 1}/${chunks.size})</b>")
+                        appendLine()
+                    }
+
+                    for ((index, item) in chunk.withIndex()) {
+                        val globalIndex = chunkIndex * maxItemsPerMessage + index + 1
+                        val name = item["name"] as? String ?: "Неизвестно"
+                        val employer = item["employer"] as? String ?: "N/A"
+                        val url = item["url"] as? String ?: "#"
+                        val status = item["status"] as? String ?: "UNKNOWN"
+
+                        appendLine("$globalIndex. <b>$name</b>")
+                        appendLine("   👔 $employer")
+                        appendLine("   🔗 <a href=\"$url\">Открыть вакансию</a>")
+                        appendLine("   📊 Статус: $status")
+                        appendLine()
+                    }
+
+                    if (chunks.size > 1 && chunkIndex < chunks.size - 1) {
+                        appendLine("... (продолжение следует)")
+                    }
+                }
+
+                messages.add(message)
+            }
+
+            // Если сообщение одно, возвращаем его для отправки через sendMessageSafely
+            if (messages.size == 1) {
+                return messages[0]
+            }
+
+            // Если сообщений несколько, отправляем их все напрямую
+            for ((index, message) in messages.withIndex()) {
+                telegramClient.sendMessage(chatId, message)
+                // Небольшая задержка между сообщениями, чтобы не превысить rate limit
+                if (index < messages.size - 1) {
+                    kotlinx.coroutines.delay(100)
+                }
+            }
+
+            // Возвращаем финальное сообщение (оно будет отправлено через sendMessageSafely в handleCommand)
+            "✅ Отправлено ${messages.size} сообщений с информацией об очереди"
+        } catch (e: Exception) {
+            log.error("❌ [TelegramCommand] Error getting queue: ${e.message}", e)
+            "❌ Ошибка при получении информации об очереди: ${e.message ?: "Неизвестная ошибка"}"
+        }
+    }
+
+    /**
      * Обрабатывает команду /help
      */
     private fun handleHelpCommand(chatId: String): String {
@@ -613,6 +699,9 @@ class TelegramCommandHandler(
             appendLine()
             appendLine("<b>/sent_status [vacancy_id]</b> - Проверить, была ли вакансия отправлена в Telegram")
             appendLine("   Пример: /sent_status (сводка) или /sent_status 12345678 (конкретная вакансия)")
+            appendLine()
+            appendLine("<b>/queue</b> - Показать вакансии в очереди на обработку")
+            appendLine("   Показывает список вакансий, ожидающих анализа")
             appendLine()
             appendLine("<b>/mark-applied-{id}</b> - Отметить вакансию как \"откликнулся\"")
             appendLine("   Пример: /mark-applied-12345678")

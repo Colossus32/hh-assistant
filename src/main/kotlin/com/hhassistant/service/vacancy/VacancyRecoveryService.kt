@@ -20,6 +20,7 @@ class VacancyRecoveryService(
     private val vacancyRepository: VacancyRepository,
     private val vacancyService: VacancyService,
     private val vacancyStatusService: VacancyStatusService,
+    private val vacancyAnalysisService: VacancyAnalysisService,
     @Value("\${app.vacancy-recovery.batch-size:100}") private val batchSize: Int,
     @Value("\${app.vacancy-recovery.retry-window-hours:48}") private val retryWindowHours: Int,
 ) {
@@ -83,10 +84,25 @@ class VacancyRecoveryService(
             )
 
             var recoveredCount = 0
+            var skippedCount = 0
 
             vacanciesToRecover.forEach { vacancy ->
                 try {
-                    // Просто переводим в NEW для повторной обработки
+                    // ВАЖНО: Проверяем, не была ли вакансия уже проанализирована
+                    // Если анализ существует и вакансия нерелевантна - не сбрасываем статус,
+                    // чтобы избежать бесконечного цикла обработки нерелевантных вакансий
+                    val existingAnalysis = vacancyAnalysisService.findByVacancyId(vacancy.id)
+                    if (existingAnalysis != null && !existingAnalysis.isRelevant) {
+                        log.debug(
+                            "[VacancyRecovery] Vacancy ${vacancy.id} already analyzed and not relevant " +
+                                "(score: ${String.format("%.2f", existingAnalysis.relevanceScore * 100)}%), " +
+                                "skipping recovery to avoid infinite loop",
+                        )
+                        skippedCount++
+                        return@forEach
+                    }
+
+                    // Переводим в NEW для повторной обработки
                     val oldStatus = vacancy.status
                     vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.NEW))
                     log.debug(
@@ -102,7 +118,8 @@ class VacancyRecoveryService(
             }
 
             log.info(
-                "[VacancyRecovery] Completed - Reset $recoveredCount vacancies to NEW status",
+                "[VacancyRecovery] Completed - Reset $recoveredCount vacancies to NEW status " +
+                    "($skippedCount skipped as already analyzed and not relevant)",
             )
 
             return Pair(recoveredCount, 0)

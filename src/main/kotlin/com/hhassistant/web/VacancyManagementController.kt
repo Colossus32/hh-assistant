@@ -3,6 +3,7 @@ package com.hhassistant.web
 import com.hhassistant.config.AppConstants
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
+import com.hhassistant.service.vacancy.VacancyProcessingQueueService
 import com.hhassistant.service.vacancy.VacancyService
 import com.hhassistant.service.vacancy.VacancyStatusService
 import mu.KotlinLogging
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController
 class VacancyManagementController(
     private val vacancyService: VacancyService,
     private val vacancyStatusService: VacancyStatusService,
+    private val vacancyProcessingQueueService: VacancyProcessingQueueService,
 ) {
     private val log = KotlinLogging.logger {}
 
@@ -276,6 +278,27 @@ class VacancyManagementController(
                         "status" to vacancy.status.name,
                     )
                 },
+            ),
+        )
+    }
+
+    /**
+     * Получает список вакансий в очереди на обработку
+     * GET /api/vacancies/queue
+     */
+    @GetMapping("/queue")
+    fun getQueueVacancies(): ResponseEntity<Map<String, Any>> {
+        log.info("📋 [VacancyManagement] Getting queue vacancies...")
+        val queueItems = vacancyProcessingQueueService.getQueueItems()
+        val queueSize = vacancyProcessingQueueService.getQueueSize()
+
+        log.info("✅ [VacancyManagement] Found $queueSize vacancies in queue")
+
+        return ResponseEntity.ok(
+            mapOf(
+                "count" to queueSize,
+                "size" to queueSize,
+                "vacancies" to queueItems,
             ),
         )
     }

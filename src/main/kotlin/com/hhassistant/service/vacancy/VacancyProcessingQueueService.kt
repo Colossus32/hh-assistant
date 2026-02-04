@@ -5,6 +5,7 @@ import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.exception.OllamaException
 import com.hhassistant.exception.VacancyProcessingException
+import com.hhassistant.util.TraceContext
 import jakarta.annotation.PreDestroy
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -71,6 +72,9 @@ class VacancyProcessingQueueService(
 
     // Множество обрабатываемых вакансий (для проверки дубликатов)
     private val processingVacancies = ConcurrentHashMap<String, Boolean>()
+
+    // Множество вакансий, уже добавленных в очередь (для предотвращения дубликатов)
+    private val queuedVacancies = ConcurrentHashMap<String, Boolean>()
 
     // Флаг работы очереди
     private val isRunning = AtomicBoolean(false)
@@ -167,6 +171,40 @@ class VacancyProcessingQueueService(
                 return false
             }
 
+            // Проверяем, не добавлена ли уже в очередь (атомарная проверка и добавление)
+            if (queuedVacancies.putIfAbsent(vacancyId, true) != null) {
+                log.debug(" [VacancyProcessingQueue] Vacancy $vacancyId is already in queue, skipping")
+                return false
+            }
+
+            // ВАЖНО: Проверяем, не была ли вакансия уже проанализирована (даже если статус QUEUED)
+            // Это может произойти, если статус не обновился из-за ошибки или перезапуска приложения
+            val existingAnalysis = runBlocking {
+                vacancyAnalysisService.findByVacancyId(vacancyId)
+            }
+            if (existingAnalysis != null) {
+                log.warn(
+                    "⚠️ [VacancyProcessingQueue] Vacancy $vacancyId already has analysis (analyzed at ${existingAnalysis.analyzedAt}), " +
+                        "but status is ${vacancy.status}. Updating status and skipping.",
+                )
+                // Обновляем статус на основе существующего анализа
+                val correctStatus = if (existingAnalysis.isRelevant) {
+                    VacancyStatus.ANALYZED
+                } else {
+                    VacancyStatus.SKIPPED
+                }
+                try {
+                    if (vacancy.status != correctStatus) {
+                        vacancyStatusService.updateVacancyStatus(vacancy.withStatus(correctStatus))
+                        log.info(" [VacancyProcessingQueue] Updated vacancy $vacancyId status from ${vacancy.status} to $correctStatus")
+                    }
+                } catch (e: Exception) {
+                    log.error(" [VacancyProcessingQueue] Failed to update status for vacancy $vacancyId: ${e.message}", e)
+                }
+                queuedVacancies.remove(vacancyId)
+                return false
+            }
+
             // Пропускаем уже обработанные вакансии
             if (vacancy.status in listOf(
                     VacancyStatus.ANALYZED,
@@ -178,6 +216,8 @@ class VacancyProcessingQueueService(
                 log.debug(
                     " [VacancyProcessingQueue] Vacancy $vacancyId already processed (status: ${vacancy.status}), skipping",
                 )
+                // Удаляем из queuedVacancies, так как мы не будем добавлять в очередь
+                queuedVacancies.remove(vacancyId)
                 return false
             }
 
@@ -187,7 +227,44 @@ class VacancyProcessingQueueService(
                     vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.QUEUED))
                 } catch (e: Exception) {
                     log.warn(" [VacancyProcessingQueue] Failed to update status for vacancy $vacancyId: ${e.message}")
+                    // Удаляем из queuedVacancies при ошибке
+                    queuedVacancies.remove(vacancyId)
+                    return false
                 }
+            }
+        } else {
+            // Даже если checkDuplicate = false, проверяем queuedVacancies для предотвращения дубликатов
+            if (queuedVacancies.putIfAbsent(vacancyId, true) != null) {
+                log.debug(" [VacancyProcessingQueue] Vacancy $vacancyId is already in queue (checkDuplicate=false but duplicate detected), skipping")
+                return false
+            }
+
+            // ВАЖНО: Даже при checkDuplicate=false проверяем, не была ли вакансия уже проанализирована
+            // Это предотвращает повторную обработку при перезапуске приложения
+            val existingAnalysis = runBlocking {
+                vacancyAnalysisService.findByVacancyId(vacancyId)
+            }
+            if (existingAnalysis != null) {
+                log.warn(
+                    "⚠️ [VacancyProcessingQueue] Vacancy $vacancyId already has analysis (analyzed at ${existingAnalysis.analyzedAt}), " +
+                        "but status is ${vacancy.status}. Updating status and skipping.",
+                )
+                // Обновляем статус на основе существующего анализа
+                val correctStatus = if (existingAnalysis.isRelevant) {
+                    VacancyStatus.ANALYZED
+                } else {
+                    VacancyStatus.SKIPPED
+                }
+                try {
+                    if (vacancy.status != correctStatus) {
+                        vacancyStatusService.updateVacancyStatus(vacancy.withStatus(correctStatus))
+                        log.info(" [VacancyProcessingQueue] Updated vacancy $vacancyId status from ${vacancy.status} to $correctStatus")
+                    }
+                } catch (e: Exception) {
+                    log.error(" [VacancyProcessingQueue] Failed to update status for vacancy $vacancyId: ${e.message}", e)
+                }
+                queuedVacancies.remove(vacancyId)
+                return false
             }
         }
 
@@ -260,115 +337,155 @@ class VacancyProcessingQueueService(
      */
     private suspend fun processQueueItem(item: QueueItem) {
         processingSemaphore.withPermit {
-            try {
-                log.info(" [VacancyProcessingQueue] Processing vacancy ${item.vacancyId}")
+            // Устанавливаем trace ID для трассировки вакансии через все логи
+            TraceContext.withTraceIdSuspend(
+                traceId = TraceContext.generateTraceId(item.vacancyId),
+                vacancyId = item.vacancyId,
+            ) {
+                try {
+                    log.info(" [VacancyProcessingQueue] Processing vacancy ${item.vacancyId}")
 
-                // Получаем вакансию из БД
-                val vacancy = vacancyRepository.findById(item.vacancyId).orElse(null)
-                if (vacancy == null) {
-                    log.warn(" [VacancyProcessingQueue] Vacancy ${item.vacancyId} not found, skipping")
-                    processingVacancies.remove(item.vacancyId)
-                    return@withPermit
-                }
+                    // Получаем вакансию из БД
+                    val vacancy = vacancyRepository.findById(item.vacancyId).orElse(null)
+                    if (vacancy == null) {
+                        log.warn(" [VacancyProcessingQueue] Vacancy ${item.vacancyId} not found, skipping")
+                        processingVacancies.remove(item.vacancyId)
+                        queuedVacancies.remove(item.vacancyId)
+                        return@withTraceIdSuspend
+                    }
 
-                // Проверяем, не была ли уже обработана
-                if (vacancy.status !in listOf(VacancyStatus.QUEUED, VacancyStatus.NEW)) {
-                    log.debug(
-                        "ℹ️ [VacancyProcessingQueue] Vacancy ${item.vacancyId} already processed (status: ${vacancy.status}), skipping",
-                    )
-                    processingVacancies.remove(item.vacancyId)
-                    return@withPermit
-                }
-
-                // Проверяем состояние Circuit Breaker перед обработкой
-                val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
-                if (circuitBreakerState == "OPEN") {
-                    // Если Circuit Breaker OPEN, проверяем активные запросы
-                    var activeRequests = ollamaMonitoringService?.getActiveRequestsCount() ?: 0
-                    if (activeRequests > 0) {
-                        // Есть активные запросы - ждем их завершения с таймаутом
-                        log.info(
-                            " [VacancyProcessingQueue] Circuit Breaker is OPEN, " +
-                                "but there are $activeRequests active requests. " +
-                                "Waiting for completion (timeout: ${circuitBreakerOpenWaitTimeoutSeconds}s)...",
+                    // Проверяем, не была ли уже обработана
+                    if (vacancy.status !in listOf(VacancyStatus.QUEUED, VacancyStatus.NEW)) {
+                        log.debug(
+                            "ℹ️ [VacancyProcessingQueue] Vacancy ${item.vacancyId} already processed (status: ${vacancy.status}), skipping",
                         )
-                        val waitStartTime = System.currentTimeMillis()
-                        val timeoutMillis = circuitBreakerOpenWaitTimeoutSeconds * 1000L
-                        while (activeRequests > 0 && (System.currentTimeMillis() - waitStartTime) < timeoutMillis) {
-                            delay(1000) // Проверяем каждую секунду
-                            val currentActiveRequests = ollamaMonitoringService?.getActiveRequestsCount() ?: 0
-                            if (currentActiveRequests == 0) {
-                                log.info(
-                                    " [VacancyProcessingQueue] All active requests completed, proceeding with vacancy ${item.vacancyId}",
-                                )
-                                break
-                            }
-                            if (currentActiveRequests != activeRequests) {
-                                log.debug(
-                                    " [VacancyProcessingQueue] Active requests changed: $activeRequests -> $currentActiveRequests",
-                                )
-                                activeRequests = currentActiveRequests
-                            }
+                        processingVacancies.remove(item.vacancyId)
+                        queuedVacancies.remove(item.vacancyId)
+                        return@withTraceIdSuspend
+                    }
+
+                    // Дополнительная проверка: если анализ уже существует, но статус не обновлен
+                    val existingAnalysis = vacancyAnalysisService.findByVacancyId(item.vacancyId)
+                    if (existingAnalysis != null) {
+                        log.warn(
+                            "⚠️ [VacancyProcessingQueue] Vacancy ${item.vacancyId} already has analysis (analyzed at ${existingAnalysis.analyzedAt}), " +
+                                "but status is ${vacancy.status}. Updating status and skipping processing.",
+                        )
+                        // Обновляем статус на основе существующего анализа
+                        val correctStatus = if (existingAnalysis.isRelevant) {
+                            VacancyStatus.ANALYZED
+                        } else {
+                            VacancyStatus.SKIPPED
                         }
-                        val waitDuration = System.currentTimeMillis() - waitStartTime
-                        val finalActiveRequests = ollamaMonitoringService?.getActiveRequestsCount() ?: 0
-                        if (finalActiveRequests > 0) {
+                        try {
+                            if (vacancy.status != correctStatus) {
+                                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(correctStatus))
+                                log.info(" [VacancyProcessingQueue] Updated vacancy ${item.vacancyId} status from ${vacancy.status} to $correctStatus")
+                            }
+                        } catch (e: Exception) {
+                            log.error(" [VacancyProcessingQueue] Failed to update status for vacancy ${item.vacancyId}: ${e.message}", e)
+                        }
+                        processingVacancies.remove(item.vacancyId)
+                        queuedVacancies.remove(item.vacancyId)
+                        queue.remove(item)
+                        metricsService.setQueueSize(queue.size)
+                        return@withTraceIdSuspend
+                    }
+
+                    // Проверяем состояние Circuit Breaker перед обработкой
+                    val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
+                    if (circuitBreakerState == "OPEN") {
+                        // Если Circuit Breaker OPEN, проверяем активные запросы
+                        var activeRequests = ollamaMonitoringService?.getActiveRequestsCount() ?: 0
+                        if (activeRequests > 0) {
+                            // Есть активные запросы - ждем их завершения с таймаутом
+                            log.info(
+                                " [VacancyProcessingQueue] Circuit Breaker is OPEN, " +
+                                    "but there are $activeRequests active requests. " +
+                                    "Waiting for completion (timeout: ${circuitBreakerOpenWaitTimeoutSeconds}s)...",
+                            )
+                            val waitStartTime = System.currentTimeMillis()
+                            val timeoutMillis = circuitBreakerOpenWaitTimeoutSeconds * 1000L
+                            while (activeRequests > 0 && (System.currentTimeMillis() - waitStartTime) < timeoutMillis) {
+                                delay(1000) // Проверяем каждую секунду
+                                val currentActiveRequests = ollamaMonitoringService?.getActiveRequestsCount() ?: 0
+                                if (currentActiveRequests == 0) {
+                                    log.info(
+                                        " [VacancyProcessingQueue] All active requests completed, proceeding with vacancy ${item.vacancyId}",
+                                    )
+                                    break
+                                }
+                                if (currentActiveRequests != activeRequests) {
+                                    log.debug(
+                                        " [VacancyProcessingQueue] Active requests changed: $activeRequests -> $currentActiveRequests",
+                                    )
+                                    activeRequests = currentActiveRequests
+                                }
+                            }
+                            val waitDuration = System.currentTimeMillis() - waitStartTime
+                            val finalActiveRequests = ollamaMonitoringService?.getActiveRequestsCount() ?: 0
+                            if (finalActiveRequests > 0) {
+                                log.warn(
+                                    " [VacancyProcessingQueue] Timeout waiting for active requests to complete " +
+                                        "(waited ${waitDuration}ms, still $finalActiveRequests active). " +
+                                        "Marking vacancy ${item.vacancyId} as SKIPPED",
+                                )
+                                try {
+                                    vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
+                                } catch (updateError: Exception) {
+                                    log.error(
+                                        " [VacancyProcessingQueue] Failed to update status for vacancy ${item.vacancyId} after timeout",
+                                        updateError,
+                                    )
+                                }
+                                processingVacancies.remove(item.vacancyId)
+                                queuedVacancies.remove(item.vacancyId)
+                                queue.remove(item)
+                                metricsService.setQueueSize(queue.size)
+                                return@withTraceIdSuspend
+                            } else {
+                                log.info(
+                                    " [VacancyProcessingQueue] All active requests completed after ${waitDuration}ms, proceeding with vacancy ${item.vacancyId}",
+                                )
+                            }
+                        } else {
+                            // Нет активных запросов - сразу помечаем как SKIPPED
                             log.warn(
-                                " [VacancyProcessingQueue] Timeout waiting for active requests to complete " +
-                                    "(waited ${waitDuration}ms, still $finalActiveRequests active). " +
-                                    "Marking vacancy ${item.vacancyId} as SKIPPED",
+                                " [VacancyProcessingQueue] Circuit Breaker is OPEN and no active requests, marking vacancy ${item.vacancyId} as SKIPPED",
                             )
                             try {
                                 vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
                             } catch (updateError: Exception) {
                                 log.error(
-                                    " [VacancyProcessingQueue] Failed to update status for vacancy ${item.vacancyId} after timeout",
+                                    " [VacancyProcessingQueue] Failed to update status for vacancy ${item.vacancyId}",
                                     updateError,
                                 )
                             }
                             processingVacancies.remove(item.vacancyId)
+                            queuedVacancies.remove(item.vacancyId)
                             queue.remove(item)
                             metricsService.setQueueSize(queue.size)
-                            return@withPermit
-                        } else {
-                            log.info(
-                                " [VacancyProcessingQueue] All active requests completed after ${waitDuration}ms, proceeding with vacancy ${item.vacancyId}",
-                            )
+                            return@withTraceIdSuspend
                         }
-                    } else {
-                        // Нет активных запросов - сразу помечаем как SKIPPED
-                        log.warn(
-                            " [VacancyProcessingQueue] Circuit Breaker is OPEN and no active requests, marking vacancy ${item.vacancyId} as SKIPPED",
-                        )
-                        try {
-                            vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
-                        } catch (updateError: Exception) {
-                            log.error(
-                                " [VacancyProcessingQueue] Failed to update status for vacancy ${item.vacancyId}",
-                                updateError,
-                            )
-                        }
-                        processingVacancies.remove(item.vacancyId)
-                        queue.remove(item)
-                        metricsService.setQueueSize(queue.size)
-                        return@withPermit
                     }
+
+                    // Обрабатываем вакансию: извлечение навыков → анализ → генерация письма → отправка в Telegram
+                    processVacancy(vacancy)
+
+                    // Удаляем из множества обрабатываемых и из очереди
+                    processingVacancies.remove(item.vacancyId)
+                    queuedVacancies.remove(item.vacancyId)
+                    queue.remove(item)
+
+                    // Обновляем метрику размера очереди
+                    metricsService.setQueueSize(queue.size)
+                } catch (e: Exception) {
+                    log.error(" [VacancyProcessingQueue] Error processing queue item ${item.vacancyId}: ${e.message}", e)
+                    processingVacancies.remove(item.vacancyId)
+                    queuedVacancies.remove(item.vacancyId)
+                    queue.remove(item)
+                    metricsService.setQueueSize(queue.size)
                 }
-
-                // Обрабатываем вакансию: извлечение навыков → анализ → генерация письма → отправка в Telegram
-                processVacancy(vacancy)
-
-                // Удаляем из множества обрабатываемых
-                processingVacancies.remove(item.vacancyId)
-                queue.remove(item)
-
-                // Обновляем метрику размера очереди
-                metricsService.setQueueSize(queue.size)
-            } catch (e: Exception) {
-                log.error(" [VacancyProcessingQueue] Error processing queue item ${item.vacancyId}: ${e.message}", e)
-                processingVacancies.remove(item.vacancyId)
-                queue.remove(item)
-                metricsService.setQueueSize(queue.size)
             }
         }
     }
@@ -518,13 +635,60 @@ class VacancyProcessingQueueService(
     fun getQueueSize(): Int = queue.size
 
     /**
+     * Получает информацию о вакансиях в очереди на обработку
+     * @return Список вакансий с их названиями и ссылками
+     */
+    fun getQueueItems(): List<Map<String, Any>> {
+        val items = mutableListOf<Map<String, Any>>()
+
+        // Получаем все элементы из очереди
+        val queueSnapshot = queue.toList()
+
+        for (item in queueSnapshot) {
+            try {
+                val vacancy = vacancyRepository.findById(item.vacancyId).orElse(null)
+                if (vacancy != null) {
+                    items.add(
+                        mapOf(
+                            "id" to vacancy.id,
+                            "name" to vacancy.name,
+                            "employer" to vacancy.employer,
+                            "url" to vacancy.url,
+                            "status" to vacancy.status.name,
+                            "addedAt" to item.addedAt.toString(),
+                            "publishedAt" to (item.publishedAt?.toString() ?: "Не указано"),
+                        ),
+                    )
+                } else {
+                    // Вакансия не найдена в БД, но есть в очереди
+                    items.add(
+                        mapOf(
+                            "id" to item.vacancyId,
+                            "name" to "Вакансия не найдена в БД",
+                            "employer" to "N/A",
+                            "url" to "N/A",
+                            "status" to "NOT_FOUND",
+                            "addedAt" to item.addedAt.toString(),
+                            "publishedAt" to (item.publishedAt?.toString() ?: "Не указано"),
+                        ),
+                    )
+                }
+            } catch (e: Exception) {
+                log.warn(" [VacancyProcessingQueue] Error getting info for queue item ${item.vacancyId}: ${e.message}")
+            }
+        }
+
+        return items
+    }
+
+    /**
      * Проверяет, пуста ли очередь обработки новых вакансий.
      * Очередь считается пустой, если в ней нет элементов и нет обрабатываемых вакансий.
      *
      * @return true если очередь пуста, false если есть вакансии в очереди или обрабатываются
      */
     fun isQueueEmpty(): Boolean {
-        return queue.isEmpty() && processingVacancies.isEmpty()
+        return queue.isEmpty() && processingVacancies.isEmpty() && queuedVacancies.isEmpty()
     }
 
     /**
@@ -533,6 +697,7 @@ class VacancyProcessingQueueService(
     fun clearQueue() {
         queue.clear()
         processingVacancies.clear()
+        queuedVacancies.clear()
         log.info(" [VacancyProcessingQueue] Queue cleared")
     }
 
@@ -566,12 +731,13 @@ class VacancyProcessingQueueService(
     private fun markProcessingVacanciesAsSkipped() {
         runBlocking {
             try {
-                // Получаем все вакансии, которые сейчас обрабатываются
+                // Получаем все вакансии, которые сейчас обрабатываются или в очереди
                 val processingVacancyIds = processingVacancies.keys.toList()
                 val queuedVacancyIds = queue.map { it.vacancyId }
+                val trackedQueuedIds = queuedVacancies.keys.toList()
 
                 // Объединяем списки и убираем дубликаты
-                val allVacancyIds = (processingVacancyIds + queuedVacancyIds).distinct()
+                val allVacancyIds = (processingVacancyIds + queuedVacancyIds + trackedQueuedIds).distinct()
 
                 if (allVacancyIds.isEmpty()) {
                     log.info("[VacancyProcessingQueue] No vacancies to mark as SKIPPED")
