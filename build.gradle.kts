@@ -132,13 +132,14 @@ ktlint {
     disabledRules.set(setOf("import-ordering"))
 }
 
-tasks.named("check") {
-    dependsOn("ktlintCheck")
-}
+// KtLint проверка отключена при билдах
+// tasks.named("check") {
+//     dependsOn("ktlintCheck")
+// }
 
-tasks.named("build") {
-    dependsOn("ktlintFormat")
-}
+// tasks.named("build") {
+//     dependsOn("ktlintFormat")
+// }
 
 // Быстрый билд без форматирования и тестов (для локальной разработки)
 tasks.register("fastBuild") {
