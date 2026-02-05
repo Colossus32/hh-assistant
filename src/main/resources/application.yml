@@ -44,6 +44,9 @@ app:
     extract-relevant-skills: "0 0 3 * * *"  # Every day at 3:00 AM - extract skills for relevant vacancies without skills
     process-queued-vacancies: "0 */10 * * * *"  # Every 10 minutes - process QUEUED vacancies from database
     recovery-skill-extraction: "0 */5 * * * *"  # Every 5 minutes - recovery: extract skills from one vacancy if processing queue is empty
+  healthcheck:
+    enabled: true  # Включить периодическую проверку здоровья системы
+    schedule: "0 0 * * * *"  # Каждый час (cron: секунда минута час день месяц день_недели)
   max-vacancies-per-cycle: 2000  # Максимальное количество вакансий за цикл (ограничение HH.ru API: 2000)
   cleanup:
     enabled: true  # Включить автоматическую очистку несуществующих вакансий

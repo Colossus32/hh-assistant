@@ -12,10 +12,8 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.withTimeout
 import mu.KotlinLogging
-import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
-import org.springframework.context.annotation.Lazy
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.bodyToMono
@@ -31,7 +29,7 @@ class OllamaClient(
     @Value("\${ollama.timeouts.skill-extraction:60}") private val skillExtractionTimeoutSeconds: Long,
     @Value("\${ollama.timeouts.log-analysis:180}") private val logAnalysisTimeoutSeconds: Long,
     @Value("\${ollama.timeouts.other:90}") private val otherTimeoutSeconds: Long,
-    @Autowired(required = false) @Lazy private val ollamaMonitoringService: OllamaMonitoringService?,
+    private val ollamaMonitoringService: OllamaMonitoringService?,
 ) {
     private val log = KotlinLogging.logger {}
 

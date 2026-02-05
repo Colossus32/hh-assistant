@@ -1,11 +1,11 @@
 package com.hhassistant.service.vacancy
 
-import com.hhassistant.config.AppConstants
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.exception.OllamaException
 import com.hhassistant.exception.VacancyProcessingException
+import com.hhassistant.service.monitoring.CircuitBreakerStateService
 import com.hhassistant.service.monitoring.OllamaMonitoringService
 import com.hhassistant.service.notification.NotificationService
 import com.hhassistant.service.resume.ResumeService
@@ -47,6 +47,7 @@ class VacancySchedulerService(
     private val vacancyRepository: com.hhassistant.repository.VacancyRepository,
     private val vacancyContentValidator: VacancyContentValidator,
     private val vacancyRecoveryService: VacancyRecoveryService,
+    private val circuitBreakerStateService: CircuitBreakerStateService,
     @Autowired(required = false) private val ollamaMonitoringService: OllamaMonitoringService?,
     @Value("\${app.analysis.max-concurrent-requests:3}") private val maxConcurrentRequests: Int,
 ) {
@@ -92,7 +93,7 @@ class VacancySchedulerService(
      */
     @Scheduled(cron = "\${app.schedule.skipped-retry:0 */5 * * * *}")
     fun retrySkippedVacancies() {
-        val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
+        val circuitBreakerState = circuitBreakerStateService.getCircuitBreakerState()
         if (circuitBreakerState == "OPEN") {
             log.debug("[Scheduler] Circuit Breaker is still OPEN, skipping retry of skipped vacancies")
             return
@@ -215,7 +216,7 @@ class VacancySchedulerService(
         schedulerScope.launch {
             try {
                 // Проверяем состояние Circuit Breaker перед запуском recovery
-                val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
+                val circuitBreakerState = circuitBreakerStateService.getCircuitBreakerState()
                 if (circuitBreakerState == "OPEN") {
                     log.info(
                         "[Scheduler] Recovery skill extraction skipped: Circuit Breaker is OPEN (total without skills: $totalCount, relevant: $relevantCount)",
@@ -317,10 +318,15 @@ class VacancySchedulerService(
 
     /**
      * Отправляет обновление статуса в Telegram
+     * Теперь не отправляет сообщения - только логирует
      */
     private fun sendStatusUpdate(fetchResult: VacancyService.FetchResult) {
-        val hhApiStatus = buildStatusMessage(fetchResult)
-        notificationService.sendStatusUpdate(hhApiStatus, fetchResult.searchKeywords, fetchResult.vacancies.size)
+        // Убрали отправку сообщений каждые 15 минут
+        // Healthcheck теперь выполняется отдельным сервисом HealthCheckService
+        log.debug(
+            "[Scheduler] Status update: ${fetchResult.vacancies.size} vacancies found, " +
+                "keywords: ${fetchResult.searchKeywords.joinToString(", ")}",
+        )
     }
 
     /**
@@ -390,20 +396,12 @@ class VacancySchedulerService(
             e.message ?: "Unauthorized or Forbidden access to HH.ru API. " +
                 "Token may be invalid, expired, or lacks required permissions.",
         )
-        notificationService.sendStatusUpdate(
-            " ERROR: Token invalid or insufficient permissions",
-            emptyList(),
-            0,
-        )
+        // Не отправляем статус-сообщение, если вакансий не найдено (sendStatusUpdate пропустит отправку при vacanciesFound = 0)
     }
 
     private fun handleGeneralError(e: Exception) {
         log.error("[Scheduler] Error during scheduled vacancy check: ${e.message}", e)
-        notificationService.sendStatusUpdate(
-            " ERROR: ${e.message?.take(AppConstants.TextLimits.ERROR_MESSAGE_MAX_LENGTH) ?: "Unknown error"}",
-            emptyList(),
-            0,
-        )
+        // Не отправляем статус-сообщение, если вакансий не найдено (sendStatusUpdate пропустит отправку при vacanciesFound = 0)
     }
 
     /**
@@ -418,7 +416,7 @@ class VacancySchedulerService(
         log.debug(" [Scheduler] Processing vacancy: ${vacancy.id} - '${vacancy.name}'")
         return try {
             // Проверяем состояние Circuit Breaker перед анализом (до semaphore, чтобы не блокировать поток)
-            val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
+            val circuitBreakerState = circuitBreakerStateService.getCircuitBreakerState()
             if (circuitBreakerState == "OPEN") {
                 log.warn(" [Scheduler] Circuit Breaker is OPEN, skipping vacancy ${vacancy.id} for retry later")
                 vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
@@ -538,14 +536,14 @@ class VacancySchedulerService(
                     notificationService.sendMessage(
                         """
  <b>Резюме не найдено!</b>
-                        
+
                         Для начала работы с HH Assistant необходимо загрузить резюме.
-                        
+
                         <b>Как загрузить резюме:</b>
                         1. Отправьте PDF файл с резюме в этот чат
                         2. Дождитесь подтверждения обработки
                         3. После этого вы начнете получать подходящие вакансии
-                        
+
                         <i>Примечание: Резюме должно быть в формате PDF</i>
                         """.trimIndent(),
                     )

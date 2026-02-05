@@ -3,12 +3,10 @@ package com.hhassistant.service.monitoring
 import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.exception.HHAPIException
+import com.hhassistant.repository.VacancyAnalysisRepository
 import com.hhassistant.repository.VacancyRepository
-import com.hhassistant.service.skill.SkillExtractionService
-import com.hhassistant.service.vacancy.VacancyAnalysisService
+import com.hhassistant.repository.VacancySkillRepository
 import com.hhassistant.service.vacancy.VacancyContentValidator
-import com.hhassistant.service.vacancy.VacancyProcessingQueueService
-import com.hhassistant.service.vacancy.VacancyRecoveryService
 import com.hhassistant.service.vacancy.VacancyService
 import com.hhassistant.service.vacancy.VacancyStatusService
 import jakarta.annotation.PreDestroy
@@ -22,7 +20,6 @@ import kotlinx.coroutines.withContext
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.context.event.ApplicationReadyEvent
-import org.springframework.context.annotation.Lazy
 import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
 import java.util.concurrent.ConcurrentHashMap
@@ -45,20 +42,16 @@ enum class OllamaTaskType {
  */
 @Service
 class OllamaMonitoringService(
-    @Lazy private val vacancyAnalysisService: VacancyAnalysisService,
+    private val circuitBreakerStateService: CircuitBreakerStateService,
     private val vacancyRepository: VacancyRepository,
-    private val vacancyRecoveryService: VacancyRecoveryService,
-    @Lazy private val vacancyProcessingQueueService: VacancyProcessingQueueService,
+    private val vacancySkillRepository: VacancySkillRepository,
+    private val vacancyAnalysisRepository: VacancyAnalysisRepository,
     private val vacancyService: VacancyService,
     private val vacancyContentValidator: VacancyContentValidator,
     private val hhVacancyClient: HHVacancyClient,
-    private val skillExtractionService: SkillExtractionService,
     private val vacancyStatusService: VacancyStatusService,
     @Value("\${app.ollama-monitoring.enabled:true}") private val enabled: Boolean,
     @Value("\${app.ollama-monitoring.interval-seconds:5}") private val intervalSeconds: Int,
-    @Value("\${app.ollama-monitoring.recovery.enabled:true}") private val recoveryEnabled: Boolean,
-    @Value("\${app.ollama-monitoring.recovery.interval-seconds:10}") private val recoveryIntervalSeconds: Int,
-    @Value("\${app.ollama-monitoring.recovery.pause-when-empty-minutes:30}") private val pauseWhenEmptyMinutes: Int,
     @Value("\${app.ollama-monitoring.skipped-validation.enabled:true}") private val skippedValidationEnabled: Boolean,
     @Value("\${app.ollama-monitoring.skipped-validation.batch-size:20}") private val skippedValidationBatchSize: Int,
     @Value("\${app.ollama-monitoring.skipped-validation.interval-seconds:5}") private val skippedValidationIntervalSeconds: Int,
@@ -79,12 +72,6 @@ class OllamaMonitoringService(
     )
 
     private var monitoringJob: Job? = null
-
-    // Время последнего запуска восстановления (для ограничения частоты)
-    private val lastRecoveryTime = AtomicLong(0)
-
-    // Время последней паузы восстановления (когда нечего восстанавливать и нет NEW)
-    private val lastRecoveryPauseTime = AtomicLong(0)
 
     // Время последнего запуска валидации skipped вакансий
     private val lastSkippedValidationTime = AtomicLong(0)
@@ -129,13 +116,13 @@ class OllamaMonitoringService(
         // Если активных запросов стало 0 и Circuit Breaker в OPEN, сбрасываем его в CLOSED
         val currentCount = activeRequests.get()
         if (previousCount > 0 && currentCount == 0) {
-            val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
+            val circuitBreakerState = circuitBreakerStateService.getCircuitBreakerState()
             if (circuitBreakerState == "OPEN") {
                 log.info(
                     "[OllamaMonitoring] All active requests completed (was $previousCount, now $currentCount). " +
                         "Resetting Circuit Breaker from OPEN to CLOSED",
                 )
-                vacancyAnalysisService.resetCircuitBreaker()
+                circuitBreakerStateService.resetCircuitBreaker()
                 // Сбрасываем время перехода в OPEN
                 circuitBreakerOpenTime.set(0L)
             }
@@ -186,7 +173,7 @@ class OllamaMonitoringService(
      */
     private fun logOllamaStatus() {
         val activeCount = activeRequests.get()
-        val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
+        val circuitBreakerState = circuitBreakerStateService.getCircuitBreakerState()
         val tasksByType = getActiveTasksByType()
 
         // Отслеживаем время перехода в OPEN
@@ -245,7 +232,7 @@ class OllamaMonitoringService(
                             "(threshold: ${circuitBreakerWaitDurationSeconds}s). " +
                             "Attempting to transition to HALF_OPEN for recovery...",
                     )
-                    vacancyAnalysisService.tryTransitionToHalfOpen()
+                    circuitBreakerStateService.tryTransitionToHalfOpen()
                     // Сбрасываем время после попытки перехода
                     circuitBreakerOpenTime.set(0L)
                 } else {
@@ -258,96 +245,10 @@ class OllamaMonitoringService(
             }
         }
 
-        // Если нет активных запросов и статус IDLE, запускаем восстановление failed/skipped вакансий
-        // и обработку NEW вакансий
-        if (activeCount == 0 && status == "IDLE (no active requests)" && recoveryEnabled) {
-            tryRecoveryFailedAndSkippedVacancies()
-            tryProcessNewVacancies()
-        }
-
         // Если есть активные запросы к LLM, параллельно обрабатываем skipped вакансии
         // (валидация по словам и проверка URL без использования LLM)
         if (activeCount > 0 && skippedValidationEnabled) {
             tryProcessSkippedVacanciesInParallel()
-        }
-    }
-
-    /**
-     * Пытается восстановить failed и skipped вакансии, если прошло достаточно времени с последнего запуска
-     */
-    private fun tryRecoveryFailedAndSkippedVacancies() {
-        val now = System.currentTimeMillis()
-        val lastRecovery = lastRecoveryTime.get()
-        val timeSinceLastRecovery = now - lastRecovery
-
-        // Проверяем, прошло ли достаточно времени с последнего запуска (10 секунд)
-        if (timeSinceLastRecovery < recoveryIntervalSeconds * 1000L) {
-            return
-        }
-
-        // Проверяем состояние Circuit Breaker
-        val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
-        if (circuitBreakerState == "OPEN") {
-            return
-        }
-
-        // Проверяем, есть ли вакансии для восстановления
-        val hasVacanciesToRecover = vacancyRecoveryService.hasVacanciesToRecover()
-
-        // Если нечего восстанавливать - выходим
-        if (!hasVacanciesToRecover) {
-            return
-        }
-
-        // Обновляем время последнего запуска
-        if (!lastRecoveryTime.compareAndSet(lastRecovery, now)) {
-            // Другой поток уже запустил восстановление
-            return
-        }
-
-        // Запускаем восстановление через фасад-сервис
-        vacancyRecoveryService.recoverFailedAndSkippedVacancies { recoveredCount, _ ->
-            log.info(
-                "[OllamaMonitoring] Recovery completed - Reset $recoveredCount vacancies to NEW",
-            )
-        }
-    }
-
-    /**
-     * Пытается обработать NEW вакансии, добавляя их в очередь обработки
-     */
-    private fun tryProcessNewVacancies() {
-        // Проверяем состояние Circuit Breaker
-        val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
-        if (circuitBreakerState == "OPEN") {
-            return
-        }
-
-        // Проверяем, есть ли NEW вакансии
-        val newVacanciesCount = vacancyRepository.countPendingVacancies()
-        if (newVacanciesCount == 0L) {
-            return
-        }
-
-        // Запускаем обработку NEW вакансий асинхронно
-        monitoringScope.launch {
-            try {
-                // Получаем NEW вакансии и добавляем их в очередь
-                val newVacancies = vacancyRepository.findByStatus(VacancyStatus.NEW)
-                    .take(50) // Берем до 50 вакансий за раз
-
-                if (newVacancies.isNotEmpty()) {
-                    val vacancyIds = newVacancies.map { it.id }
-                    val enqueuedCount = vacancyProcessingQueueService.enqueueBatch(vacancyIds)
-
-                    log.info(
-                        "[OllamaMonitoring] Added $enqueuedCount NEW vacancies to processing queue " +
-                            "(out of ${newVacancies.size} found)",
-                    )
-                }
-            } catch (e: Exception) {
-                log.error("[OllamaMonitoring] Error processing NEW vacancies: ${e.message}", e)
-            }
         }
     }
 
@@ -428,7 +329,7 @@ class OllamaMonitoringService(
                             "failed validation: ${validationResult.rejectionReason}, deleting",
                     )
                     try {
-                        skillExtractionService.deleteVacancyAndSkills(vacancy.id)
+                        deleteVacancyAndSkills(vacancy.id)
                         deletedByValidationCount++
                     } catch (e: Exception) {
                         log.error(
@@ -472,7 +373,7 @@ class OllamaMonitoringService(
                 // Если URL неактуален (404) - удаляем вакансию
                 if (!urlCheckResult) {
                     try {
-                        skillExtractionService.deleteVacancyAndSkills(vacancy.id)
+                        deleteVacancyAndSkills(vacancy.id)
                         deletedByUrlCount++
                     } catch (e: Exception) {
                         log.error(
@@ -506,6 +407,29 @@ class OllamaMonitoringService(
                 "validated=$validatedCount, resetToNew=$resetToNewCount, " +
                 "deletedByValidation=$deletedByValidationCount, deletedByUrl=$deletedByUrlCount",
         )
+    }
+
+    /**
+     * Удаляет вакансию и все связанные данные (навыки, анализы)
+     */
+    private fun deleteVacancyAndSkills(vacancyId: String) {
+        try {
+            // Удаляем связи вакансия-навык
+            vacancySkillRepository.deleteByVacancyId(vacancyId)
+
+            // Удаляем анализы вакансии
+            vacancyAnalysisRepository.findByVacancyId(vacancyId)?.let { analysis ->
+                vacancyAnalysisRepository.delete(analysis)
+                log.debug("🗑️ [OllamaMonitoring] Deleted VacancyAnalysis for vacancy $vacancyId")
+            }
+
+            // Удаляем саму вакансию
+            vacancyRepository.deleteById(vacancyId)
+
+            log.info("✅ [OllamaMonitoring] Deleted vacancy $vacancyId and all related data")
+        } catch (e: Exception) {
+            log.error("❌ [OllamaMonitoring] Failed to delete vacancy $vacancyId: ${e.message}", e)
+        }
     }
 
     /**
