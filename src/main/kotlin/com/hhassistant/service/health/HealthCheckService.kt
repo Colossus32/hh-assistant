@@ -28,7 +28,7 @@ class HealthCheckService(
 
     /**
      * Проверяет здоровье системы и отправляет статус в Telegram.
-     * Запускается каждые 15 минут (можно настроить через app.healthcheck.schedule).
+     * Запускается каждый час (можно настроить через app.healthcheck.schedule).
      * Не отправляет сообщения с 23:00 до 8:00.
      */
     @Scheduled(cron = "\${app.healthcheck.schedule:0 */15 * * * *}")
@@ -62,7 +62,7 @@ class HealthCheckService(
 
                 val message = buildHealthCheckMessage(ollamaHealth, hhapiHealth)
                 val sent = telegramClient.sendMessage(message)
-                
+
                 if (sent) {
                     log.info("✅ [HealthCheck] Health check message sent to Telegram")
                 } else {
@@ -94,7 +94,7 @@ class HealthCheckService(
         return buildString {
             appendLine("📊 <b>Health Check</b>")
             appendLine()
-            
+
             // Статус Ollama
             appendLine("<b>Ollama:</b>")
             when (ollamaHealth.status.code) {
@@ -117,7 +117,7 @@ class HealthCheckService(
                 }
             }
             appendLine()
-            
+
             // Статус HH.ru API
             appendLine("<b>HH.ru API:</b>")
             when (hhapiHealth.status.code) {
@@ -147,11 +147,11 @@ class HealthCheckService(
                 }
             }
             appendLine()
-            
+
             // Общий статус
-            val allUp = ollamaHealth.status.code == "UP" && 
-                       (hhapiHealth.status.code == "UP" || hhapiHealth.status.code == "UNKNOWN")
-            
+            val allUp = ollamaHealth.status.code == "UP" &&
+                (hhapiHealth.status.code == "UP" || hhapiHealth.status.code == "UNKNOWN")
+
             if (allUp) {
                 appendLine("✅ <b>Все системы работают</b>")
             } else {
@@ -160,4 +160,3 @@ class HealthCheckService(
         }
     }
 }
-
