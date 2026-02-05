@@ -15,6 +15,7 @@ import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.exception.HHAPIException
 import com.hhassistant.exception.OllamaException
 import com.hhassistant.repository.VacancyAnalysisRepository
+import com.hhassistant.service.monitoring.CircuitBreakerStateService
 import com.hhassistant.service.resume.ResumeService
 import com.hhassistant.service.skill.SkillExtractionService
 import com.hhassistant.service.util.AnalysisTimeService
@@ -44,6 +45,8 @@ class VacancyAnalysisService(
     private val analysisTimeService: AnalysisTimeService,
     private val skillExtractionService: SkillExtractionService,
     private val hhVacancyClient: HHVacancyClient,
+    private val circuitBreakerStateService: CircuitBreakerStateService,
+    private val processedVacancyCacheService: ProcessedVacancyCacheService,
     @Qualifier("ollamaCircuitBreaker") private val ollamaCircuitBreaker: CircuitBreaker,
     @Qualifier("ollamaRetry") private val ollamaRetry: Retry,
     @Value("\${app.analysis.min-relevance-score:0.6}") private val minRelevanceScore: Double,
@@ -62,54 +65,49 @@ class VacancyAnalysisService(
      * @return VacancyAnalysis если анализ существует, null в противном случае
      */
     suspend fun findByVacancyId(vacancyId: String): VacancyAnalysis? {
+        log.debug("🔍 [VacancyAnalysis] Querying database for vacancy $vacancyId")
+        val startTime = System.currentTimeMillis()
         return withContext(Dispatchers.IO) {
-            repository.findByVacancyId(vacancyId)
+            val result = repository.findByVacancyId(vacancyId)
+            val duration = System.currentTimeMillis() - startTime
+            if (result != null) {
+                log.debug("✅ [VacancyAnalysis] Found analysis for vacancy $vacancyId in ${duration}ms")
+            } else {
+                log.debug("❌ [VacancyAnalysis] No analysis found for vacancy $vacancyId in ${duration}ms")
+            }
+            result
         }
     }
 
     /**
      * Получает текущее состояние Circuit Breaker для Ollama
      * @return Состояние Circuit Breaker: "CLOSED", "OPEN", "HALF_OPEN"
+     * @deprecated Используйте CircuitBreakerStateService напрямую
      */
+    @Deprecated("Use CircuitBreakerStateService directly", ReplaceWith("circuitBreakerStateService.getCircuitBreakerState()"))
     fun getCircuitBreakerState(): String {
-        return ollamaCircuitBreaker.state.name
+        return circuitBreakerStateService.getCircuitBreakerState()
     }
 
     /**
      * Сбрасывает Circuit Breaker в состояние CLOSED
      * Используется когда все активные запросы завершились и circuit breaker находится в OPEN
+     * @deprecated Используйте CircuitBreakerStateService напрямую
      */
+    @Deprecated("Use CircuitBreakerStateService directly", ReplaceWith("circuitBreakerStateService.resetCircuitBreaker()"))
     fun resetCircuitBreaker() {
-        val currentState = ollamaCircuitBreaker.state
-        if (currentState.name == "OPEN") {
-            try {
-                ollamaCircuitBreaker.reset()
-                log.info("[Ollama] Circuit Breaker reset from OPEN to CLOSED (all active requests completed)")
-            } catch (e: Exception) {
-                log.warn("[Ollama] Failed to reset Circuit Breaker: ${e.message}")
-            }
-        }
+        circuitBreakerStateService.resetCircuitBreaker()
     }
 
     /**
      * Пытается принудительно перевести Circuit Breaker из OPEN в HALF_OPEN
      * Используется когда прошло достаточно времени с момента перехода в OPEN
      * и нет активных запросов
+     * @deprecated Используйте CircuitBreakerStateService напрямую
      */
+    @Deprecated("Use CircuitBreakerStateService directly", ReplaceWith("circuitBreakerStateService.tryTransitionToHalfOpen()"))
     fun tryTransitionToHalfOpen() {
-        val currentState = ollamaCircuitBreaker.state
-        if (currentState.name == "OPEN") {
-            try {
-                // В Resilience4j нет прямого метода transitionToHalfOpenState()
-                // Но можно использовать reset() для перехода в CLOSED
-                // или попытаться сделать пробный запрос через circuit breaker
-                // Для автоматического перехода в HALF_OPEN нужно просто сбросить
-                ollamaCircuitBreaker.reset()
-                log.info("[Ollama] Circuit Breaker reset from OPEN to CLOSED (attempting recovery)")
-            } catch (e: Exception) {
-                log.warn("[Ollama] Failed to transition Circuit Breaker to HALF_OPEN: ${e.message}")
-            }
-        }
+        circuitBreakerStateService.tryTransitionToHalfOpen()
     }
 
     /**
@@ -121,10 +119,25 @@ class VacancyAnalysisService(
      */
     @Loggable
     suspend fun analyzeVacancy(vacancy: Vacancy): VacancyAnalysis? {
-        // Проверяем, не анализировалась ли вакансия ранее
-        repository.findByVacancyId(vacancy.id)?.let {
-            log.debug("Vacancy ${vacancy.id} already analyzed, returning existing analysis")
-            return it
+        // Проверяем, не анализировалась ли вакансия ранее (используем кэш для быстрой проверки)
+        if (processedVacancyCacheService.isProcessed(vacancy.id)) {
+            // Вакансия обработана, получаем анализ из БД (запрос к БД)
+            log.debug("📊 [VacancyAnalysis] Cache hit for vacancy ${vacancy.id}, querying database for existing analysis")
+            val startTime = System.currentTimeMillis()
+            val existingAnalysis = withContext(Dispatchers.IO) {
+                repository.findByVacancyId(vacancy.id)
+            }
+            val duration = System.currentTimeMillis() - startTime
+            
+            existingAnalysis?.let {
+                log.debug("✅ [VacancyAnalysis] Found existing analysis for vacancy ${vacancy.id} in ${duration}ms, returning cached result")
+                return it
+            }
+            // Кэш говорит, что обработана, но анализа нет - возможно кэш устарел, удаляем из кэша
+            log.warn(
+                "⚠️ [VacancyAnalysis] Vacancy ${vacancy.id} marked as processed in cache, but analysis not found in ${duration}ms. Removing from cache.",
+            )
+            processedVacancyCacheService.removeFromCache(vacancy.id)
         }
 
         // Проверяем состояние Circuit Breaker перед анализом
@@ -319,6 +332,9 @@ class VacancyAnalysisService(
                 savedAnalysis.relevanceScore * 100,
             )}%)",
         )
+
+        // Обновляем кэш обработанных вакансий
+        processedVacancyCacheService.markAsProcessed(vacancy.id)
 
         // Сохраняем навыки в БД, если вакансия релевантна (relevance_score >= minRelevanceScore)
         if (isRelevant && validatedSkills.isNotEmpty()) {

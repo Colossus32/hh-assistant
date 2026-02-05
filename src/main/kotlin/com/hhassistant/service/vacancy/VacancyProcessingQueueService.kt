@@ -5,6 +5,7 @@ import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.exception.OllamaException
 import com.hhassistant.exception.VacancyProcessingException
+import com.hhassistant.service.monitoring.CircuitBreakerStateService
 import com.hhassistant.util.TraceContext
 import jakarta.annotation.PreDestroy
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -46,6 +47,8 @@ class VacancyProcessingQueueService(
     private val vacancyAnalysisService: VacancyAnalysisService,
     private val vacancyNotificationService: VacancyNotificationService,
     private val metricsService: com.hhassistant.metrics.MetricsService,
+    private val circuitBreakerStateService: CircuitBreakerStateService,
+    private val processedVacancyCacheService: ProcessedVacancyCacheService,
     @Autowired(required = false) private val ollamaMonitoringService:
     com.hhassistant.service.monitoring.OllamaMonitoringService?,
     @Value("\${app.vacancy-processing.queue.enabled:true}") private val queueEnabled: Boolean,
@@ -179,27 +182,38 @@ class VacancyProcessingQueueService(
 
             // ВАЖНО: Проверяем, не была ли вакансия уже проанализирована (даже если статус QUEUED)
             // Это может произойти, если статус не обновился из-за ошибки или перезапуска приложения
-            val existingAnalysis = runBlocking {
-                vacancyAnalysisService.findByVacancyId(vacancyId)
-            }
-            if (existingAnalysis != null) {
-                log.warn(
-                    "⚠️ [VacancyProcessingQueue] Vacancy $vacancyId already has analysis (analyzed at ${existingAnalysis.analyzedAt}), " +
-                        "but status is ${vacancy.status}. Updating status and skipping.",
-                )
-                // Обновляем статус на основе существующего анализа
-                val correctStatus = if (existingAnalysis.isRelevant) {
-                    VacancyStatus.ANALYZED
-                } else {
-                    VacancyStatus.NOT_SUITABLE
+            // Используем кэш для быстрой проверки
+            if (processedVacancyCacheService.isProcessed(vacancyId)) {
+                // Вакансия обработана, получаем анализ для обновления статуса (запрос к БД)
+                log.debug("📊 [VacancyProcessingQueue] Cache hit for vacancy $vacancyId, fetching analysis from DB for status update")
+                val existingAnalysis = runBlocking {
+                    vacancyAnalysisService.findByVacancyId(vacancyId)
                 }
-                try {
-                    if (vacancy.status != correctStatus) {
-                        vacancyStatusService.updateVacancyStatus(vacancy.withStatus(correctStatus))
-                        log.info(" [VacancyProcessingQueue] Updated vacancy $vacancyId status from ${vacancy.status} to $correctStatus")
+                if (existingAnalysis != null) {
+                    log.warn(
+                        "⚠️ [VacancyProcessingQueue] Vacancy $vacancyId already has analysis (analyzed at ${existingAnalysis.analyzedAt}), " +
+                            "but status is ${vacancy.status}. Updating status and skipping.",
+                    )
+                    // Обновляем статус на основе существующего анализа
+                    val correctStatus = if (existingAnalysis.isRelevant) {
+                        VacancyStatus.ANALYZED
+                    } else {
+                        VacancyStatus.NOT_SUITABLE
                     }
-                } catch (e: Exception) {
-                    log.error(" [VacancyProcessingQueue] Failed to update status for vacancy $vacancyId: ${e.message}", e)
+                    try {
+                        if (vacancy.status != correctStatus) {
+                            vacancyStatusService.updateVacancyStatus(vacancy.withStatus(correctStatus))
+                            log.info(" [VacancyProcessingQueue] Updated vacancy $vacancyId status from ${vacancy.status} to $correctStatus")
+                        }
+                    } catch (e: Exception) {
+                        log.error(" [VacancyProcessingQueue] Failed to update status for vacancy $vacancyId: ${e.message}", e)
+                    }
+                } else {
+                    // Кэш говорит, что обработана, но анализа нет - возможно кэш устарел, удаляем из кэша
+                    log.warn(
+                        "⚠️ [VacancyProcessingQueue] Vacancy $vacancyId marked as processed in cache, but analysis not found. Removing from cache.",
+                    )
+                    processedVacancyCacheService.removeFromCache(vacancyId)
                 }
                 queuedVacancies.remove(vacancyId)
                 return false
@@ -243,27 +257,38 @@ class VacancyProcessingQueueService(
 
             // ВАЖНО: Даже при checkDuplicate=false проверяем, не была ли вакансия уже проанализирована
             // Это предотвращает повторную обработку при перезапуске приложения
-            val existingAnalysis = runBlocking {
-                vacancyAnalysisService.findByVacancyId(vacancyId)
-            }
-            if (existingAnalysis != null) {
-                log.warn(
-                    "⚠️ [VacancyProcessingQueue] Vacancy $vacancyId already has analysis (analyzed at ${existingAnalysis.analyzedAt}), " +
-                        "but status is ${vacancy.status}. Updating status and skipping.",
-                )
-                // Обновляем статус на основе существующего анализа
-                val correctStatus = if (existingAnalysis.isRelevant) {
-                    VacancyStatus.ANALYZED
-                } else {
-                    VacancyStatus.SKIPPED
+            // Используем кэш для быстрой проверки
+            if (processedVacancyCacheService.isProcessed(vacancyId)) {
+                // Вакансия обработана, получаем анализ для обновления статуса (запрос к БД)
+                log.debug("📊 [VacancyProcessingQueue] Cache hit for vacancy $vacancyId, fetching analysis from DB for status update")
+                val existingAnalysis = runBlocking {
+                    vacancyAnalysisService.findByVacancyId(vacancyId)
                 }
-                try {
-                    if (vacancy.status != correctStatus) {
-                        vacancyStatusService.updateVacancyStatus(vacancy.withStatus(correctStatus))
-                        log.info(" [VacancyProcessingQueue] Updated vacancy $vacancyId status from ${vacancy.status} to $correctStatus")
+                if (existingAnalysis != null) {
+                    log.warn(
+                        "⚠️ [VacancyProcessingQueue] Vacancy $vacancyId already has analysis (analyzed at ${existingAnalysis.analyzedAt}), " +
+                            "but status is ${vacancy.status}. Updating status and skipping.",
+                    )
+                    // Обновляем статус на основе существующего анализа
+                    val correctStatus = if (existingAnalysis.isRelevant) {
+                        VacancyStatus.ANALYZED
+                    } else {
+                        VacancyStatus.SKIPPED
                     }
-                } catch (e: Exception) {
-                    log.error(" [VacancyProcessingQueue] Failed to update status for vacancy $vacancyId: ${e.message}", e)
+                    try {
+                        if (vacancy.status != correctStatus) {
+                            vacancyStatusService.updateVacancyStatus(vacancy.withStatus(correctStatus))
+                            log.info(" [VacancyProcessingQueue] Updated vacancy $vacancyId status from ${vacancy.status} to $correctStatus")
+                        }
+                    } catch (e: Exception) {
+                        log.error(" [VacancyProcessingQueue] Failed to update status for vacancy $vacancyId: ${e.message}", e)
+                    }
+                } else {
+                    // Кэш говорит, что обработана, но анализа нет - возможно кэш устарел, удаляем из кэша
+                    log.warn(
+                        "⚠️ [VacancyProcessingQueue] Vacancy $vacancyId marked as processed in cache, but analysis not found. Removing from cache.",
+                    )
+                    processedVacancyCacheService.removeFromCache(vacancyId)
                 }
                 queuedVacancies.remove(vacancyId)
                 return false
@@ -367,25 +392,36 @@ class VacancyProcessingQueueService(
                     }
 
                     // Дополнительная проверка: если анализ уже существует, но статус не обновлен
-                    val existingAnalysis = vacancyAnalysisService.findByVacancyId(item.vacancyId)
-                    if (existingAnalysis != null) {
-                        log.warn(
-                            "⚠️ [VacancyProcessingQueue] Vacancy ${item.vacancyId} already has analysis (analyzed at ${existingAnalysis.analyzedAt}), " +
-                                "but status is ${vacancy.status}. Updating status and skipping processing.",
-                        )
-                        // Обновляем статус на основе существующего анализа
-                        val correctStatus = if (existingAnalysis.isRelevant) {
-                            VacancyStatus.ANALYZED
-                        } else {
-                            VacancyStatus.NOT_SUITABLE
-                        }
-                        try {
-                            if (vacancy.status != correctStatus) {
-                                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(correctStatus))
-                                log.info(" [VacancyProcessingQueue] Updated vacancy ${item.vacancyId} status from ${vacancy.status} to $correctStatus")
+                    // Используем кэш для быстрой проверки
+                    if (processedVacancyCacheService.isProcessed(item.vacancyId)) {
+                        // Кэш-хит, получаем анализ для обновления статуса (запрос к БД)
+                        log.debug("📊 [VacancyProcessingQueue] Cache hit for vacancy ${item.vacancyId}, fetching analysis from DB for status update")
+                        val existingAnalysis = vacancyAnalysisService.findByVacancyId(item.vacancyId)
+                        if (existingAnalysis != null) {
+                            log.warn(
+                                "⚠️ [VacancyProcessingQueue] Vacancy ${item.vacancyId} already has analysis (analyzed at ${existingAnalysis.analyzedAt}), " +
+                                    "but status is ${vacancy.status}. Updating status and skipping processing.",
+                            )
+                            // Обновляем статус на основе существующего анализа
+                            val correctStatus = if (existingAnalysis.isRelevant) {
+                                VacancyStatus.ANALYZED
+                            } else {
+                                VacancyStatus.NOT_SUITABLE
                             }
-                        } catch (e: Exception) {
-                            log.error(" [VacancyProcessingQueue] Failed to update status for vacancy ${item.vacancyId}: ${e.message}", e)
+                            try {
+                                if (vacancy.status != correctStatus) {
+                                    vacancyStatusService.updateVacancyStatus(vacancy.withStatus(correctStatus))
+                                    log.info(" [VacancyProcessingQueue] Updated vacancy ${item.vacancyId} status from ${vacancy.status} to $correctStatus")
+                                }
+                            } catch (e: Exception) {
+                                log.error(" [VacancyProcessingQueue] Failed to update status for vacancy ${item.vacancyId}: ${e.message}", e)
+                            }
+                        } else {
+                            // Кэш говорит, что обработана, но анализа нет - возможно кэш устарел, удаляем из кэша
+                            log.warn(
+                                "⚠️ [VacancyProcessingQueue] Vacancy ${item.vacancyId} marked as processed in cache, but analysis not found. Removing from cache.",
+                            )
+                            processedVacancyCacheService.removeFromCache(item.vacancyId)
                         }
                         processingVacancies.remove(item.vacancyId)
                         queuedVacancies.remove(item.vacancyId)
@@ -395,7 +431,7 @@ class VacancyProcessingQueueService(
                     }
 
                     // Проверяем состояние Circuit Breaker перед обработкой
-                    val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
+                    val circuitBreakerState = circuitBreakerStateService.getCircuitBreakerState()
                     if (circuitBreakerState == "OPEN") {
                         // Если Circuit Breaker OPEN, проверяем активные запросы
                         var activeRequests = ollamaMonitoringService?.getActiveRequestsCount() ?: 0
@@ -577,7 +613,7 @@ class VacancyProcessingQueueService(
             // Проверяем, является ли это ошибкой rate limit
             val isRateLimit = e.message?.contains("Rate limit exceeded") == true ||
                 e.message?.contains("marked as SKIPPED for retry later") == true
-            val circuitBreakerState = vacancyAnalysisService.getCircuitBreakerState()
+            val circuitBreakerState = circuitBreakerStateService.getCircuitBreakerState()
 
             if (isCircuitBreakerOpen || circuitBreakerState == "OPEN") {
                 // Если Circuit Breaker OPEN, помечаем как SKIPPED для повторной обработки позже
