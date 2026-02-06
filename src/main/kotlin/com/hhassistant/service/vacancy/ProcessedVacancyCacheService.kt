@@ -48,7 +48,6 @@ class ProcessedVacancyCacheService(
         val isInCache = cacheLock.read {
             processedVacanciesCache.containsKey(vacancyId)
         }
-        
         if (isInCache) {
             cacheHits++
             log.debug("✅ [ProcessedVacancyCache] Cache HIT for vacancy $vacancyId (hits: $cacheHits, misses: $cacheMisses)")
@@ -56,7 +55,6 @@ class ProcessedVacancyCacheService(
             cacheMisses++
             log.debug("❌ [ProcessedVacancyCache] Cache MISS for vacancy $vacancyId (hits: $cacheHits, misses: $cacheMisses)")
         }
-        
         return isInCache
     }
 
@@ -149,24 +147,20 @@ class ProcessedVacancyCacheService(
     @Scheduled(cron = "0 0 0 * * *") // Каждый день в полночь
     fun invalidateAndRebuildCache() {
         log.info("🔄 [ProcessedVacancyCache] Invalidating and rebuilding cache at midnight...")
-        
         // Логируем статистику перед инвалидацией
         val stats = getCacheStats()
         log.info(
             "📊 [ProcessedVacancyCache] Cache stats before rebuild: hits=${stats.hits}, misses=${stats.misses}, " +
                 "hitRate=${String.format("%.2f", stats.hitRate)}%, size=${stats.size}",
         )
-        
         runBlocking {
             try {
                 loadCacheFromDatabase()
-                
                 // Сбрасываем счетчики после пересборки
                 cacheLock.write {
                     cacheHits = 0
                     cacheMisses = 0
                 }
-                
                 log.info("✅ [ProcessedVacancyCache] Cache successfully rebuilt at midnight, stats reset")
             } catch (e: Exception) {
                 log.error(

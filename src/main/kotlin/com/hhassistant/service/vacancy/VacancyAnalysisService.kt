@@ -128,7 +128,6 @@ class VacancyAnalysisService(
                 repository.findByVacancyId(vacancy.id)
             }
             val duration = System.currentTimeMillis() - startTime
-            
             existingAnalysis?.let {
                 log.debug("✅ [VacancyAnalysis] Found existing analysis for vacancy ${vacancy.id} in ${duration}ms, returning cached result")
                 return it
