@@ -3,7 +3,13 @@ package com.hhassistant.service.health
 import com.hhassistant.client.telegram.TelegramClient
 import com.hhassistant.health.HHAPIHealthIndicator
 import com.hhassistant.health.OllamaHealthIndicator
-import kotlinx.coroutines.runBlocking
+import jakarta.annotation.PreDestroy
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.actuate.health.Health
@@ -14,7 +20,8 @@ import java.time.LocalTime
 /**
  * Сервис для периодической проверки здоровья системы и отправки статуса в Telegram.
  * Проверяет статус Ollama и подключение к HH.ru API.
- * Не отправляет сообщения с 23:00 до 8:00.
+ * Важно: Хелсчеки НЕ отправляются с 23:00 до 8:00 (ночной режим тишины).
+ * В отличие от хелсчеков, уведомления о вакансиях отправляются всегда, чтобы не пропустить важные вакансии.
  */
 @Service
 class HealthCheckService(
@@ -26,10 +33,22 @@ class HealthCheckService(
 ) {
     private val log = KotlinLogging.logger {}
 
+    // Scope для асинхронных операций
+    private val healthCheckScope = CoroutineScope(
+        Dispatchers.Default + SupervisorJob() + CoroutineExceptionHandler { _, exception ->
+            log.error(
+                "❌ [HealthCheck] Unhandled exception in health check coroutine: ${exception.message}",
+                exception,
+            )
+        },
+    )
+
     /**
      * Проверяет здоровье системы и отправляет статус в Telegram.
      * Запускается каждый час (можно настроить через app.healthcheck.schedule).
-     * Не отправляет сообщения с 23:00 до 8:00.
+     * Не отправляет сообщения с 23:00 до 8:00 (ночной режим тишины).
+     * В отличие от хелсчеков, уведомления о вакансиях отправляются всегда.
+     * Выполняется асинхронно, не блокируя планировщик Spring.
      */
     @Scheduled(cron = "\${app.healthcheck.schedule:0 */15 * * * *}")
     fun performHealthCheck() {
@@ -55,7 +74,7 @@ class HealthCheckService(
 
         log.info("📊 [HealthCheck] Performing health check...")
 
-        runBlocking {
+        healthCheckScope.launch {
             try {
                 val ollamaHealth = ollamaHealthIndicator.health()
                 val hhapiHealth = hhapiHealthIndicator.health()
@@ -158,5 +177,14 @@ class HealthCheckService(
                 appendLine("⚠️ <b>Обнаружены проблемы</b>")
             }
         }
+    }
+
+    /**
+     * Очищает ресурсы при закрытии приложения
+     */
+    @PreDestroy
+    fun shutdown() {
+        log.info("🔄 [HealthCheck] Shutting down health check scope...")
+        healthCheckScope.cancel()
     }
 }

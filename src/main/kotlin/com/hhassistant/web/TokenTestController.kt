@@ -4,7 +4,6 @@ import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.exception.HHAPIException
 import com.hhassistant.service.util.EnvFileService
-import kotlinx.coroutines.runBlocking
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
@@ -31,7 +30,7 @@ class TokenTestController(
      * GET /api/token/test
      */
     @GetMapping("/test")
-    fun testToken(
+    suspend fun testToken(
         @RequestParam(required = false, defaultValue = "Java") keywords: String,
     ): ResponseEntity<Map<String, Any>> {
         log.info("🔍 [TokenTest] Testing token validity...")
@@ -73,9 +72,7 @@ class TokenTestController(
                 isActive = true,
             )
 
-            val vacancies = runBlocking {
-                hhVacancyClient.searchVacancies(searchConfig)
-            }
+            val vacancies = hhVacancyClient.searchVacancies(searchConfig)
 
             response["status"] = "✅ SUCCESS"
             response["message"] = "Token is valid and working!"

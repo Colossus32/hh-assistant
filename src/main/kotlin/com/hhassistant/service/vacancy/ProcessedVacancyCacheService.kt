@@ -1,8 +1,13 @@
 package com.hhassistant.service.vacancy
 
 import com.hhassistant.repository.VacancyAnalysisRepository
+import jakarta.annotation.PreDestroy
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import mu.KotlinLogging
 import org.springframework.boot.context.event.ApplicationReadyEvent
@@ -39,6 +44,16 @@ class ProcessedVacancyCacheService(
     private var cacheHits = 0L
     private var cacheMisses = 0L
 
+    // Scope для асинхронных операций
+    private val cacheScope = CoroutineScope(
+        Dispatchers.Default + SupervisorJob() + CoroutineExceptionHandler { _, exception ->
+            log.error(
+                "❌ [ProcessedVacancyCache] Unhandled exception in cache coroutine: ${exception.message}",
+                exception,
+            )
+        },
+    )
+
     /**
      * Проверяет, была ли вакансия уже обработана (есть анализ в БД)
      * @param vacancyId ID вакансии
@@ -56,6 +71,38 @@ class ProcessedVacancyCacheService(
             log.debug("❌ [ProcessedVacancyCache] Cache MISS for vacancy $vacancyId (hits: $cacheHits, misses: $cacheMisses)")
         }
         return isInCache
+    }
+
+    /**
+     * Проверяет батчем, какие вакансии уже были обработаны
+     * @param vacancyIds Список ID вакансий для проверки
+     * @return Множество ID вакансий, которые уже были обработаны
+     */
+    fun areProcessed(vacancyIds: List<String>): Set<String> {
+        if (vacancyIds.isEmpty()) {
+            return emptySet()
+        }
+
+        val processedIds = cacheLock.read {
+            vacancyIds.filter { processedVacanciesCache.containsKey(it) }.toSet()
+        }
+
+        // Обновляем статистику
+        val hits = processedIds.size
+        val misses = vacancyIds.size - hits
+        cacheLock.write {
+            cacheHits += hits
+            cacheMisses += misses
+        }
+
+        if (log.isDebugEnabled) {
+            log.debug(
+                "✅ [ProcessedVacancyCache] Batch check: ${processedIds.size}/${vacancyIds.size} processed " +
+                    "(hits: $cacheHits, misses: $cacheMisses)",
+            )
+        }
+
+        return processedIds
     }
 
     /**
@@ -119,10 +166,11 @@ class ProcessedVacancyCacheService(
 
     /**
      * Загружает кэш при старте приложения
+     * Загружается асинхронно, не блокируя старт приложения
      */
     @EventListener(ApplicationReadyEvent::class)
     fun loadCacheOnStartup() {
-        runBlocking {
+        cacheScope.launch {
             try {
                 loadCacheFromDatabase()
                 // Сбрасываем счетчики после загрузки кэша при старте
@@ -143,6 +191,7 @@ class ProcessedVacancyCacheService(
 
     /**
      * Инвалидирует кэш в полночь и пересобирает его заново
+     * Выполняется асинхронно, не блокируя планировщик Spring
      */
     @Scheduled(cron = "0 0 0 * * *") // Каждый день в полночь
     fun invalidateAndRebuildCache() {
@@ -153,7 +202,7 @@ class ProcessedVacancyCacheService(
             "📊 [ProcessedVacancyCache] Cache stats before rebuild: hits=${stats.hits}, misses=${stats.misses}, " +
                 "hitRate=${String.format("%.2f", stats.hitRate)}%, size=${stats.size}",
         )
-        runBlocking {
+        cacheScope.launch {
             try {
                 loadCacheFromDatabase()
                 // Сбрасываем счетчики после пересборки
@@ -221,4 +270,13 @@ class ProcessedVacancyCacheService(
         val size: Int,
         val hitRate: Double,
     )
+
+    /**
+     * Очищает ресурсы при закрытии приложения
+     */
+    @PreDestroy
+    fun shutdown() {
+        log.info("🔄 [ProcessedVacancyCache] Shutting down cache scope...")
+        cacheScope.cancel()
+    }
 }

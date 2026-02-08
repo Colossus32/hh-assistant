@@ -12,11 +12,13 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import mu.KotlinLogging
@@ -110,6 +112,7 @@ class VacancyProcessingQueueService(
 
     /**
      * Загружает ожидающие вакансии в очередь при старте приложения
+     * Загружается асинхронно, не блокируя старт приложения
      */
     @EventListener(ApplicationReadyEvent::class)
     fun loadPendingVacanciesOnStartup() {
@@ -120,12 +123,12 @@ class VacancyProcessingQueueService(
 
         log.info(" [VacancyProcessingQueue] Loading pending QUEUED vacancies into queue on startup...")
 
-        runBlocking {
+        queueScope.launch {
             try {
                 val queuedVacancies = vacancyRepository.findByStatus(VacancyStatus.QUEUED)
                 if (queuedVacancies.isEmpty()) {
                     log.info("ℹ️ [VacancyProcessingQueue] No QUEUED vacancies found on startup")
-                    return@runBlocking
+                    return@launch
                 }
 
                 log.info(" [VacancyProcessingQueue] Found ${queuedVacancies.size} QUEUED vacancies on startup")
@@ -184,36 +187,9 @@ class VacancyProcessingQueueService(
             // Это может произойти, если статус не обновился из-за ошибки или перезапуска приложения
             // Используем кэш для быстрой проверки
             if (processedVacancyCacheService.isProcessed(vacancyId)) {
-                // Вакансия обработана, получаем анализ для обновления статуса (запрос к БД)
-                log.debug("📊 [VacancyProcessingQueue] Cache hit for vacancy $vacancyId, fetching analysis from DB for status update")
-                val existingAnalysis = runBlocking {
-                    vacancyAnalysisService.findByVacancyId(vacancyId)
-                }
-                if (existingAnalysis != null) {
-                    log.warn(
-                        "⚠️ [VacancyProcessingQueue] Vacancy $vacancyId already has analysis (analyzed at ${existingAnalysis.analyzedAt}), " +
-                            "but status is ${vacancy.status}. Updating status and skipping.",
-                    )
-                    // Обновляем статус на основе существующего анализа
-                    val correctStatus = if (existingAnalysis.isRelevant) {
-                        VacancyStatus.ANALYZED
-                    } else {
-                        VacancyStatus.NOT_SUITABLE
-                    }
-                    try {
-                        if (vacancy.status != correctStatus) {
-                            vacancyStatusService.updateVacancyStatus(vacancy.withStatus(correctStatus))
-                            log.info(" [VacancyProcessingQueue] Updated vacancy $vacancyId status from ${vacancy.status} to $correctStatus")
-                        }
-                    } catch (e: Exception) {
-                        log.error(" [VacancyProcessingQueue] Failed to update status for vacancy $vacancyId: ${e.message}", e)
-                    }
-                } else {
-                    // Кэш говорит, что обработана, но анализа нет - возможно кэш устарел, удаляем из кэша
-                    log.warn(
-                        "⚠️ [VacancyProcessingQueue] Vacancy $vacancyId marked as processed in cache, but analysis not found. Removing from cache.",
-                    )
-                    processedVacancyCacheService.removeFromCache(vacancyId)
+                // Запускаем асинхронное обновление статуса, не блокируя поток
+                queueScope.launch {
+                    updateStatusIfAnalysisExists(vacancyId, vacancy, checkDuplicate = true)
                 }
                 queuedVacancies.remove(vacancyId)
                 return false
@@ -259,36 +235,9 @@ class VacancyProcessingQueueService(
             // Это предотвращает повторную обработку при перезапуске приложения
             // Используем кэш для быстрой проверки
             if (processedVacancyCacheService.isProcessed(vacancyId)) {
-                // Вакансия обработана, получаем анализ для обновления статуса (запрос к БД)
-                log.debug("📊 [VacancyProcessingQueue] Cache hit for vacancy $vacancyId, fetching analysis from DB for status update")
-                val existingAnalysis = runBlocking {
-                    vacancyAnalysisService.findByVacancyId(vacancyId)
-                }
-                if (existingAnalysis != null) {
-                    log.warn(
-                        "⚠️ [VacancyProcessingQueue] Vacancy $vacancyId already has analysis (analyzed at ${existingAnalysis.analyzedAt}), " +
-                            "but status is ${vacancy.status}. Updating status and skipping.",
-                    )
-                    // Обновляем статус на основе существующего анализа
-                    val correctStatus = if (existingAnalysis.isRelevant) {
-                        VacancyStatus.ANALYZED
-                    } else {
-                        VacancyStatus.SKIPPED
-                    }
-                    try {
-                        if (vacancy.status != correctStatus) {
-                            vacancyStatusService.updateVacancyStatus(vacancy.withStatus(correctStatus))
-                            log.info(" [VacancyProcessingQueue] Updated vacancy $vacancyId status from ${vacancy.status} to $correctStatus")
-                        }
-                    } catch (e: Exception) {
-                        log.error(" [VacancyProcessingQueue] Failed to update status for vacancy $vacancyId: ${e.message}", e)
-                    }
-                } else {
-                    // Кэш говорит, что обработана, но анализа нет - возможно кэш устарел, удаляем из кэша
-                    log.warn(
-                        "⚠️ [VacancyProcessingQueue] Vacancy $vacancyId marked as processed in cache, but analysis not found. Removing from cache.",
-                    )
-                    processedVacancyCacheService.removeFromCache(vacancyId)
+                // Запускаем асинхронное обновление статуса, не блокируя поток
+                queueScope.launch {
+                    updateStatusIfAnalysisExists(vacancyId, vacancy, checkDuplicate = false)
                 }
                 queuedVacancies.remove(vacancyId)
                 return false
@@ -322,16 +271,107 @@ class VacancyProcessingQueueService(
 
     /**
      * Добавляет несколько вакансий в очередь
+     * Использует батчевую проверку обработанных вакансий и параллельную обработку
      */
     @Loggable
-    fun enqueueBatch(vacancyIds: List<String>): Int {
-        var addedCount = 0
-        for (vacancyId in vacancyIds) {
-            if (enqueue(vacancyId)) {
-                addedCount++
-            }
+    suspend fun enqueueBatch(vacancyIds: List<String>): Int {
+        if (vacancyIds.isEmpty()) {
+            return 0
         }
-        return addedCount
+
+        if (!queueEnabled) {
+            log.debug("ℹ️ [VacancyProcessingQueue] Queue is disabled, skipping batch enqueue")
+            return 0
+        }
+
+        // Батчевая проверка обработанных вакансий
+        val processedIds = processedVacancyCacheService.areProcessed(vacancyIds)
+        val unprocessedIds = vacancyIds.filter { it !in processedIds }
+
+        if (unprocessedIds.isEmpty()) {
+            log.debug(" [VacancyProcessingQueue] All ${vacancyIds.size} vacancies already processed, skipping")
+            return 0
+        }
+
+        log.debug(
+            " [VacancyProcessingQueue] Batch enqueue: ${processedIds.size} already processed, " +
+                "${unprocessedIds.size} to process",
+        )
+
+        // Параллельная обработка оставшихся вакансий
+        return supervisorScope {
+            val results = unprocessedIds.map { vacancyId ->
+                async(Dispatchers.Default) {
+                    try {
+                        if (enqueue(vacancyId, checkDuplicate = true)) {
+                            1
+                        } else {
+                            0
+                        }
+                    } catch (e: Exception) {
+                        log.error(
+                            " [VacancyProcessingQueue] Error enqueueing vacancy $vacancyId in batch: ${e.message}",
+                            e,
+                        )
+                        0
+                    }
+                }
+            }.awaitAll()
+
+            results.sum()
+        }
+    }
+
+    /**
+     * Асинхронно обновляет статус вакансии, если анализ уже существует в БД.
+     * Вызывается когда кэш указывает, что вакансия уже обработана.
+     *
+     * @param vacancyId ID вакансии
+     * @param vacancy Вакансия из БД
+     * @param checkDuplicate Флаг, влияющий на выбор статуса при нерелевантной вакансии
+     */
+    private suspend fun updateStatusIfAnalysisExists(
+        vacancyId: String,
+        vacancy: Vacancy,
+        checkDuplicate: Boolean,
+    ) {
+        try {
+            log.debug("📊 [VacancyProcessingQueue] Cache hit for vacancy $vacancyId, fetching analysis from DB for status update")
+            val existingAnalysis = vacancyAnalysisService.findByVacancyId(vacancyId)
+
+            if (existingAnalysis != null) {
+                log.warn(
+                    "⚠️ [VacancyProcessingQueue] Vacancy $vacancyId already has analysis (analyzed at ${existingAnalysis.analyzedAt}), " +
+                        "but status is ${vacancy.status}. Updating status and skipping.",
+                )
+
+                // Обновляем статус на основе существующего анализа
+                val correctStatus = if (existingAnalysis.isRelevant) {
+                    VacancyStatus.ANALYZED
+                } else {
+                    // Разница в статусах для checkDuplicate = true/false
+                    if (checkDuplicate) {
+                        VacancyStatus.NOT_SUITABLE
+                    } else {
+                        VacancyStatus.SKIPPED
+                    }
+                }
+
+                if (vacancy.status != correctStatus) {
+                    vacancyStatusService.updateVacancyStatus(vacancy.withStatus(correctStatus))
+                    log.info(" [VacancyProcessingQueue] Updated vacancy $vacancyId status from ${vacancy.status} to $correctStatus")
+                }
+            } else {
+                // Кэш говорит, что обработана, но анализа нет
+                // Не удаляем из кэша - кэш пересобирается раз в день в полночь
+                log.warn(
+                    "⚠️ [VacancyProcessingQueue] Vacancy $vacancyId marked as processed in cache, but analysis not found. " +
+                        "Cache will be rebuilt at midnight.",
+                )
+            }
+        } catch (e: Exception) {
+            log.error(" [VacancyProcessingQueue] Failed to update status for vacancy $vacancyId: ${e.message}", e)
+        }
     }
 
     /**
@@ -769,73 +809,72 @@ class VacancyProcessingQueueService(
     /**
      * Помечает все вакансии в процессе обработки как SKIPPED
      * Вызывается при закрытии приложения, если есть активные запросы к LLM
+     * Все операции синхронные, runBlocking не требуется
      */
     private fun markProcessingVacanciesAsSkipped() {
-        runBlocking {
-            try {
-                // Получаем все вакансии, которые сейчас обрабатываются или в очереди
-                val processingVacancyIds = processingVacancies.keys.toList()
-                val queuedVacancyIds = queue.map { it.vacancyId }
-                val trackedQueuedIds = queuedVacancies.keys.toList()
+        try {
+            // Получаем все вакансии, которые сейчас обрабатываются или в очереди
+            val processingVacancyIds = processingVacancies.keys.toList()
+            val queuedVacancyIds = queue.map { it.vacancyId }
+            val trackedQueuedIds = queuedVacancies.keys.toList()
 
-                // Объединяем списки и убираем дубликаты
-                val allVacancyIds = (processingVacancyIds + queuedVacancyIds + trackedQueuedIds).distinct()
+            // Объединяем списки и убираем дубликаты
+            val allVacancyIds = (processingVacancyIds + queuedVacancyIds + trackedQueuedIds).distinct()
 
-                if (allVacancyIds.isEmpty()) {
-                    log.info("[VacancyProcessingQueue] No vacancies to mark as SKIPPED")
-                    return@runBlocking
-                }
+            if (allVacancyIds.isEmpty()) {
+                log.info("[VacancyProcessingQueue] No vacancies to mark as SKIPPED")
+                return
+            }
 
-                log.info(
-                    "[VacancyProcessingQueue] Marking ${allVacancyIds.size} vacancies as SKIPPED " +
-                        "(processing: ${processingVacancyIds.size}, queued: ${queuedVacancyIds.size})",
-                )
+            log.info(
+                "[VacancyProcessingQueue] Marking ${allVacancyIds.size} vacancies as SKIPPED " +
+                    "(processing: ${processingVacancyIds.size}, queued: ${queuedVacancyIds.size})",
+            )
 
-                var markedCount = 0
-                var errorCount = 0
+            var markedCount = 0
+            var errorCount = 0
 
-                // Помечаем каждую вакансию как SKIPPED
-                for (vacancyId in allVacancyIds) {
-                    try {
-                        val vacancy = vacancyRepository.findById(vacancyId).orElse(null)
-                        if (vacancy == null) {
-                            log.debug("[VacancyProcessingQueue] Vacancy $vacancyId not found, skipping")
-                            continue
-                        }
+            // Помечаем каждую вакансию как SKIPPED
+            for (vacancyId in allVacancyIds) {
+                try {
+                    val vacancy = vacancyRepository.findById(vacancyId).orElse(null)
+                    if (vacancy == null) {
+                        log.debug("[VacancyProcessingQueue] Vacancy $vacancyId not found, skipping")
+                        continue
+                    }
 
-                        // Помечаем только NEW и QUEUED вакансии как SKIPPED
-                        if (vacancy.status in listOf(VacancyStatus.NEW, VacancyStatus.QUEUED)) {
-                            vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
-                            markedCount++
-                            log.debug(
-                                "[VacancyProcessingQueue] Marked vacancy $vacancyId as SKIPPED " +
-                                    "(was: ${vacancy.status})",
-                            )
-                        } else {
-                            log.debug(
-                                "[VacancyProcessingQueue] Vacancy $vacancyId already has status ${vacancy.status}, " +
-                                    "not marking as SKIPPED",
-                            )
-                        }
-                    } catch (e: Exception) {
-                        errorCount++
-                        log.error(
-                            "[VacancyProcessingQueue] Failed to mark vacancy $vacancyId as SKIPPED: ${e.message}",
-                            e,
+                    // Помечаем только NEW и QUEUED вакансии как SKIPPED
+                    if (vacancy.status in listOf(VacancyStatus.NEW, VacancyStatus.QUEUED)) {
+                        vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
+                        markedCount++
+                        log.debug(
+                            "[VacancyProcessingQueue] Marked vacancy $vacancyId as SKIPPED " +
+                                "(was: ${vacancy.status})",
+                        )
+                    } else {
+                        log.debug(
+                            "[VacancyProcessingQueue] Vacancy $vacancyId already has status ${vacancy.status}, " +
+                                "not marking as SKIPPED",
                         )
                     }
+                } catch (e: Exception) {
+                    errorCount++
+                    log.error(
+                        "[VacancyProcessingQueue] Failed to mark vacancy $vacancyId as SKIPPED: ${e.message}",
+                        e,
+                    )
                 }
-
-                log.info(
-                    "[VacancyProcessingQueue] Shutdown complete: marked $markedCount vacancies as SKIPPED, " +
-                        "$errorCount errors",
-                )
-            } catch (e: Exception) {
-                log.error(
-                    "[VacancyProcessingQueue] Error marking vacancies as SKIPPED during shutdown: ${e.message}",
-                    e,
-                )
             }
+
+            log.info(
+                "[VacancyProcessingQueue] Shutdown complete: marked $markedCount vacancies as SKIPPED, " +
+                    "$errorCount errors",
+            )
+        } catch (e: Exception) {
+            log.error(
+                "[VacancyProcessingQueue] Error marking vacancies as SKIPPED during shutdown: ${e.message}",
+                e,
+            )
         }
     }
 }

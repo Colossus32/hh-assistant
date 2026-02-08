@@ -3,7 +3,6 @@ package com.hhassistant.web
 import com.hhassistant.client.hh.HHOAuthService
 import com.hhassistant.client.hh.dto.OAuthTokenResponse
 import com.hhassistant.service.util.EnvFileService
-import kotlinx.coroutines.runBlocking
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
@@ -58,15 +57,13 @@ class OAuthController(
      * Не требует авторизации пользователя.
      */
     @GetMapping("/application-token")
-    fun getApplicationToken(
+    suspend fun getApplicationToken(
         @Value("\${hh.api.user-agent}") userAgent: String,
     ): ResponseEntity<Map<String, Any>> {
         log.info { "Requesting application token" }
 
         // Обработка ошибок централизована в GlobalExceptionHandler
-        val tokenResponse: OAuthTokenResponse = runBlocking {
-            oauthService.getApplicationToken(userAgent)
-        }
+        val tokenResponse: OAuthTokenResponse = oauthService.getApplicationToken(userAgent)
 
         log.info { "Successfully obtained application token" }
 
@@ -129,7 +126,7 @@ class OAuthController(
      * GET /oauth/callback?code=XXX
      */
     @GetMapping("/callback")
-    fun callback(
+    suspend fun callback(
         @RequestParam("code", required = false) code: String?,
         @RequestParam("error", required = false) error: String?,
         @RequestParam("error_description", required = false) errorDescription: String?,
@@ -160,9 +157,7 @@ class OAuthController(
         log.info { "Received authorization code, exchanging for access token..." }
 
         // Обработка ошибок централизована в GlobalExceptionHandler
-        val tokenResponse: OAuthTokenResponse = runBlocking {
-            oauthService.exchangeCodeForToken(code)
-        }
+        val tokenResponse: OAuthTokenResponse = oauthService.exchangeCodeForToken(code)
 
         log.info { "Successfully obtained access token" }
 

@@ -81,7 +81,7 @@ class VacancyFetchServiceTest {
         coEvery { hhVacancyClient.searchVacancies(any()) } returns listOf(vacancyDto1, vacancyDto2)
         every { vacancyRepository.findAllIds() } returns emptyList()
         every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { firstArg() }
-        every { vacancyProcessingQueueService.enqueueBatch(any()) } returns 2
+        coEvery { vacancyProcessingQueueService.enqueueBatch(any()) } returns 2
 
         // When
         val result = service.fetchAndSaveNewVacancies()
@@ -142,7 +142,7 @@ class VacancyFetchServiceTest {
         )
         every { vacancyRepository.findAllIds() } returns emptyList()
         every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { firstArg() }
-        every { vacancyProcessingQueueService.enqueueBatch(any()) } returns 2
+        coEvery { vacancyProcessingQueueService.enqueueBatch(any()) } returns 2
 
         // When
         val result = service.fetchAndSaveNewVacancies()

@@ -49,6 +49,8 @@ class VacancySchedulerServiceTest {
         skillExtractionQueueService = mockk(relaxed = true)
         vacancyRepository = mockk(relaxed = true)
         val vacancyContentValidator = mockk<com.hhassistant.service.vacancy.VacancyContentValidator>(relaxed = true)
+        val vacancyRecoveryService = mockk<com.hhassistant.service.vacancy.VacancyRecoveryService>(relaxed = true)
+        val circuitBreakerStateService = mockk<com.hhassistant.service.monitoring.CircuitBreakerStateService>(relaxed = true)
         val ollamaMonitoringService = mockk<com.hhassistant.service.monitoring.OllamaMonitoringService>(relaxed = true)
 
         service = VacancySchedulerService(
@@ -64,6 +66,8 @@ class VacancySchedulerServiceTest {
             skillExtractionQueueService = skillExtractionQueueService,
             vacancyRepository = vacancyRepository,
             vacancyContentValidator = vacancyContentValidator,
+            vacancyRecoveryService = vacancyRecoveryService,
+            circuitBreakerStateService = circuitBreakerStateService,
             ollamaMonitoringService = ollamaMonitoringService,
             maxConcurrentRequests = 3,
         )

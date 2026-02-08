@@ -13,6 +13,8 @@ import org.springframework.stereotype.Service
 /**
  * Сервис для отправки уведомлений о вакансиях в Telegram
  * Использует прямые вызовы методов вместо событий
+ * Важно: Вакансии отправляются всегда, независимо от времени суток (в отличие от хелсчеков).
+ * Это гарантирует, что пользователь не пропустит новую вакансию из-за ночного режима тишины.
  */
 @Service
 class VacancyNotificationService(
@@ -26,6 +28,8 @@ class VacancyNotificationService(
     /**
      * Отправляет вакансию в Telegram и обновляет статус
      * Заменяет event-driven подход на прямой вызов
+     * Важно: Вакансии отправляются всегда, независимо от времени суток (23:00-8:00).
+     * Хелсчеки блокируются ночью, но вакансии - нет, чтобы не пропустить важные уведомления.
      *
      * @param vacancy Вакансия для отправки
      * @param analysis Анализ вакансии
@@ -36,7 +40,8 @@ class VacancyNotificationService(
         vacancy: Vacancy,
         analysis: VacancyAnalysis,
     ): Boolean {
-        log.info("📱 [Notification] Sending vacancy ${vacancy.id} to Telegram")
+        val currentTime = java.time.LocalTime.now()
+        log.info("📱 [Notification] Sending vacancy ${vacancy.id} to Telegram (current time: $currentTime)")
 
         try {
             // Fix vacancy URL if it's in wrong format (API URL instead of browser URL)
@@ -51,7 +56,7 @@ class VacancyNotificationService(
                 val sentAt = java.time.LocalDateTime.now()
                 vacancyStatusService.updateVacancyStatus(vacancy.withSentToTelegramAt(sentAt))
                 metricsService.incrementNotificationsSent()
-                log.info("[Notification] Successfully sent vacancy ${vacancy.id} to Telegram at $sentAt")
+                log.info("✅ [Notification] Successfully sent vacancy ${vacancy.id} to Telegram at $sentAt (sent regardless of time of day)")
             } else {
                 log.warn(
                     "[Notification] Message sending returned false for vacancy ${vacancy.id} (Telegram may be disabled or not configured)",

@@ -38,9 +38,13 @@ class VacancyAnalysisServiceTest {
     private lateinit var objectMapper: ObjectMapper
     private lateinit var promptConfig: PromptConfig
     private lateinit var vacancyContentValidator: VacancyContentValidator
+    private lateinit var vacancyStatusService: com.hhassistant.service.vacancy.VacancyStatusService
     private lateinit var metricsService: com.hhassistant.metrics.MetricsService
     private lateinit var analysisTimeService: AnalysisTimeService
     private lateinit var skillExtractionService: SkillExtractionService
+    private lateinit var hhVacancyClient: com.hhassistant.client.hh.HHVacancyClient
+    private lateinit var circuitBreakerStateService: com.hhassistant.service.monitoring.CircuitBreakerStateService
+    private lateinit var processedVacancyCacheService: com.hhassistant.service.vacancy.ProcessedVacancyCacheService
     private lateinit var ollamaCircuitBreaker: CircuitBreaker
     private lateinit var ollamaRetry: Retry
     private lateinit var service: VacancyAnalysisService
@@ -53,9 +57,13 @@ class VacancyAnalysisServiceTest {
         objectMapper = jacksonObjectMapper()
         promptConfig = PromptConfig()
         vacancyContentValidator = mockk(relaxed = true)
+        vacancyStatusService = mockk(relaxed = true)
         metricsService = mockk(relaxed = true)
         analysisTimeService = mockk(relaxed = true)
         skillExtractionService = mockk(relaxed = true)
+        hhVacancyClient = mockk(relaxed = true)
+        circuitBreakerStateService = mockk(relaxed = true)
+        processedVacancyCacheService = mockk(relaxed = true)
         ollamaCircuitBreaker = CircuitBreaker.ofDefaults("ollamaTest")
         ollamaRetry = Retry.ofDefaults("ollamaTest")
         service = VacancyAnalysisService(
@@ -65,12 +73,17 @@ class VacancyAnalysisServiceTest {
             objectMapper = objectMapper,
             promptConfig = promptConfig,
             vacancyContentValidator = vacancyContentValidator,
+            vacancyStatusService = vacancyStatusService,
             metricsService = metricsService,
             analysisTimeService = analysisTimeService,
             skillExtractionService = skillExtractionService,
+            hhVacancyClient = hhVacancyClient,
+            circuitBreakerStateService = circuitBreakerStateService,
+            processedVacancyCacheService = processedVacancyCacheService,
             ollamaCircuitBreaker = ollamaCircuitBreaker,
             ollamaRetry = ollamaRetry,
             minRelevanceScore = 0.6,
+            maxConcurrentUrlChecks = 2,
         )
     }
 

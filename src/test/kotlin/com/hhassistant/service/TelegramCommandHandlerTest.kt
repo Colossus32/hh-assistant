@@ -50,6 +50,7 @@ class TelegramCommandHandlerTest {
         exclusionRuleService = mockk(relaxed = true)
         exclusionKeywordService = mockk(relaxed = true)
         analysisTimeService = mockk(relaxed = true)
+        val vacancyProcessingQueueService = mockk<com.hhassistant.service.vacancy.VacancyProcessingQueueService>(relaxed = true)
 
         // Мокаем authorizationService так, чтобы он всегда разрешал доступ для тестов
         authorizationService = mockk(relaxed = true) {
@@ -63,6 +64,7 @@ class TelegramCommandHandlerTest {
             skillExtractionService = skillExtractionService,
             skillStatisticsService = skillStatisticsService,
             skillExtractionQueueService = skillExtractionQueueService,
+            vacancyProcessingQueueService = vacancyProcessingQueueService,
             vacancyService = vacancyService,
             exclusionRuleService = exclusionRuleService,
             exclusionKeywordService = exclusionKeywordService,

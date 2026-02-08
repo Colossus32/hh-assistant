@@ -2,7 +2,6 @@ package com.hhassistant.web
 
 import com.hhassistant.client.hh.HHVacancyClient
 import com.hhassistant.domain.entity.SearchConfig
-import kotlinx.coroutines.runBlocking
 import mu.KotlinLogging
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
@@ -26,7 +25,7 @@ class VacancyTestController(
      * GET /api/vacancies/test/search?keywords=Kotlin&area=Москва&minSalary=150000
      */
     @GetMapping("/search")
-    fun searchVacancies(
+    suspend fun searchVacancies(
         @RequestParam("keywords", required = false, defaultValue = "Kotlin Developer") keywords: String,
         @RequestParam("area", required = false) area: String?,
         @RequestParam("minSalary", required = false) minSalary: Int?,
@@ -44,9 +43,7 @@ class VacancyTestController(
         )
 
         // Обработка ошибок централизована в GlobalExceptionHandler
-        val vacancies = runBlocking {
-            hhVacancyClient.searchVacancies(config)
-        }
+        val vacancies = hhVacancyClient.searchVacancies(config)
 
         log.info { "Found ${vacancies.size} vacancies" }
 
@@ -74,13 +71,11 @@ class VacancyTestController(
      * GET /api/vacancies/test/{id}
      */
     @GetMapping("/{id}")
-    fun getVacancyDetails(@org.springframework.web.bind.annotation.PathVariable id: String): ResponseEntity<Any> {
+    suspend fun getVacancyDetails(@org.springframework.web.bind.annotation.PathVariable id: String): ResponseEntity<Any> {
         log.info { "Getting vacancy details for id: $id" }
 
         // Обработка ошибок централизована в GlobalExceptionHandler
-        val vacancy = runBlocking {
-            hhVacancyClient.getVacancyDetails(id)
-        }
+        val vacancy = hhVacancyClient.getVacancyDetails(id)
 
         return ResponseEntity.ok(
             mapOf(
