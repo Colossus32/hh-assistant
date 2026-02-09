@@ -51,6 +51,7 @@ class VacancyProcessingQueueService(
     private val metricsService: com.hhassistant.metrics.MetricsService,
     private val circuitBreakerStateService: CircuitBreakerStateService,
     private val processedVacancyCacheService: ProcessedVacancyCacheService,
+    private val vacancyProcessingControlService: VacancyProcessingControlService,
     @Autowired(required = false) private val ollamaMonitoringService:
     com.hhassistant.service.monitoring.OllamaMonitoringService?,
     @Value("\${app.vacancy-processing.queue.enabled:true}") private val queueEnabled: Boolean,
@@ -470,6 +471,26 @@ class VacancyProcessingQueueService(
                         return@withTraceIdSuspend
                     }
 
+                    // Проверяем, не приостановлена ли обработка
+                    if (vacancyProcessingControlService.isProcessingPaused()) {
+                        log.info(
+                            "⏸️ [VacancyProcessingQueue] Processing is paused, marking vacancy ${item.vacancyId} as SKIPPED for retry later",
+                        )
+                        try {
+                            vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
+                        } catch (updateError: Exception) {
+                            log.error(
+                                " [VacancyProcessingQueue] Failed to update status for vacancy ${item.vacancyId} after pause",
+                                updateError,
+                            )
+                        }
+                        processingVacancies.remove(item.vacancyId)
+                        queuedVacancies.remove(item.vacancyId)
+                        queue.remove(item)
+                        metricsService.setQueueSize(queue.size)
+                        return@withTraceIdSuspend
+                    }
+
                     // Проверяем состояние Circuit Breaker перед обработкой
                     val circuitBreakerState = circuitBreakerStateService.getCircuitBreakerState()
                     if (circuitBreakerState == "OPEN") {
@@ -573,6 +594,22 @@ class VacancyProcessingQueueService(
      */
     private suspend fun processVacancy(vacancy: Vacancy) {
         log.info(" [VacancyProcessingQueue] Starting analysis pipeline for vacancy ${vacancy.id}")
+
+        // Проверяем, не приостановлена ли обработка перед отправкой в LLM
+        if (vacancyProcessingControlService.isProcessingPaused()) {
+            log.info(
+                "⏸️ [VacancyProcessingQueue] Processing is paused, skipping LLM analysis for vacancy ${vacancy.id}",
+            )
+            try {
+                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.SKIPPED))
+            } catch (updateError: Exception) {
+                log.error(
+                    " [VacancyProcessingQueue] Failed to update status for vacancy ${vacancy.id} after pause",
+                    updateError,
+                )
+            }
+            return
+        }
 
         try {
             // Шаг 1: Анализ через Ollama на соответствие резюме

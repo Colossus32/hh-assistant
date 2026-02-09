@@ -47,6 +47,7 @@ class VacancyAnalysisService(
     private val hhVacancyClient: HHVacancyClient,
     private val circuitBreakerStateService: CircuitBreakerStateService,
     private val processedVacancyCacheService: ProcessedVacancyCacheService,
+    private val vacancyProcessingControlService: VacancyProcessingControlService,
     @Qualifier("ollamaCircuitBreaker") private val ollamaCircuitBreaker: CircuitBreaker,
     @Qualifier("ollamaRetry") private val ollamaRetry: Retry,
     @Value("\${app.analysis.min-relevance-score:0.6}") private val minRelevanceScore: Double,
@@ -137,6 +138,14 @@ class VacancyAnalysisService(
                 "⚠️ [VacancyAnalysis] Vacancy ${vacancy.id} marked as processed in cache, but analysis not found in ${duration}ms. Removing from cache.",
             )
             processedVacancyCacheService.removeFromCache(vacancy.id)
+        }
+
+        // Проверяем, не приостановлена ли обработка перед отправкой в LLM
+        if (vacancyProcessingControlService.isProcessingPaused()) {
+            log.info("[Ollama] Processing is paused, skipping analysis for vacancy ${vacancy.id}")
+            throw OllamaException.ConnectionException(
+                "Vacancy processing is paused. Please resume processing using /resume command.",
+            )
         }
 
         // Проверяем состояние Circuit Breaker перед анализом

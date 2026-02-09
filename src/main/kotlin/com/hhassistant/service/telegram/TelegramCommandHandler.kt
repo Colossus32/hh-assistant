@@ -11,6 +11,7 @@ import com.hhassistant.service.skill.SkillExtractionQueueService
 import com.hhassistant.service.skill.SkillExtractionService
 import com.hhassistant.service.skill.SkillStatisticsService
 import com.hhassistant.service.util.AnalysisTimeService
+import com.hhassistant.service.vacancy.VacancyProcessingControlService
 import com.hhassistant.service.vacancy.VacancyProcessingQueueService
 import com.hhassistant.service.vacancy.VacancyService
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +39,7 @@ class TelegramCommandHandler(
     private val skillExtractionQueueService: SkillExtractionQueueService,
     private val vacancyProcessingQueueService: VacancyProcessingQueueService,
     private val vacancyService: VacancyService,
+    private val vacancyProcessingControlService: VacancyProcessingControlService,
     private val exclusionRuleService: ExclusionRuleService,
     private val exclusionKeywordService: ExclusionKeywordService,
     private val analysisTimeService: AnalysisTimeService,
@@ -86,6 +88,8 @@ class TelegramCommandHandler(
                 text.startsWith("/sent_status ") -> handleSentStatusCommand(text)
                 text == "/sent_status" -> handleSentStatusCommand(text)
                 text == "/queue" -> handleQueueCommand(chatId)
+                text == "/pause" -> handlePauseCommand()
+                text == "/resume" -> handleResumeCommand()
                 text == "/help" -> handleHelpCommand(chatId)
                 text.matches(Regex("/mark-applied-\\d+")) -> handleMarkAppliedCommand(text)
                 text.matches(Regex("/mark-not-interested-\\d+")) -> handleMarkNotInterestedCommand(text)
@@ -157,6 +161,8 @@ class TelegramCommandHandler(
             appendLine("   /vacancies - Список непросмотренных вакансий")
             appendLine("   /vacancies_all - Список всех вакансий (включая просмотренные)")
             appendLine("   /queue - Вакансии в очереди на обработку")
+            appendLine("   /pause - Приостановить обработку вакансий")
+            appendLine("   /resume - Возобновить обработку вакансий")
             appendLine("   /skills [N] - Топ навыков (статистика сразу, обработка в фоне)")
             appendLine("   /skills_now [N] - Текущий топ навыков (без обработки)")
             appendLine("   /help - Справка")
@@ -169,11 +175,27 @@ class TelegramCommandHandler(
      * Обрабатывает команду /status
      */
     private fun handleStatusCommand(): String {
+        val processingStatus = vacancyProcessingControlService.getStatus()
+        val isPaused = processingStatus["isPaused"] as? Boolean ?: false
         return buildString {
             appendLine("📊 <b>Статус системы:</b>")
             appendLine()
             appendLine("✅ Бот работает")
             appendLine("✅ REST API доступен")
+            appendLine()
+            if (isPaused) {
+                appendLine("⏸️ <b>Обработка вакансий:</b> Приостановлена")
+                appendLine("📅 Приостановлено: ${processingStatus["pausedAt"]}")
+                appendLine()
+                appendLine("💡 Используйте /resume для возобновления обработки")
+            } else {
+                appendLine("▶️ <b>Обработка вакансий:</b> Активна")
+                if (processingStatus["resumedAt"] != "N/A") {
+                    appendLine("📅 Возобновлено: ${processingStatus["resumedAt"]}")
+                }
+                appendLine()
+                appendLine("💡 Используйте /pause для приостановки обработки")
+            }
             appendLine()
             appendLine("💡 Используйте /vacancies для просмотра вакансий.")
         }
@@ -660,6 +682,59 @@ class TelegramCommandHandler(
     }
 
     /**
+     * Обрабатывает команду /pause - приостанавливает обработку вакансий
+     */
+    private fun handlePauseCommand(): String {
+        return try {
+            val wasPaused = vacancyProcessingControlService.pauseProcessing()
+            if (wasPaused) {
+                val status = vacancyProcessingControlService.getStatus()
+                buildString {
+                    appendLine("⏸️ <b>Обработка вакансий приостановлена</b>")
+                    appendLine()
+                    appendLine("Запросы в LLM не будут отправляться.")
+                    appendLine("Вакансии будут помечаться как SKIPPED для обработки позже.")
+                    appendLine()
+                    appendLine("📅 <b>Приостановлено:</b> ${status["pausedAt"]}")
+                    appendLine()
+                    appendLine("💡 Используйте /resume для возобновления обработки")
+                }
+            } else {
+                "ℹ️ Обработка вакансий уже приостановлена"
+            }
+        } catch (e: Exception) {
+            log.error("❌ [TelegramCommand] Error pausing processing: ${e.message}", e)
+            "❌ Ошибка при приостановке обработки: ${e.message ?: "Неизвестная ошибка"}"
+        }
+    }
+
+    /**
+     * Обрабатывает команду /resume - возобновляет обработку вакансий
+     */
+    private fun handleResumeCommand(): String {
+        return try {
+            val wasResumed = vacancyProcessingControlService.resumeProcessing()
+            if (wasResumed) {
+                val status = vacancyProcessingControlService.getStatus()
+                buildString {
+                    appendLine("▶️ <b>Обработка вакансий возобновлена</b>")
+                    appendLine()
+                    appendLine("Запросы в LLM будут отправляться снова.")
+                    appendLine()
+                    appendLine("📅 <b>Возобновлено:</b> ${status["resumedAt"]}")
+                    appendLine()
+                    appendLine("💡 Используйте /pause для приостановки обработки")
+                }
+            } else {
+                "ℹ️ Обработка вакансий уже активна"
+            }
+        } catch (e: Exception) {
+            log.error("❌ [TelegramCommand] Error resuming processing: ${e.message}", e)
+            "❌ Ошибка при возобновлении обработки: ${e.message ?: "Неизвестная ошибка"}"
+        }
+    }
+
+    /**
      * Обрабатывает команду /help
      */
     private fun handleHelpCommand(chatId: String): String {
@@ -703,6 +778,13 @@ class TelegramCommandHandler(
             appendLine()
             appendLine("<b>/queue</b> - Показать вакансии в очереди на обработку")
             appendLine("   Показывает список вакансий, ожидающих анализа")
+            appendLine()
+            appendLine("<b>/pause</b> - Приостановить обработку вакансий")
+            appendLine("   Останавливает отправку запросов в LLM для освобождения ресурсов")
+            appendLine("   Вакансии будут помечаться как SKIPPED для обработки позже")
+            appendLine()
+            appendLine("<b>/resume</b> - Возобновить обработку вакансий")
+            appendLine("   Возобновляет отправку запросов в LLM")
             appendLine()
             appendLine("<b>/mark-applied-{id}</b> - Отметить вакансию как \"откликнулся\"")
             appendLine("   Пример: /mark-applied-12345678")
