@@ -10,6 +10,7 @@ import com.hhassistant.service.skill.SkillStatisticsService
 import com.hhassistant.service.telegram.TelegramAuthorizationService
 import com.hhassistant.service.telegram.TelegramCommandHandler
 import com.hhassistant.service.util.AnalysisTimeService
+import com.hhassistant.service.vacancy.VacancyProcessingControlService
 import com.hhassistant.service.vacancy.VacancyService
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -51,6 +52,9 @@ class TelegramCommandHandlerTest {
         exclusionKeywordService = mockk(relaxed = true)
         analysisTimeService = mockk(relaxed = true)
         val vacancyProcessingQueueService = mockk<com.hhassistant.service.vacancy.VacancyProcessingQueueService>(relaxed = true)
+        val vacancyProcessingControlService = mockk<VacancyProcessingControlService>(relaxed = true) {
+            every { isProcessingPaused() } returns false
+        }
 
         // Мокаем authorizationService так, чтобы он всегда разрешал доступ для тестов
         authorizationService = mockk(relaxed = true) {
@@ -69,6 +73,7 @@ class TelegramCommandHandlerTest {
             exclusionRuleService = exclusionRuleService,
             exclusionKeywordService = exclusionKeywordService,
             analysisTimeService = analysisTimeService,
+            vacancyProcessingControlService = vacancyProcessingControlService,
             apiBaseUrl = "http://localhost:8080",
         )
         coEvery { telegramClient.sendMessage(targetChatId = any(), text = any(), replyMarkup = any()) } returns true

@@ -23,6 +23,7 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.cache.annotation.CacheEvict
 import org.springframework.cache.annotation.Cacheable
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 import java.util.concurrent.atomic.AtomicInteger
 
 @Service
@@ -456,7 +457,8 @@ class VacancyService(
         )
 
         if (newVacancies.isNotEmpty()) {
-            vacancyRepository.saveAll(newVacancies)
+            // Сохраняем в транзакции для обеспечения атомарности
+            saveVacanciesInTransaction(newVacancies)
             log.info(" [VacancyService]  Saved ${newVacancies.size} new vacancies to database for config ID=$configId")
             newVacancies.forEach { vacancy ->
                 log.debug(
@@ -473,6 +475,17 @@ class VacancyService(
         }
 
         return newVacancies
+    }
+
+    /**
+     * Сохраняет вакансии в транзакции для обеспечения атомарности операции.
+     * Используется для сохранения вакансий из suspend функций.
+     *
+     * @param vacancies Список вакансий для сохранения
+     */
+    @Transactional(rollbackFor = [Exception::class])
+    fun saveVacanciesInTransaction(vacancies: List<Vacancy>) {
+        vacancyRepository.saveAll(vacancies)
     }
 
     /**

@@ -16,6 +16,7 @@ import com.hhassistant.service.skill.SkillExtractionService
 import com.hhassistant.service.util.AnalysisTimeService
 import com.hhassistant.service.vacancy.VacancyAnalysisService
 import com.hhassistant.service.vacancy.VacancyContentValidator
+import com.hhassistant.service.vacancy.VacancyProcessingControlService
 import io.github.resilience4j.circuitbreaker.CircuitBreaker
 import io.github.resilience4j.retry.Retry
 import io.mockk.coEvery
@@ -45,6 +46,7 @@ class VacancyAnalysisServiceTest {
     private lateinit var hhVacancyClient: com.hhassistant.client.hh.HHVacancyClient
     private lateinit var circuitBreakerStateService: com.hhassistant.service.monitoring.CircuitBreakerStateService
     private lateinit var processedVacancyCacheService: com.hhassistant.service.vacancy.ProcessedVacancyCacheService
+    private lateinit var vacancyProcessingControlService: VacancyProcessingControlService
     private lateinit var ollamaCircuitBreaker: CircuitBreaker
     private lateinit var ollamaRetry: Retry
     private lateinit var service: VacancyAnalysisService
@@ -64,6 +66,9 @@ class VacancyAnalysisServiceTest {
         hhVacancyClient = mockk(relaxed = true)
         circuitBreakerStateService = mockk(relaxed = true)
         processedVacancyCacheService = mockk(relaxed = true)
+        vacancyProcessingControlService = mockk(relaxed = true) {
+            every { isProcessingPaused() } returns false
+        }
         ollamaCircuitBreaker = CircuitBreaker.ofDefaults("ollamaTest")
         ollamaRetry = Retry.ofDefaults("ollamaTest")
         service = VacancyAnalysisService(
@@ -80,6 +85,7 @@ class VacancyAnalysisServiceTest {
             hhVacancyClient = hhVacancyClient,
             circuitBreakerStateService = circuitBreakerStateService,
             processedVacancyCacheService = processedVacancyCacheService,
+            vacancyProcessingControlService = vacancyProcessingControlService,
             ollamaCircuitBreaker = ollamaCircuitBreaker,
             ollamaRetry = ollamaRetry,
             minRelevanceScore = 0.6,

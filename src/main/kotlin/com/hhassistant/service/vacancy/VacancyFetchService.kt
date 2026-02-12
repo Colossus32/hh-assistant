@@ -18,6 +18,7 @@ import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -269,10 +270,12 @@ class VacancyFetchService(
      * Сохраняет вакансии батчами для оптимизации производительности.
      * Разбивает большой список на батчи и сохраняет каждый батч через saveAll().
      * Hibernate batch автоматически группирует INSERT-запросы.
+     * Использует транзакцию для обеспечения атомарности операции.
      *
      * @param vacancies Список вакансий для сохранения
      * @return Список сохраненных вакансий
      */
+    @Transactional(rollbackFor = [Exception::class])
     private fun saveVacanciesInBatches(vacancies: List<Vacancy>): List<Vacancy> {
         val batchSize = 100 // Размер батча для сохранения
         val allSaved = mutableListOf<Vacancy>()
