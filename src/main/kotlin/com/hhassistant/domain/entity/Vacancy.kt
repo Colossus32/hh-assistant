@@ -1,5 +1,6 @@
 package com.hhassistant.domain.entity
 
+import com.hhassistant.domain.model.VacancySource
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -53,6 +54,22 @@ data class Vacancy(
     @Column(name = "status", length = 30, nullable = false)
     val status: VacancyStatus = VacancyStatus.NEW,
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "source", length = 20)
+    val source: VacancySource = VacancySource.HH_RU,
+
+    /**
+     * Для Telegram вакансий: ID сообщения для отслеживания дубликатов
+     */
+    @Column(name = "message_id", length = 100)
+    val messageId: String? = null,  // null для HH.ru
+
+    /**
+     * Для Telegram вакансий: канал-источник
+     */
+    @Column(name = "channel_username", length = 255)
+    val channelUsername: String? = null, // null для HH.ru
+
     /**
      * Версия записи для optimistic locking.
      * Автоматически увеличивается при каждом обновлении записи.
@@ -72,6 +89,11 @@ data class Vacancy(
      * Проверяет, была ли вакансия отправлена пользователю
      */
     fun isSentToUser(): Boolean = status == VacancyStatus.SENT_TO_USER && sentToTelegramAt != null
+
+    /**
+     * Проверяет, является ли вакансия из Telegram канала
+     */
+    fun isFromTelegram(): Boolean = source == VacancySource.TELEGRAM_CHANNEL
 
     /**
      * Проверяет, была ли вакансия пропущена (не релевантна)

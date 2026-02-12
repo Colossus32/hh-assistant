@@ -125,4 +125,14 @@ interface VacancyRepository : JpaRepository<Vacancy, String> {
      */
     @Query("SELECT COUNT(v) FROM Vacancy v WHERE v.status = 'SKIPPED'")
     fun countSkippedVacancies(): Long
+    
+    /**
+     * Ищет вакансию по messageId и channelUsername (для Telegram вакансий)
+     */
+    fun findByMessageIdAndChannelUsername(messageId: String, channelUsername: String): Vacancy?
+    
+    /**
+     * Ищет вакансии по источнику
+     */
+    fun findBySource(source: com.hhassistant.domain.model.VacancySource): List<Vacancy>
 }
