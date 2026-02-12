@@ -44,10 +44,15 @@ app:
     extract-relevant-skills: "0 0 3 * * *"  # Every day at 3:00 AM - extract skills for relevant vacancies without skills
     process-queued-vacancies: "0 */10 * * * *"  # Every 10 minutes - process QUEUED vacancies from database
     recovery-skill-extraction: "0 */5 * * * *"  # Every 5 minutes - recovery: extract skills from one vacancy if processing queue is empty
-  healthcheck:
+    healthcheck:
     enabled: true  # Включить периодическую проверку здоровья системы
     schedule: "0 0 * * * *"  # Каждый час (cron: секунда минута час день месяц день_недели)
-  max-vacancies-per-cycle: 2000  # Максимальное количество вакансий за цикл (ограничение HH.ru API: 2000)
+    max-vacancies-per-cycle: 2000  # Максимальное количество вакансий за цикл (ограничение HH.ru API: 2000)
+  telegram-channels:
+    enabled: true
+    fetch-interval: 900  # Каждые 15 минут (как и HH.ru)
+    messages-per-fetch: 100
+    min-relevance-score: 0.7
   cleanup:
     enabled: true  # Включить автоматическую очистку несуществующих вакансий
     schedule: "0 0 2 * * *"  # Каждый день в 2:00 (cron: секунда минута час день месяц день_недели)
