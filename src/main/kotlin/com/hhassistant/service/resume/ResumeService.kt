@@ -18,10 +18,13 @@ class ResumeService(
     private val pdfParser: PDFParserService,
     private val hhResumeClient: HHResumeClient,
     private val objectMapper: ObjectMapper,
-    @Value("\${app.resume.path:./resumes/resume.pdf}") private val resumePath: String,
+    @Value("\${app.resume.path:./resumes/resume.pdf}") private val resumePath: String?,
     @Qualifier("resumeStructureCache") private val resumeStructureCache: Cache<String, com.hhassistant.domain.model.ResumeStructure>,
 ) {
     private val log = KotlinLogging.logger {}
+
+    // Финальный путь к резюме (по умолчанию из конфигурации)
+    private val finalResumePath: String = resumePath ?: "./resumes/resume.pdf"
 
     // Кэш резюме в памяти - загружается один раз при старте
     @Volatile
@@ -182,7 +185,7 @@ class ResumeService(
     }
 
     private fun loadFromPDF(): Resume {
-        val pdfFile = File(resumePath)
+        val pdfFile = File(finalResumePath)
         require(pdfFile.exists()) {
             "Resume PDF file not found at: ${pdfFile.absolutePath}. " +
                 "Please place your resume.pdf in the resumes/ directory."

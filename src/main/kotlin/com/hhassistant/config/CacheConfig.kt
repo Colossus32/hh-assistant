@@ -60,6 +60,33 @@ class CacheConfig {
     }
 
     /**
+     * Кэш для результатов проверок URL вакансий (404/доступна)
+     * TTL: 10 минут (вакансии редко пропадают быстро)
+     * Это уменьшает количество запросов к HH.ru API при проверке URL
+     */
+    @Bean("vacancyUrlCheckCache")
+    fun vacancyUrlCheckCache(): com.github.benmanes.caffeine.cache.Cache<String, Boolean> {
+        return Caffeine.newBuilder()
+            .maximumSize(AppConstants.Cache.VACANCY_URL_CHECK_MAX_SIZE.toLong())
+            .expireAfterWrite(10, TimeUnit.MINUTES) // TTL: 10 минут
+            .recordStats()
+            .build()
+    }
+
+    /**
+     * Кэш для структуры резюме
+     * TTL: 1 час (резюме меняется редко)
+     */
+    @Bean("resumeStructureCache")
+    fun resumeStructureCache(): com.github.benmanes.caffeine.cache.Cache<String, com.hhassistant.domain.model.ResumeStructure> {
+        return Caffeine.newBuilder()
+            .maximumSize(100L)
+            .expireAfterWrite(1, TimeUnit.HOURS) // TTL: 1 час
+            .recordStats()
+            .build()
+    }
+
+    /**
      * Кэш для GET endpoints (списки вакансий)
      * TTL: 30 секунд (быстрое обновление при изменениях)
      */

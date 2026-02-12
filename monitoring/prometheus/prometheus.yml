@@ -14,9 +14,3 @@ scrape_configs:
           application: 'hh-assistant'
           service: 'backend'
 
-
-
-
-
-
-

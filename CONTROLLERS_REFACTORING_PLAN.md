@@ -284,8 +284,3 @@ fun getVacancy(): Deferred<ResponseEntity<Any>> = async {
 
 Suspend функции - это правильный и простой способ для Spring контроллеров.
 
-
-
-
-
-

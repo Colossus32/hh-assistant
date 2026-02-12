@@ -90,9 +90,3 @@ ollama pull llama3.2:3b
 - Попробуйте более легкую модель (llama3.2:3b вместо qwen2.5:7b)
 - Увеличьте timeout в application.yml
 
-
-
-
-
-
-

@@ -24,7 +24,7 @@ fun loadPendingVacanciesOnStartup() {
 }
 ```
 
-**Проблема:** 
+**Проблема:**
 - `enqueue()` - обычная функция (не suspend)
 - Блокирует поток при старте приложения
 
@@ -254,9 +254,4 @@ fun enqueue(vacancyId: String): Boolean {
     // Или сделать enqueue suspend функцией
 }
 ```
-
-
-
-
-
 

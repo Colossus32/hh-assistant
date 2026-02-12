@@ -34,6 +34,7 @@ object AppConstants {
         const val VACANCY_DETAILS_MAX_SIZE = 1000
         const val SEARCH_CONFIG_MAX_SIZE = 100
         const val VACANCY_IDS_MAX_SIZE = 10
+        const val VACANCY_URL_CHECK_MAX_SIZE = 500
         const val VACANCY_LIST_MAX_SIZE = 500
         const val DEFAULT_MAX_SIZE = 500
     }

@@ -93,17 +93,20 @@ class MetricsService(
         .tag("channel", "telegram")
         .register(meterRegistry)
 
-    // ========== Таймеры ==========
+    // ========== Таймеры (с гистограммами p50, p95, p99) ==========
     private val vacancyAnalysisTimer: Timer = Timer.builder("vacancy.analysis.duration")
-        .description("Time taken to analyze a vacancy")
+        .description("Time taken to analyze a vacancy (with percentiles)")
+        .publishPercentiles(0.5, 0.95, 0.99)
         .register(meterRegistry)
 
     private val coverLetterGenerationTimer: Timer = Timer.builder("cover_letter.generation.duration")
-        .description("Time taken to generate a cover letter")
+        .description("Time taken to generate a cover letter (with percentiles)")
+        .publishPercentiles(0.5, 0.95, 0.99)
         .register(meterRegistry)
 
     private val vacancyFetchTimer: Timer = Timer.builder("vacancy.fetch.duration")
-        .description("Time taken to fetch vacancies from HH.ru")
+        .description("Time taken to fetch vacancies from HH.ru (with percentiles)")
+        .publishPercentiles(0.5, 0.95, 0.99)
         .register(meterRegistry)
 
     // ========== Gauge метрики (текущие значения) ==========

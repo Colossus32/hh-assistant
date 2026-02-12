@@ -24,9 +24,3 @@ databaseChangeLog:
                   constraints:
                     nullable: true
 
-
-
-
-
-
-

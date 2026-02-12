@@ -85,9 +85,9 @@ rabbitTemplate.convertAndSend("vacancy.events", "fetched", event)
 fun `should publish VacancyAnalyzedEvent`() {
     val eventPublisher = mockk<ApplicationEventPublisher>()
     val service = VacancyAnalysisService(..., eventPublisher)
-    
+
     service.analyzeVacancy(vacancy)
-    
+
     verify { eventPublisher.publishEvent(any<VacancyAnalyzedEvent>()) }
 }
 ```
@@ -100,10 +100,10 @@ fun `should process full event flow`() {
     every { eventPublisher.publishEvent(any()) } answers {
         capturedEvents.add(firstArg())
     }
-    
+
     // Действие
     fetchService.fetchAndSaveNewVacancies()
-    
+
     // Проверка
     assertThat(capturedEvents).hasSize(1)
     assertThat(capturedEvents[0]).isInstanceOf(VacancyFetchedEvent::class.java)
@@ -148,10 +148,4 @@ fun `should process full event flow`() {
 2. **Мониторинг**: Добавить метрики для событий (количество, время обработки)
 3. **Трассировка**: Добавить correlation ID для отслеживания flow через события
 4. **Тестирование**: Использовать `@SpringBootTest` для интеграционных тестов с реальным Event Bus
-
-
-
-
-
-
 

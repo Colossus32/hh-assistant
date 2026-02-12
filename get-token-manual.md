@@ -2,7 +2,7 @@
 
 ## Шаг 1: Регистрация приложения
 1. Перейдите на https://dev.hh.ru
-2. Войдите в аккаунт HH.ru  
+2. Войдите в аккаунт HH.ru
 3. Создайте новое приложение
 4. Укажите Redirect URI: `http://localhost:8080/callback`
 5. Сохраните Client ID и Client Secret
@@ -23,7 +23,7 @@ https://hh.ru/oauth/authorize?response_type=code&client_id=YOUR_CLIENT_ID&redire
 $body = @{
     grant_type = "authorization_code"
     client_id = "YOUR_CLIENT_ID"
-    client_secret = "YOUR_CLIENT_SECRET"  
+    client_secret = "YOUR_CLIENT_SECRET"
     code = "YOUR_AUTHORIZATION_CODE"
     redirect_uri = "http://localhost:8080/callback"
 }
@@ -49,10 +49,4 @@ HH_ACCESS_TOKEN=ваш_полученный_токен
 ```
 ./gradlew bootRun
 ```
-
-
-
-
-
-
 

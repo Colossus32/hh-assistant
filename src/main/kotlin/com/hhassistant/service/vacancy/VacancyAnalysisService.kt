@@ -54,6 +54,8 @@ class VacancyAnalysisService(
     private val vacancyProcessingControlService: VacancyProcessingControlService,
     @Qualifier("ollamaCircuitBreaker") private val ollamaCircuitBreaker: CircuitBreaker,
     @Qualifier("ollamaRetry") private val ollamaRetry: Retry,
+    @Qualifier("vacancyUrlCheckCache") private val vacancyUrlCheckCache:
+    com.github.benmanes.caffeine.cache.Cache<String, Boolean>,
     @Value("\${app.analysis.min-relevance-score:0.6}") private val minRelevanceScore: Double,
     @Value("\${app.analysis.max-concurrent-url-checks:2}") private val maxConcurrentUrlChecks: Int,
 ) {
@@ -67,27 +69,40 @@ class VacancyAnalysisService(
     /**
      * Проверяет URL вакансии на доступность (существует ли вакансия на HH.ru)
      * Используется для батчевой проверки нескольких вакансий параллельно
-     *
+     * Оптимизация: использует кэш для уменьшения количества запросов к HH.ru API
      * @param vacancyId ID вакансии для проверки
      * @return true если вакансия доступна, false если не найдена (404)
      * @throws HHAPIException.RateLimitException если превышен rate limit
      * @throws HHAPIException.ConnectionException для других ошибок соединения
      */
     private suspend fun checkVacancyUrl(vacancyId: String): Boolean {
+        // Сначала проверяем кэш
+        vacancyUrlCheckCache.getIfPresent(vacancyId)?.let { cachedResult ->
+            log.trace("[URL Check] Cache hit for vacancy $vacancyId: $cachedResult")
+            return cachedResult
+        }
+
         return urlCheckSemaphore.withPermit {
             withContext(Dispatchers.IO) {
                 try {
                     hhVacancyClient.getVacancyDetails(vacancyId)
-                    // Вакансия существует и доступна
+                    // Вакансия существует и доступна - сохраняем в кэш
+                    vacancyUrlCheckCache.put(vacancyId, true)
+                    log.debug("[URL Check] Vacancy $vacancyId is available (cache miss)")
                     true
                 } catch (e: HHAPIException.NotFoundException) {
-                    // Вакансия не найдена (404)
+                    // Вакансия не найдена (404) - сохраняем в кэш
+                    vacancyUrlCheckCache.put(vacancyId, false)
+                    log.debug("[URL Check] Vacancy $vacancyId not found (404), cached as unavailable")
                     false
                 } catch (e: HHAPIException.RateLimitException) {
                     // Пробрасываем rate limit для обработки выше
+                    // Не сохраняем в кэш при rate limit - статус может измениться
+                    log.warn("[URL Check] Rate limit while checking vacancy $vacancyId")
                     throw e
                 } catch (e: Exception) {
                     // Другие ошибки - логируем, но считаем URL валидным
+                    // Не сохраняем в кэш при ошибках сети - статус может измениться
                     log.warn(
                         "[URL Check] Error checking vacancy $vacancyId URL: ${e.message}, " +
                             "assuming URL is valid and proceeding",
@@ -409,7 +424,7 @@ class VacancyAnalysisService(
             coverLetterLastAttemptAt = null,
         )
 
-        // Сохраняем анализ и навыки в одной транзакции для обеспечения атомарности
+        // Сохраняем анализ в транзакции
         val savedAnalysis = saveAnalysisAndSkillsInTransaction(analysis, vacancy, isRelevant, validatedSkills)
         log.info(
             "[Ollama] Saved analysis to database for vacancy ${vacancy.id} (isRelevant=$isRelevant, score=${String.format(
@@ -417,6 +432,23 @@ class VacancyAnalysisService(
                 savedAnalysis.relevanceScore * 100,
             )}%)",
         )
+
+        // Сохраняем навыки отдельно (после успешной транзакции)
+        // Извлекаем за пределы транзакции для избежания runBlocking
+        if (isRelevant && validatedSkills.isNotEmpty()) {
+            try {
+                saveSkillsFromAnalysisAsync(vacancy, validatedSkills)
+                log.info("[Ollama] Saved ${validatedSkills.size} skills to database for vacancy ${vacancy.id}")
+            } catch (e: Exception) {
+                // Ошибка сохранения навыков не должна блокировать анализ
+                // Анализ уже сохранен, но навыки не сохранены - это можно восстановить позже
+                log.error(
+                    "[Ollama] Failed to save skills for vacancy ${vacancy.id}: ${e.message}. " +
+                        "Analysis was saved, but skills were not. Will be recovered later.",
+                    e,
+                )
+            }
+        }
 
         // Обновляем кэш обработанных вакансий
         processedVacancyCacheService.markAsProcessed(vacancy.id)
@@ -484,7 +516,10 @@ class VacancyAnalysisService(
             // Шаг 3: Очищаем JSON от проблемных символов (неэкранированные переносы строк в строках)
             val sanitizedJson = sanitizeJsonString(jsonString)
 
-            // Шаг 4: Парсим JSON
+            // Шаг 4: Валидация JSON схемы (проверка обязательных полей)
+            validateJsonSchema(sanitizedJson, vacancyId)
+
+            // Шаг 5: Парсим JSON
             val parsed = try {
                 objectMapper.readValue(sanitizedJson, AnalysisResult::class.java)
             } catch (e: JsonProcessingException) {
@@ -519,6 +554,59 @@ class VacancyAnalysisService(
             throw OllamaException.ParsingException(
                 "Unexpected error parsing LLM response for vacancy $vacancyId: ${e.message}",
                 e,
+            )
+        }
+    }
+
+    /**
+     * Валидирует JSON схему перед парсингом.
+     * Проверяет наличие обязательных полей: relevance_score
+     * Это помогает выявить проблемы с ответом LLM до попытки парсинга.
+     * @param jsonString JSON строка для валидации
+     * @param vacancyId ID вакансии (для логирования)
+     * @throws OllamaException.ParsingException если JSON не соответствует схеме
+     */
+    private fun validateJsonSchema(jsonString: String, vacancyId: String) {
+        try {
+            val jsonNode = objectMapper.readTree(jsonString)
+
+            // Проверяем обязательное поле relevance_score
+            if (!jsonNode.has("relevance_score")) {
+                throw OllamaException.ParsingException(
+                    "JSON schema validation failed for vacancy $vacancyId: " +
+                        "missing required field 'relevance_score'. " +
+                        "JSON: ${jsonString.take(200)}",
+                )
+            }
+
+            // Проверяем тип relevance_score (должен быть числом)
+            val relevanceScoreNode = jsonNode.get("relevance_score")
+            if (!relevanceScoreNode.isNumber) {
+                throw OllamaException.ParsingException(
+                    "JSON schema validation failed for vacancy $vacancyId: " +
+                        "field 'relevance_score' must be a number, got: ${relevanceScoreNode.nodeType}. " +
+                        "JSON: ${jsonString.take(200)}",
+                )
+            }
+
+            // Проверяем диапазон relevance_score (0.0 - 1.0)
+            val relevanceScore = relevanceScoreNode.asDouble()
+            if (relevanceScore < 0.0 || relevanceScore > 1.0) {
+                log.warn(
+                    "[JSON Schema] relevance_score out of range [0.0, 1.0] for vacancy $vacancyId: $relevanceScore. " +
+                        "Will be clamped during validation.",
+                )
+            }
+
+            log.debug("[JSON Schema] Validation passed for vacancy $vacancyId")
+        } catch (e: OllamaException.ParsingException) {
+            throw e
+        } catch (e: Exception) {
+            // Если не удалось распарсить JSON для валидации, это не критично
+            // Парсер попытается обработать это позже
+            log.warn(
+                "[JSON Schema] Failed to validate JSON schema for vacancy $vacancyId: ${e.message}. " +
+                    "Will attempt to parse anyway.",
             )
         }
     }
@@ -704,7 +792,6 @@ class VacancyAnalysisService(
 
     /**
      * Валидирует результат анализа от LLM.
-     *
      * @param result Результат анализа для валидации
      * @return Валидированный результат
      * @throws IllegalArgumentException если relevanceScore вне допустимого диапазона
@@ -739,9 +826,9 @@ class VacancyAnalysisService(
     }
 
     /**
-     * Сохраняет анализ и навыки в одной транзакции для обеспечения атомарности.
-     * Если сохранение навыков не удастся, откатится и анализ.
-     *
+     * Сохраняет анализ в транзакции и сохраняет навыки отдельно.
+     * Изменение: извлечение навыков вынесено за пределы транзакции для избежания runBlocking.
+     * Это предотвращает deadlock и блокировку пула потоков.
      * @param analysis Анализ вакансии для сохранения
      * @param vacancy Вакансия
      * @param isRelevant Релевантна ли вакансия
@@ -755,19 +842,16 @@ class VacancyAnalysisService(
         isRelevant: Boolean,
         validatedSkills: List<String>,
     ): VacancyAnalysis {
-        // Сохраняем анализ
+        // Сохраняем анализ в транзакции
         val savedAnalysis = repository.save(analysis)
 
-        // Сохраняем навыки в БД, если вакансия релевантна (relevance_score >= minRelevanceScore)
+        // Навыки сохраняем отдельно, после успешного сохранения анализа
+        // Если сохранение навыков упадет, анализ уже будет в БД (но можно откатить отдельно)
+        // Это безопаснее чем runBlocking внутри транзакции
         if (isRelevant && validatedSkills.isNotEmpty()) {
-            try {
-                saveSkillsFromAnalysis(vacancy, validatedSkills)
-                log.info("[Ollama] Saved ${validatedSkills.size} skills to database for vacancy ${vacancy.id}")
-            } catch (e: Exception) {
-                log.error("[Ollama] Failed to save skills for vacancy ${vacancy.id}: ${e.message}", e)
-                // Выбрасываем исключение, чтобы транзакция откатилась
-                throw e
-            }
+            log.debug(
+                "[Ollama] Will save ${validatedSkills.size} skills for vacancy ${vacancy.id} after transaction",
+            )
         } else {
             log.debug(
                 "[Ollama] Skipping skill extraction for vacancy ${vacancy.id} (isRelevant=$isRelevant, skills=${validatedSkills.size})",
@@ -778,11 +862,13 @@ class VacancyAnalysisService(
     }
 
     /**
-     * Сохраняет навыки из анализа LLM в БД.
-     * Использует SkillExtractionService для нормализации и сохранения.
-     * Вызывается внутри транзакции saveAnalysisAndSkillsInTransaction.
+     * Сохраняет навыки из анализа LLM в БД асинхронно.
+     * Вызывается отдельно после успешной транзакции сохранения анализа.
+     * Это предотвращает deadlock от runBlocking внутри транзакции.
+     * @param vacancy Вакансия
+     * @param skills Список навыков для сохранения
      */
-    private fun saveSkillsFromAnalysis(vacancy: Vacancy, skills: List<String>) {
+    private suspend fun saveSkillsFromAnalysisAsync(vacancy: Vacancy, skills: List<String>) {
         if (skills.isEmpty()) {
             log.debug("[Ollama] No skills to save for vacancy ${vacancy.id}")
             return
@@ -793,11 +879,8 @@ class VacancyAnalysisService(
             com.hhassistant.client.hh.dto.KeySkillDto(name = skillName)
         }
 
-        // Используем существующий сервис для сохранения навыков
-        // Используем runBlocking для вызова suspend функции из обычной функции внутри транзакции
-        kotlinx.coroutines.runBlocking {
-            skillExtractionService.extractAndSaveSkills(vacancy, keySkills)
-        }
+        // Асинхронный вызов сервиса для сохранения навыков
+        skillExtractionService.extractAndSaveSkills(vacancy, keySkills)
     }
 
     /**

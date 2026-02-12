@@ -237,3 +237,6 @@ if (processedVacancyCacheService.isProcessed(vacancyId)) {
 
 
 
+
+
+

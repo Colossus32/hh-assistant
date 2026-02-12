@@ -50,7 +50,7 @@ data class Vacancy(
     val skillsExtractedAt: LocalDateTime? = null,
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", length = 20, nullable = false)
+    @Column(name = "status", length = 30, nullable = false)
     val status: VacancyStatus = VacancyStatus.NEW,
 
     /**

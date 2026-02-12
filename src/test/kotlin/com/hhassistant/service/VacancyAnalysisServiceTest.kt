@@ -2,6 +2,7 @@ package com.hhassistant.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.github.benmanes.caffeine.cache.Caffeine
 import com.hhassistant.client.ollama.OllamaClient
 import com.hhassistant.config.PromptConfig
 import com.hhassistant.domain.entity.Resume
@@ -49,6 +50,7 @@ class VacancyAnalysisServiceTest {
     private lateinit var vacancyProcessingControlService: VacancyProcessingControlService
     private lateinit var ollamaCircuitBreaker: CircuitBreaker
     private lateinit var ollamaRetry: Retry
+    private lateinit var vacancyUrlCheckCache: com.github.benmanes.caffeine.cache.Cache<String, Boolean>
     private lateinit var service: VacancyAnalysisService
 
     @BeforeEach
@@ -71,6 +73,7 @@ class VacancyAnalysisServiceTest {
         }
         ollamaCircuitBreaker = CircuitBreaker.ofDefaults("ollamaTest")
         ollamaRetry = Retry.ofDefaults("ollamaTest")
+        vacancyUrlCheckCache = Caffeine.newBuilder().build()
         service = VacancyAnalysisService(
             ollamaClient = ollamaClient,
             resumeService = resumeService,
@@ -88,6 +91,7 @@ class VacancyAnalysisServiceTest {
             vacancyProcessingControlService = vacancyProcessingControlService,
             ollamaCircuitBreaker = ollamaCircuitBreaker,
             ollamaRetry = ollamaRetry,
+            vacancyUrlCheckCache = vacancyUrlCheckCache,
             minRelevanceScore = 0.6,
             maxConcurrentUrlChecks = 2,
         )

@@ -26,6 +26,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
+import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import java.time.LocalDateTime
 import java.util.concurrent.ConcurrentHashMap
@@ -34,7 +35,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * In-memory очередь для обработки вакансий (приоритетная очередь для анализа)
- *
  * Логика работы:
  * 1. Вакансии из HH.ru API попадают в очередь (статус QUEUED)
  * 2. При добавлении проверяется, не была ли вакансия уже обработана
@@ -327,7 +327,6 @@ class VacancyProcessingQueueService(
     /**
      * Асинхронно обновляет статус вакансии, если анализ уже существует в БД.
      * Вызывается когда кэш указывает, что вакансия уже обработана.
-     *
      * @param vacancyId ID вакансии
      * @param vacancy Вакансия из БД
      * @param checkDuplicate Флаг, влияющий на выбор статуса при нерелевантной вакансии
@@ -819,6 +818,27 @@ class VacancyProcessingQueueService(
         processingVacancies.clear()
         queuedVacancies.clear()
         log.info(" [VacancyProcessingQueue] Queue cleared")
+    }
+
+    /**
+     * Периодически очищает старые записи из queuedVacancies для предотвращения утечки памяти.
+     * Удаляет записи, если размер кэша превышает лимит (5000 записей).
+     * Это предотвращает неограниченный рост памяти при большом количестве пропущенных вакансий.
+     */
+    @Scheduled(fixedDelay = 3600000) // Каждый час
+    fun cleanupQueuedVacanciesCache() {
+        val maxSize = 5000 // Максимальный размер кэша
+        if (queuedVacancies.size > maxSize) {
+            val beforeSize = queuedVacancies.size
+            // Очищаем половину старых записей (FIFO - удаляем первые добавленные)
+            val keysToRemove = queuedVacancies.keys.take(queuedVacancies.size / 2)
+            keysToRemove.forEach { queuedVacancies.remove(it) }
+            val afterSize = queuedVacancies.size
+            log.info(
+                "[VacancyProcessingQueue] Cleaned up queuedVacancies cache: " +
+                    "$beforeSize -> $afterSize entries (removed ${beforeSize - afterSize})",
+            )
+        }
     }
 
     @PreDestroy

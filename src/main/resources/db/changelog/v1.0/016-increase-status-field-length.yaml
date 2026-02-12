@@ -1,0 +1,13 @@
+databaseChangeLog:
+  - changeSet:
+      id: increase-status-field-length
+      author: system
+      changes:
+        - modifyDataType:
+            tableName: vacancies
+            columnName: status
+            newDataType: varchar(30)
+            remarks: |
+              Увеличение длины поля status с 20 до 30 символов
+              для поддержки статуса REJECTED_BY_VALIDATOR (21 символ)
+              и возможных будущих статусов

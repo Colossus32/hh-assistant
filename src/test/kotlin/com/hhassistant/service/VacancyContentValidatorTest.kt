@@ -15,6 +15,7 @@ import java.time.LocalDateTime
 class VacancyContentValidatorTest {
     private val exclusionRuleService = mockk<ExclusionRuleService>(relaxed = true)
     private val resumeService = mockk<ResumeService>(relaxed = true)
+    private val metricsService = mockk<com.hhassistant.metrics.MetricsService>(relaxed = true)
 
     @Test
     fun `validate returns valid when no exclusion rules configured`() = runBlocking {
@@ -24,6 +25,7 @@ class VacancyContentValidatorTest {
         val validator = VacancyContentValidator(
             exclusionRuleService = exclusionRuleService,
             resumeService = resumeService,
+            metricsService = metricsService,
             fallbackKeywords = emptyList(),
             fallbackCaseSensitive = false,
             skillMatchingEnabled = false, // Отключаем проверку навыков для этого теста
@@ -42,6 +44,7 @@ class VacancyContentValidatorTest {
         val validator = VacancyContentValidator(
             exclusionRuleService = exclusionRuleService,
             resumeService = resumeService,
+            metricsService = metricsService,
             fallbackKeywords = emptyList(),
             fallbackCaseSensitive = false,
             skillMatchingEnabled = false,
@@ -61,6 +64,7 @@ class VacancyContentValidatorTest {
         val validator = VacancyContentValidator(
             exclusionRuleService = exclusionRuleService,
             resumeService = resumeService,
+            metricsService = metricsService,
             fallbackKeywords = emptyList(),
             fallbackCaseSensitive = true,
             skillMatchingEnabled = false,

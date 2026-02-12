@@ -1,0 +1,69 @@
+databaseChangeLog:
+  - changeSet:
+      id: add-vacancy-source-field
+      author: system
+      changes:
+        - addColumn:
+            tableName: vacancies
+            columns:
+              - column:
+                  name: source
+                  type: varchar(20)
+                  defaultValue: "HH_RU"
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: add-vacancy-message-id-field
+      author: system
+      changes:
+        - addColumn:
+            tableName: vacancies
+            columns:
+              - column:
+                  name: message_id
+                  type: varchar(100)
+
+  - changeSet:
+      id: add-vacancy-channel-username-field
+      author: system
+      changes:
+        - addColumn:
+            tableName: vacancies
+            columns:
+              - column:
+                  name: channel_username
+                  type: varchar(255)
+
+  - changeSet:
+      id: add-index-vacancy-source
+      author: system
+      changes:
+        - createIndex:
+            tableName: vacancies
+            indexName: idx_vacancies_source
+            columns:
+              - column:
+                  name: source
+
+  - changeSet:
+      id: add-unique-index-telegram-vacancy
+      author: system
+      changes:
+        - createIndex:
+            tableName: vacancies
+            indexName: idx_vacancies_telegram_unique
+            unique: true
+            columns:
+              - column:
+                  name: message_id
+              - column:
+                  name: channel_username
+            where: message_id IS NOT NULL
+
+  - changeSet:
+      id: update-existing-vacancies-source
+      author: system
+      changes:
+        - sql:
+            sql: UPDATE vacancies SET source = 'HH_RU' WHERE source IS NULL

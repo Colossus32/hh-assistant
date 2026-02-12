@@ -23,6 +23,7 @@ import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.WebClientResponseException
 import org.springframework.web.reactive.function.client.bodyToMono
 import java.time.LocalDateTime
+import java.util.concurrent.ConcurrentHashMap
 
 @Component
 class HHVacancyClient(
@@ -34,6 +35,7 @@ class HHVacancyClient(
     private val searchConfig: VacancyServiceConfig,
     @Qualifier("hhApiRetry") private val hhApiRetry: Retry,
     private val searchConfigProgressRepository: SearchConfigProgressRepository,
+    @Value("\${hh.api.pagination.restart-cooldown-hours:1}") private val restartCooldownHours: Long = 1,
 ) {
     private val log = KotlinLogging.logger {}
 
@@ -42,6 +44,12 @@ class HHVacancyClient(
      * per_page * page не может быть больше 2000
      */
     private val maxVacanciesDepth = 2000
+
+    /**
+     * Время последнего перезапуска пагинации для каждого configKey
+     * Используется для предотвращения частых перезапусков (cooldown)
+     */
+    private val lastRestartTime = ConcurrentHashMap<String, LocalDateTime>()
 
     /**
      * Генерирует уникальный ключ для SearchConfig
@@ -175,15 +183,35 @@ class HHVacancyClient(
 
                         // Если начали не с 0 и это не перезапуск, значит были новые вакансии - начинаем сначала
                         if (currentPage > 0 && actualStartPage > 0 && !isRestart) {
-                            log.info(
-                                "[HH.ru API] Empty page detected at $currentPage " +
-                                    "(started from $actualStartPage) - new vacancies may have appeared, " +
-                                    "restarting from page 0",
-                            )
-                            // Сбрасываем прогресс для этого конфига и перезапускаем с начала
-                            deleteProgressFromDatabase(configKey)
-                            // Рекурсивно перезапускаем с начала
-                            return searchVacancies(config, startFromPage = 0, isRestart = true)
+                            // Проверяем cooldown перед перезапуском
+                            val lastRestart = lastRestartTime[configKey]
+                            val now = LocalDateTime.now()
+                            val canRestart = lastRestart == null || now.isAfter(lastRestart.plusHours(restartCooldownHours))
+
+                            if (!canRestart) {
+                                val timeSinceLastRestart = java.time.Duration.between(lastRestart, now)
+                                log.warn(
+                                    "[HH.ru API] Restart cooldown active for configKey=$configKey. " +
+                                        "Last restart: $lastRestart, " +
+                                        "cooldown: ${restartCooldownHours}h, " +
+                                        "time since last restart: ${timeSinceLastRestart.toHours()}h. " +
+                                        "Skipping restart to prevent infinite loop.",
+                                )
+                                // Сохраняем последнюю успешную страницу вместо перезапуска
+                                saveProgressToDatabase(configKey, lastSuccessfulPage)
+                            } else {
+                                log.info(
+                                    "[HH.ru API] Empty page detected at $currentPage " +
+                                        "(started from $actualStartPage) - new vacancies may have appeared, " +
+                                        "restarting from page 0 (cooldown: ${restartCooldownHours}h)",
+                                )
+                                // Обновляем время последнего перезапуска
+                                lastRestartTime[configKey] = now
+                                // Сбрасываем прогресс для этого конфига и перезапускаем с начала
+                                deleteProgressFromDatabase(configKey)
+                                // Рекурсивно перезапускаем с начала
+                                return searchVacancies(config, startFromPage = 0, isRestart = true)
+                            }
                         } else if (currentPage == 0 && pageResponse.items.isEmpty()) {
                             log.warn("[HH.ru API] First page (0) is empty - no vacancies found for this search")
                             // Удаляем прогресс, так как нет вакансий

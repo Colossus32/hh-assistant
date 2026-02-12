@@ -28,6 +28,7 @@ class ResumeServiceTest {
     private lateinit var pdfParser: PDFParserService
     private lateinit var hhResumeClient: HHResumeClient
     private lateinit var objectMapper: ObjectMapper
+    private lateinit var resumeStructureCache: com.github.benmanes.caffeine.cache.Cache<String, com.hhassistant.domain.model.ResumeStructure>
     private lateinit var service: ResumeService
 
     @BeforeEach
@@ -36,7 +37,12 @@ class ResumeServiceTest {
         pdfParser = mockk()
         hhResumeClient = mockk()
         objectMapper = jacksonObjectMapper()
-        service = ResumeService(repository, pdfParser, hhResumeClient, objectMapper, "./resumes/resume.pdf")
+        // Создаем Caffeine Cache как в production коде
+        resumeStructureCache = com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+            .build<String, com.hhassistant.domain.model.ResumeStructure>()
+        // Параметры в правильном порядке: repository, pdfParser, hhResumeClient, objectMapper, resumePath, resumeStructureCache
+        // resumePath - это nullable, так как мы не используем реальный путь в тестах
+        service = ResumeService(repository, pdfParser, hhResumeClient, objectMapper, null, resumeStructureCache)
     }
 
     @Test
@@ -146,6 +152,7 @@ class ResumeServiceTest {
                 hhResumeClient,
                 objectMapper,
                 pdfFile.absolutePath,
+                resumeStructureCache,
             )
 
             val result = serviceWithTempPath.loadResume()

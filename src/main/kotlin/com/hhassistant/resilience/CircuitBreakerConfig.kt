@@ -92,21 +92,55 @@ class CircuitBreakerConfig {
 
     /**
      * Retry для HH.ru API
-     * Настроен для ретрая только временных ошибок (ConnectionException, 5xx)
+     * Настроен для ретрая:
+     * - ConnectionException (временные ошибки сети)
+     * - RateLimitException (429) с экспоненциальным бэкофом (временное ограничение)
+     * Не ретраим:
+     * - UnauthorizedException (401/403) - неверный токен
+     * - NotFoundException (404) - ресурс не найден
+     * - APIException - другие постоянные ошибки
      */
     @Bean("hhApiRetry")
     fun hhApiRetry(
         @Value("\${resilience.retry.max-attempts:3}") maxAttempts: Int,
         @Value("\${resilience.retry.wait-duration-millis:1000}") waitDurationMillis: Long,
+        @Value("\${resilience.retry.rate-limit-retry.max-attempts:5}") rateLimitMaxAttempts: Int,
+        @Value("\${resilience.retry.rate-limit-retry.initial-wait-millis:2000}") rateLimitInitialWaitMillis: Long,
+        @Value("\${resilience.retry.rate-limit-retry.backoff-multiplier:2.0}") backoffMultiplier: Double,
     ): Retry {
         val config = RetryConfig.custom<Any>()
             .maxAttempts(maxAttempts)
-            .waitDuration(Duration.ofMillis(waitDurationMillis))
-            // Ретраим только ConnectionException (временные ошибки)
-            // Постоянные ошибки (401, 403, 404, 429) не ретраятся
-            .retryExceptions(com.hhassistant.exception.HHAPIException.ConnectionException::class.java)
+            // Экспоненциальный бэкоф: 1s -> 2s -> 4s для ConnectionException
+            .intervalFunction(
+                io.github.resilience4j.core.IntervalFunction.ofExponentialBackoff(
+                    waitDurationMillis,
+                    2.0, // множитель для экспоненциального роста
+                ),
+            )
+            // Ретраим временные ошибки
+            .retryExceptions(
+                com.hhassistant.exception.HHAPIException.ConnectionException::class.java,
+            )
+            // Для RateLimitException используем отдельную стратегию
+            .retryOnException { exception ->
+                exception is com.hhassistant.exception.HHAPIException.RateLimitException
+            }
+            // Игнорируем постоянные ошибки
+            .ignoreExceptions(
+                com.hhassistant.exception.HHAPIException.UnauthorizedException::class.java,
+                com.hhassistant.exception.HHAPIException.NotFoundException::class.java,
+                com.hhassistant.exception.HHAPIException.APIException::class.java,
+            )
             .build()
 
-        return Retry.of("hh-api", config)
+        val retry = Retry.of("hh-api", config)
+
+        log.info(
+            "🔧 [Resilience] HH API Retry configured: maxAttempts=$maxAttempts, " +
+                "rateLimitMaxAttempts=$rateLimitMaxAttempts, " +
+                "initialWait=${waitDurationMillis}ms, backoffMultiplier=$backoffMultiplier",
+        )
+
+        return retry
     }
 }

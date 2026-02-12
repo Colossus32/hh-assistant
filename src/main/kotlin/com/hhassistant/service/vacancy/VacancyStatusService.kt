@@ -21,34 +21,68 @@ class VacancyStatusService(
     private val log = KotlinLogging.logger {}
 
     /**
-     * Обновляет статус вакансии
+     * Обновляет статус вакансии.
+     * ВАЖНО: Для корутин всегда перезагружает entity из БД перед обновлением,
+     * чтобы избежать конфликтов optimistic locking с detached entities.
+     * @param updatedVacancy Вакансия с новым статусом (может быть detached entity)
      */
     @Loggable
     @CacheEvict(value = ["vacancyList", "vacancyDetails"], allEntries = true)
     fun updateVacancyStatus(updatedVacancy: Vacancy) {
         try {
-            val oldStatus = vacancyRepository.findById(updatedVacancy.id)
-                .map { it.status }
-                .orElse(null)
+            // ВАЖНО: Всегда перезагружаем entity из БД перед обновлением
+            // Это предотвращает конфликты optimistic locking при вызове из корутин
+            // где entity может быть detached (отсоединена от Hibernate session)
+            val currentVacancy = vacancyRepository.findById(updatedVacancy.id).orElse(null)
+            if (currentVacancy == null) {
+                log.warn("⚠️ [StatusService] Vacancy ${updatedVacancy.id} not found in database")
+                throw VacancyProcessingException(
+                    "Vacancy not found",
+                    updatedVacancy.id,
+                )
+            }
 
-            vacancyRepository.save(updatedVacancy)
+            val oldStatus = currentVacancy.status
+            val newStatus = updatedVacancy.status
+
+            // Если статус не изменился, пропускаем обновление
+            if (oldStatus == newStatus) {
+                log.debug("[StatusService] Vacancy ${updatedVacancy.id} already has status $newStatus, skipping update")
+                return
+            }
+
+            // Обновляем статус с актуальной версией entity (для optimistic locking)
+            val updatedWithCurrentVersion = currentVacancy.withStatus(newStatus)
+            vacancyRepository.save(updatedWithCurrentVersion)
             log.info(
-                "✅ [StatusService] Updated vacancy ${updatedVacancy.id} ('${updatedVacancy.name}') status: $oldStatus -> ${updatedVacancy.status}",
+                "✅ [StatusService] Updated vacancy ${updatedVacancy.id} ('${updatedVacancy.name}') status: $oldStatus -> $newStatus",
             )
         } catch (e: OptimisticLockException) {
             log.warn(
                 "⚠️ [StatusService] Optimistic lock conflict for vacancy ${updatedVacancy.id}: " +
                     "vacancy was modified by another transaction. Retrying with fresh data...",
             )
-            // Пытаемся загрузить актуальную версию и обновить снова
+            // Пытаемся загрузить актуальную версию и обновить снова (максимум 1 retry)
             try {
                 val currentVacancy = vacancyRepository.findById(updatedVacancy.id).orElse(null)
                 if (currentVacancy != null) {
+                    val oldStatus = currentVacancy.status
+                    val newStatus = updatedVacancy.status
+
+                    // Если статус уже обновлен другим потоком, пропускаем
+                    if (oldStatus == newStatus) {
+                        log.debug(
+                            "[StatusService] Vacancy ${updatedVacancy.id} already has status $newStatus " +
+                                "(updated by another transaction), skipping",
+                        )
+                        return
+                    }
+
                     // Обновляем статус с актуальной версией
-                    val updatedWithCurrentVersion = currentVacancy.withStatus(updatedVacancy.status)
+                    val updatedWithCurrentVersion = currentVacancy.withStatus(newStatus)
                     vacancyRepository.save(updatedWithCurrentVersion)
                     log.info(
-                        "✅ [StatusService] Successfully updated vacancy ${updatedVacancy.id} after optimistic lock retry",
+                        "✅ [StatusService] Successfully updated vacancy ${updatedVacancy.id} after optimistic lock retry: $oldStatus -> $newStatus",
                     )
                 } else {
                     log.error("❌ [StatusService] Vacancy ${updatedVacancy.id} not found after optimistic lock conflict")

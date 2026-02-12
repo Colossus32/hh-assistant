@@ -21,6 +21,7 @@ class HHVacancyClientTest {
     private lateinit var mockWebServer: MockWebServer
     private lateinit var client: HHVacancyClient
     private lateinit var rateLimitService: RateLimitService
+    private lateinit var searchConfigProgressRepository: com.hhassistant.repository.SearchConfigProgressRepository
     private val objectMapper = ObjectMapper()
 
     @BeforeEach
@@ -35,6 +36,8 @@ class HHVacancyClientTest {
         rateLimitService = mockk<RateLimitService>(relaxed = true)
         coEvery { rateLimitService.tryConsume() } returns true
 
+        searchConfigProgressRepository = mockk(relaxed = true)
+
         val vacancyDetailsCache = com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
             .build<String, com.hhassistant.client.hh.dto.VacancyDto>()
 
@@ -47,8 +50,11 @@ class HHVacancyClientTest {
             experienceIds = null,
         )
 
+        val hhApiRetry = io.github.resilience4j.retry.Retry.ofDefaults("test")
+
         client = HHVacancyClient(
             webClient, perPage = 50, defaultPage = 0, rateLimitService, vacancyDetailsCache, searchConfig,
+            hhApiRetry, searchConfigProgressRepository,
         )
     }
 
