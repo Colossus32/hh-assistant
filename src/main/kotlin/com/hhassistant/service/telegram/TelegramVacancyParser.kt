@@ -60,11 +60,11 @@ class TelegramVacancyParser {
      */
     private fun isLikelyVacancy(text: String): Boolean {
         val vacancyKeywords = listOf(
-            "вакансия", "вакансії", "вакансии", "позиция", "позиції",
-            "искать", "шукаємо", "работа", "робота", "work", "job",
-            "ищу", "looking for", "hiring", "найм", "пошук",
+            "вакансия", "вакансии", "позиция",
+            "искать", "работа", "робота", "work", "job",
+            "ищу", "looking for", "hiring", "найм",
             "программист", "developer", "engineer", "senior", "middle", "junior",
-            "frontend", "backend", "fullstack", "devops", "qa"
+            "backend"
         )
         
         val lowerText = text.lowercase()
