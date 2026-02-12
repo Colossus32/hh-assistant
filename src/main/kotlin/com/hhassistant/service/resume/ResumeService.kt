@@ -1,11 +1,13 @@
 package com.hhassistant.service.resume
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.github.benmanes.caffeine.cache.Cache
 import com.hhassistant.client.hh.HHResumeClient
 import com.hhassistant.domain.entity.Resume
 import com.hhassistant.domain.entity.ResumeSource
 import com.hhassistant.repository.ResumeRepository
 import mu.KotlinLogging
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import java.io.File
@@ -17,15 +19,13 @@ class ResumeService(
     private val hhResumeClient: HHResumeClient,
     private val objectMapper: ObjectMapper,
     @Value("\${app.resume.path:./resumes/resume.pdf}") private val resumePath: String,
+    @Qualifier("resumeStructureCache") private val resumeStructureCache: Cache<String, com.hhassistant.domain.model.ResumeStructure>,
 ) {
     private val log = KotlinLogging.logger {}
 
     // Кэш резюме в памяти - загружается один раз при старте
     @Volatile
     private var cachedResume: Resume? = null
-
-    @Volatile
-    private var cachedResumeStructure: com.hhassistant.domain.model.ResumeStructure? = null
 
     /**
      * Загружает резюме из кэша или из источника (БД, HH.ru API, PDF)
@@ -52,7 +52,7 @@ class ResumeService(
             log.debug("Using existing resume from database: ${existingResume.fileName}")
             // Кэшируем резюме
             cachedResume = existingResume
-            cachedResumeStructure = getResumeStructure(existingResume)
+            // Кэш структуры резюме управляется через Caffeine cache
             return existingResume
         }
 
@@ -63,7 +63,7 @@ class ResumeService(
                 log.info("Resume loaded from HH.ru API")
                 // Кэшируем резюме
                 cachedResume = hhResume
-                cachedResumeStructure = getResumeStructure(hhResume)
+                // Кэш структуры резюме управляется через Caffeine cache
                 return hhResume
             }
         } catch (e: Exception) {
@@ -75,7 +75,7 @@ class ResumeService(
             val pdfResume = loadFromPDF()
             // Кэшируем резюме
             cachedResume = pdfResume
-            cachedResumeStructure = getResumeStructure(pdfResume)
+            // Кэш структуры резюме управляется через Caffeine cache
             return pdfResume
         } catch (e: Exception) {
             log.error("Failed to load resume from PDF: ${e.message}", e)
@@ -89,7 +89,8 @@ class ResumeService(
                 isActive = true,
             )
             cachedResume = emptyResume
-            cachedResumeStructure = null
+            // Очищаем кэш структуры резюме
+            resumeStructureCache.invalidateAll()
             return emptyResume
         }
     }
@@ -105,8 +106,10 @@ class ResumeService(
             log.info(
                 "✅ [ResumeService] Resume preloaded successfully: ${resume.fileName} (${resume.rawText.length} chars)",
             )
-            if (cachedResumeStructure != null) {
-                log.info("✅ [ResumeService] Resume structure parsed: ${cachedResumeStructure!!.skills.size} skills")
+            // Проверяем структуру резюме через кэш
+            val structure = getResumeStructure(resume)
+            if (structure != null) {
+                log.info("✅ [ResumeService] Resume structure parsed: ${structure.skills.size} skills")
             }
         } catch (e: Exception) {
             log.error("❌ [ResumeService] Failed to preload resume: ${e.message}", e)
@@ -202,21 +205,20 @@ class ResumeService(
     }
 
     fun getResumeStructure(resume: Resume): com.hhassistant.domain.model.ResumeStructure? {
-        // Используем кэшированную структуру, если она есть
-        if (cachedResumeStructure != null && cachedResume?.id == resume.id) {
-            return cachedResumeStructure
-        }
+        // Используем Caffeine cache для кэширования структуры резюме
+        val cacheKey = (resume.id ?: "default").toString()
 
-        // Парсим структуру из JSON
-        return resume.structuredData?.let {
-            try {
-                val structure = objectMapper.readValue(it, com.hhassistant.domain.model.ResumeStructure::class.java)
-                // Кэшируем структуру
-                cachedResumeStructure = structure
-                structure
-            } catch (e: Exception) {
-                log.warn("Failed to parse structured data for resume ${resume.id}", e)
-                null
+        return resumeStructureCache.get(cacheKey) {
+            // Парсим структуру из JSON, если её нет в кэше
+            resume.structuredData?.let {
+                try {
+                    val structure = objectMapper.readValue(it, com.hhassistant.domain.model.ResumeStructure::class.java)
+                    log.debug("[ResumeService] Cached resume structure for resume ${resume.id}")
+                    structure
+                } catch (e: Exception) {
+                    log.warn("Failed to parse structured data for resume ${resume.id}", e)
+                    null
+                }
             }
         }
     }
@@ -252,7 +254,8 @@ class ResumeService(
 
         // Обновляем кэш
         cachedResume = savedResume
-        cachedResumeStructure = structuredData
+        // Инвалидируем кэш структуры резюме, чтобы при следующем запросе загрузилась новая структура
+        resumeStructureCache.invalidateAll()
 
         log.info(
             "✅ [ResumeService] Resume saved successfully: ${savedResume.fileName} (${rawText.length} chars, ${structuredData.skills.size} skills)",
@@ -279,6 +282,6 @@ class ResumeService(
     fun clearCache() {
         log.info("🔄 [ResumeService] Clearing resume cache")
         cachedResume = null
-        cachedResumeStructure = null
+        resumeStructureCache.invalidateAll()
     }
 }
