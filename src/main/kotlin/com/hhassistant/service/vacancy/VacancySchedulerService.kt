@@ -427,9 +427,9 @@ class VacancySchedulerService(
             analysisSemaphore.withPermit {
                 val analysis = vacancyAnalysisService.analyzeVacancy(vacancy)
 
-                // Если анализ вернул null - вакансия была отклонена валидатором и удалена из БД
+                // Если анализ вернул null - вакансия была отклонена валидатором и помечена как REJECTED_BY_VALIDATOR
                 if (analysis == null) {
-                    log.info(" [Scheduler] Vacancy ${vacancy.id} was rejected by validator and deleted from database")
+                    log.info(" [Scheduler] Vacancy ${vacancy.id} was rejected by validator and marked as REJECTED_BY_VALIDATOR")
                     return null
                 }
 

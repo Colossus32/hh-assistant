@@ -230,17 +230,20 @@ class VacancyAnalysisService(
             metricsService.incrementVacanciesRejectedByValidator()
             metricsService.incrementVacanciesSkipped()
 
-            // Удаляем вакансию из БД, так как она содержит бан-слова
-            // Не сохраняем анализ - такие вакансии нам не нужны
+            // Помечаем вакансию как отклоненную валидатором вместо удаления
+            // Это сохраняет историю и позволяет анализировать отклоненные вакансии
             try {
-                skillExtractionService.deleteVacancyAndSkills(vacancy.id)
-                log.info("[Ollama] Deleted vacancy ${vacancy.id} from database due to exclusion rules")
+                vacancyStatusService.updateVacancyStatus(vacancy.withStatus(VacancyStatus.REJECTED_BY_VALIDATOR))
+                log.info(
+                    "[Ollama] Marked vacancy ${vacancy.id} as REJECTED_BY_VALIDATOR due to exclusion rules: " +
+                        "${contentValidation.rejectionReason}",
+                )
             } catch (e: Exception) {
-                log.error("[Ollama] Failed to delete vacancy ${vacancy.id}: ${e.message}", e)
+                log.error("[Ollama] Failed to update status for vacancy ${vacancy.id}: ${e.message}", e)
             }
 
-            // Возвращаем null, чтобы показать, что вакансия была удалена
-            // Это предотвратит дальнейшую обработку
+            // Возвращаем null, чтобы показать, что вакансия была отклонена
+            // Это предотвратит дальнейшую обработку (LLM анализ)
             return null
         }
 

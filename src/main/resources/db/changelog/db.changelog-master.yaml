@@ -19,3 +19,5 @@ databaseChangeLog:
       file: db/changelog/v1.0/009-add-unique-index-vacancy-id.yaml
   - include:
       file: db/changelog/v1.0/010-add-index-published-at.yaml
+  - include:
+      file: db/changelog/v1.0/011-add-rejected-by-validator-status.yaml

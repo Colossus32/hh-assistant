@@ -84,11 +84,12 @@ data class Vacancy(
     fun isInArchive(): Boolean = status == VacancyStatus.IN_ARCHIVE
 
     /**
-     * Проверяет, можно ли обрабатывать вакансию (не помечена как неинтересная, неподходящая или в архиве)
+     * Проверяет, можно ли обрабатывать вакансию (не помечена как неинтересная, неподходящая, отклоненная или в архиве)
      */
     fun canBeProcessed(): Boolean = status != VacancyStatus.NOT_INTERESTED &&
         status != VacancyStatus.NOT_SUITABLE &&
-        status != VacancyStatus.IN_ARCHIVE
+        status != VacancyStatus.IN_ARCHIVE &&
+        status != VacancyStatus.REJECTED_BY_VALIDATOR
 
     /**
      * Проверяет, находится ли вакансия в очереди на обработку
@@ -131,4 +132,5 @@ enum class VacancyStatus {
     IN_ARCHIVE, // Вакансия недоступна на HH.ru (404, удалена или в архиве)
     APPLIED, // Откликнулся на вакансию
     NOT_INTERESTED, // Неинтересная вакансия (не удалять, но не показывать повторно)
+    REJECTED_BY_VALIDATOR, // Отклонена валидатором (содержит бан-слова или не соответствует критериям, финальный статус)
 }

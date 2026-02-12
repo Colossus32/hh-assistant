@@ -204,6 +204,7 @@ class VacancyProcessingQueueService(
                     VacancyStatus.NOT_SUITABLE,
                     VacancyStatus.IN_ARCHIVE,
                     VacancyStatus.NOT_INTERESTED,
+                    VacancyStatus.REJECTED_BY_VALIDATOR,
                 )
             ) {
                 log.debug(
@@ -620,10 +621,10 @@ class VacancyProcessingQueueService(
 
             // Если анализ вернул null - вакансия была:
             // 1. Помечена как IN_ARCHIVE (404 на HH.ru)
-            // 2. Отклонена валидатором и удалена из БД (бан-слова)
+            // 2. Отклонена валидатором и помечена как REJECTED_BY_VALIDATOR (бан-слова)
             if (analysis == null) {
                 log.info(
-                    " [VacancyProcessingQueue] Vacancy ${vacancy.id} was rejected (IN_ARCHIVE or deleted by validator)",
+                    " [VacancyProcessingQueue] Vacancy ${vacancy.id} was rejected (IN_ARCHIVE or REJECTED_BY_VALIDATOR)",
                 )
                 return
             }
