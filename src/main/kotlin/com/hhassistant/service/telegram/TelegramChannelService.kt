@@ -1,6 +1,7 @@
 package com.hhassistant.service.telegram
 
 import com.hhassistant.client.telegram.TelegramChannelClient
+import com.hhassistant.client.telegram.dto.toEntity
 import com.hhassistant.domain.entity.TelegramChannel
 import com.hhassistant.exception.TelegramException
 import com.hhassistant.repository.TelegramChannelRepository

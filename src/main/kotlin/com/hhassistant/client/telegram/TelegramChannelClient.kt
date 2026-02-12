@@ -1,13 +1,21 @@
 package com.hhassistant.client.telegram
 
 import com.hhassistant.aspect.Loggable
-import com.hhassistant.client.telegram.dto.*
+import com.hhassistant.client.telegram.dto.ChatHistoryResponse
+import com.hhassistant.client.telegram.dto.ChannelMessage
+import com.hhassistant.client.telegram.dto.ChatInfoDto
+import com.hhassistant.client.telegram.dto.GetChatRequest
+import com.hhassistant.client.telegram.dto.GetChatResponse
+import com.hhassistant.client.telegram.dto.JoinChatRequest
+import com.hhassistant.client.telegram.dto.LeaveChatRequest
+import com.hhassistant.client.telegram.dto.SimpleResponse
 import kotlinx.coroutines.reactor.awaitSingle
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
+import org.springframework.web.reactive.function.client.bodyToMono
 
 @Component
 class TelegramChannelClient(
@@ -32,7 +40,7 @@ class TelegramChannelClient(
                 .bodyToMono<ChatHistoryResponse>()
                 .awaitSingle()
             
-            response.result?.filter { it.text?.isNotBlank() == true } ?: emptyList()
+            response.result?.filter { message: ChannelMessage -> message.text?.isNotBlank() == true } ?: emptyList()
         } catch (e: Exception) {
             log.error("Error fetching messages from channel $channelUsername: ${e.message}", e)
             emptyList()

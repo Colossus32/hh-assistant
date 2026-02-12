@@ -145,6 +145,10 @@ class GlobalExceptionHandler : ResponseEntityExceptionHandler() {
                 is TelegramException.RateLimitException -> "Telegram API rate limit exceeded"
                 is TelegramException.InvalidChatException -> "Invalid chat ID"
                 is TelegramException.APIException -> "Telegram API error"
+                is TelegramException.ChannelNotFoundException -> "Telegram channel not found"
+                is TelegramException.ChannelAlreadyExistsException -> "Telegram channel already exists"
+                is TelegramException.ChannelNotAccessibleException -> "Telegram channel not accessible"
+                is TelegramException.ChannelParsingException -> "Error parsing Telegram channel message"
             },
             path = request.requestURI,
         )

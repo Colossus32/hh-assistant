@@ -1059,7 +1059,7 @@ class TelegramCommandHandler(
             val channels = telegramChannelService.getAllChannels()
             
             if (channels.isEmpty()) {
-                "📋 <b>Telegram каналы:</b>\n\nНет добавленных каналов.\n\n💡 Используйте /add_channel @channel_name для добавления канала."
+                return "📋 <b>Telegram каналы:</b>\n\nНет добавленных каналов.\n\n💡 Используйте /add_channel @channel_name для добавления канала."
             }
             
             buildString {

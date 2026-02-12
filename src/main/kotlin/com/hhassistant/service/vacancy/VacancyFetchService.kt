@@ -156,7 +156,6 @@ class VacancyFetchService(
      */
     @Loggable
     private suspend fun fetchVacanciesFromHH(): FetchResult {
-        val startTime = System.currentTimeMillis()
         log.info("[VacancyFetch] Starting to fetch new vacancies from HH.ru API")
 
         // Get active search configurations (priority: YAML rotation > YAML single > DB)

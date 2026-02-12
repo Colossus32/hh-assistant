@@ -71,11 +71,9 @@ class TelegramChannelVacancyFetchService(
         log.debug("[TelegramChannels] Found ${messages.size} messages in channel ${channel.channelUsername}")
         
         // Фильтруем только новые сообщения (после последнего обработанного)
-        val newMessages = if (channel.lastMessageId != null) {
-            messages.filter { it.messageId > channel.lastMessageId!! }
-        } else {
-            messages
-        }
+        val newMessages = channel.lastMessageId?.let { lastId ->
+            messages.filter { it.messageId > lastId }
+        } ?: messages
         
         log.debug("[TelegramChannels] ${newMessages.size} new messages to process")
         
