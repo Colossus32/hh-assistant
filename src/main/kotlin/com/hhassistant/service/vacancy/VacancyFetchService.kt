@@ -12,6 +12,7 @@ import com.hhassistant.repository.SearchConfigRepository
 import com.hhassistant.repository.VacancyRepository
 import com.hhassistant.service.exclusion.ExclusionKeywordService
 import com.hhassistant.service.notification.NotificationService
+import com.hhassistant.service.telegram.TelegramChannelVacancyFetchService
 import com.hhassistant.service.util.SearchConfigFactory
 import com.hhassistant.service.util.TokenRefreshService
 import mu.KotlinLogging
@@ -39,7 +40,9 @@ class VacancyFetchService(
     private val metricsService: com.hhassistant.metrics.MetricsService,
     private val vacancyProcessingQueueService: VacancyProcessingQueueService,
     private val exclusionKeywordService: ExclusionKeywordService,
+    private val telegramChannelVacancyFetchService: TelegramChannelVacancyFetchService,
     @Value("\${app.max-vacancies-per-cycle:50}") private val maxVacanciesPerCycle: Int,
+    @Value("\${app.telegram-channels.enabled:true}") private val telegramChannelsEnabled: Boolean,
     @Qualifier("vacancyIdsCache") private val vacancyIdsCache:
     com.github.benmanes.caffeine.cache.Cache<String, Set<String>>,
 ) {
@@ -67,12 +70,90 @@ class VacancyFetchService(
     }
 
     /**
-     * Загружает новые вакансии из HH.ru API и сохраняет их в БД.
+     * Загружает новые вакансии из всех источников (HH.ru + Telegram каналы) и сохраняет их в БД.
      *
      * @return Результат загрузки с вакансиями и ключевыми словами
      */
     @Loggable
     suspend fun fetchAndSaveNewVacancies(): FetchResult {
+        val startTime = System.currentTimeMillis()
+        log.info("[VacancyFetch] Starting to fetch new vacancies from all sources")
+        
+        val allVacancies = mutableListOf<Vacancy>()
+        val allSearchKeywords = mutableListOf<String>()
+        
+        // 1. Получаем вакансии из HH.ru
+        val hhVacancies = fetchVacanciesFromHH()
+        allVacancies.addAll(hhVacancies.vacancies)
+        allSearchKeywords.addAll(hhVacancies.searchKeywords)
+        
+        // 2. Получаем вакансии из Telegram каналов
+        val telegramVacancies = telegramChannelVacancyFetchService.fetchVacanciesFromChannels()
+        
+        // Сохраняем вакансии из Telegram каналов и обновляем каналы
+        if (telegramVacancies.isNotEmpty()) {
+            val channels = telegramChannelVacancyFetchService.getActiveChannels()
+            
+            for (channel in channels) {
+                try {
+                    // Получаем вакансии только для этого канала
+                    val channelVacancies = telegramVacancies.filter { 
+                        it.channelUsername == channel.channelUsername 
+                    }
+                    
+                    if (channelVacancies.isNotEmpty()) {
+                        telegramChannelVacancyFetchService.saveVacanciesAndUpdateChannel(
+                            channelVacancies, channel
+                        )
+                    }
+                } catch (e: Exception) {
+                    log.error("[VacancyFetch] Error processing channel ${channel.channelUsername}: ${e.message}", e)
+                }
+            }
+            
+            // Добавляем к общему списку и в ключевые слова
+            allVacancies.addAll(telegramVacancies)
+            allSearchKeywords.add("Telegram Channels")
+        }
+        
+        // Сохраняем вакансии из HH.ru в базу
+        if (hhVacancies.vacancies.isNotEmpty()) {
+            val savedVacancies = saveVacanciesInBatches(hhVacancies.vacancies)
+            updateVacancyIdsCacheIncrementally(savedVacancies.map { it.id })
+            metricsService.incrementVacanciesFetched(hhVacancies.vacancies.size)
+            
+            // Добавляем в очередь обработки
+            val vacancyIds = savedVacancies.map { it.id }
+            val enqueuedCount = vacancyProcessingQueueService.enqueueBatch(vacancyIds)
+            val skippedCount = vacancyIds.size - enqueuedCount
+            log.info("[VacancyFetch] Added $enqueuedCount vacancies to processing queue ($skippedCount skipped as duplicates)")
+        }
+        
+        // Сохраняем вакансии из Telegram каналов в базу
+        if (telegramVacancies.isNotEmpty()) {
+            val savedVacancies = saveVacanciesInBatches(telegramVacancies)
+            updateVacancyIdsCacheIncrementally(savedVacancies.map { it.id })
+            metricsService.incrementVacanciesFetched(telegramVacancies.size)
+            
+            // Добавляем в очередь обработки
+            val vacancyIds = savedVacancies.map { it.id }
+            val enqueuedCount = vacancyProcessingQueueService.enqueueBatch(vacancyIds)
+            val skippedCount = vacancyIds.size - enqueuedCount
+            log.info("[VacancyFetch] Added $enqueuedCount Telegram vacancies to processing queue ($skippedCount skipped as duplicates)")
+        }
+        
+        val duration = System.currentTimeMillis() - startTime
+        metricsService.recordVacancyFetchTime(duration)
+        
+        log.info("[VacancyFetch] Total fetched: ${allVacancies.size} vacancies from ${allSearchKeywords.joinToString(", ")}")
+        return FetchResult(allVacancies, allSearchKeywords)
+    }
+    
+    /**
+     * Получает вакансии из HH.ru (выделено из основного метода для удобства)
+     */
+    @Loggable
+    private suspend fun fetchVacanciesFromHH(): FetchResult {
         val startTime = System.currentTimeMillis()
         log.info("[VacancyFetch] Starting to fetch new vacancies from HH.ru API")
 
@@ -139,38 +220,7 @@ class VacancyFetchService(
                 log.error("[VacancyFetch] Error fetching vacancies for config $configId: ${e.message}", e)
             }
         }
-
-        // Save all new vacancies to database with QUEUED status and add to processing queue
-        if (allNewVacancies.isNotEmpty()) {
-            log.debug(
-                "[VacancyFetch] Saving ${allNewVacancies.size} new vacancies to database with QUEUED status using batch operations...",
-            )
-
-            // Сохраняем батчами для оптимизации (Hibernate batch будет автоматически разбивать на группы)
-            val savedVacancies = saveVacanciesInBatches(allNewVacancies)
-
-            log.info(
-                "[VacancyFetch] Saved ${savedVacancies.size} vacancies to database with QUEUED status (using batch operations)",
-            )
-
-            // Инкрементально обновляем кэш ID вакансий (добавляем новые ID вместо полной инвалидации)
-            updateVacancyIdsCacheIncrementally(savedVacancies.map { it.id })
-
-            metricsService.incrementVacanciesFetched(allNewVacancies.size)
-
-            // Add vacancies to processing queue
-            val vacancyIds = savedVacancies.map { it.id }
-            val enqueuedCount = vacancyProcessingQueueService.enqueueBatch(vacancyIds)
-            val skippedCount = vacancyIds.size - enqueuedCount
-            log.info(
-                "[VacancyFetch] Added $enqueuedCount vacancies to processing queue ($skippedCount skipped as duplicates)",
-            )
-        } else {
-            log.debug("[VacancyFetch] No new vacancies found")
-        }
-
-        val duration = System.currentTimeMillis() - startTime
-        metricsService.recordVacancyFetchTime(duration)
+        
         return FetchResult(allNewVacancies, searchKeywords)
     }
 
