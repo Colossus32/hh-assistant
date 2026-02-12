@@ -6,8 +6,10 @@ import com.hhassistant.client.hh.dto.VacancyDto
 import com.hhassistant.client.hh.dto.VacancySearchResponse
 import com.hhassistant.config.VacancyServiceConfig
 import com.hhassistant.domain.entity.SearchConfig
+import com.hhassistant.domain.entity.SearchConfigProgress
 import com.hhassistant.exception.HHAPIException
 import com.hhassistant.ratelimit.RateLimitService
+import com.hhassistant.repository.SearchConfigProgressRepository
 import io.github.resilience4j.kotlin.retry.executeSuspendFunction
 import io.github.resilience4j.retry.Retry
 import kotlinx.coroutines.delay
@@ -20,6 +22,7 @@ import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.WebClientResponseException
 import org.springframework.web.reactive.function.client.bodyToMono
+import java.time.LocalDateTime
 
 @Component
 class HHVacancyClient(
@@ -30,6 +33,7 @@ class HHVacancyClient(
     @Qualifier("vacancyDetailsCache") private val vacancyDetailsCache: Cache<String, VacancyDto>,
     private val searchConfig: VacancyServiceConfig,
     @Qualifier("hhApiRetry") private val hhApiRetry: Retry,
+    private val searchConfigProgressRepository: SearchConfigProgressRepository,
 ) {
     private val log = KotlinLogging.logger {}
 
@@ -40,17 +44,74 @@ class HHVacancyClient(
     private val maxVacanciesDepth = 2000
 
     /**
-     * Кэш для отслеживания последней обработанной страницы для каждого уникального SearchConfig.
-     * Ключ: уникальный идентификатор конфигурации (keywords + area + minSalary)
-     * Значение: последняя обработанная страница
-     */
-    private val lastProcessedPageCache = java.util.concurrent.ConcurrentHashMap<String, Int>()
-
-    /**
      * Генерирует уникальный ключ для SearchConfig
      */
     private fun getConfigKey(config: SearchConfig): String {
         return "${config.keywords}|${config.area ?: "null"}|${config.minSalary ?: "null"}"
+    }
+
+    /**
+     * Загружает прогресс пагинации из БД для конфигурации
+     *
+     * @param configKey Уникальный ключ конфигурации
+     * @return Последняя обработанная страница или 0, если прогресс не найден
+     */
+    private fun loadProgressFromDatabase(configKey: String): Int {
+        return try {
+            val progress = searchConfigProgressRepository.findByConfigKey(configKey)
+            progress.map { it.lastProcessedPage }.orElse(0).also {
+                if (it > 0) {
+                    log.debug("[HH.ru API] Loaded progress from DB for configKey=$configKey: page $it")
+                }
+            }
+        } catch (e: Exception) {
+            log.warn("[HH.ru API] Failed to load progress from DB for configKey=$configKey: ${e.message}", e)
+            0
+        }
+    }
+
+    /**
+     * Сохраняет прогресс пагинации в БД для конфигурации
+     *
+     * @param configKey Уникальный ключ конфигурации
+     * @param lastPage Последняя обработанная страница
+     */
+    private fun saveProgressToDatabase(configKey: String, lastPage: Int) {
+        try {
+            val existingProgress = searchConfigProgressRepository.findByConfigKey(configKey)
+            val progress = if (existingProgress.isPresent) {
+                val existing = existingProgress.get()
+                existing.copy(
+                    lastProcessedPage = lastPage,
+                    updatedAt = LocalDateTime.now(),
+                )
+            } else {
+                SearchConfigProgress(
+                    configKey = configKey,
+                    lastProcessedPage = lastPage,
+                    updatedAt = LocalDateTime.now(),
+                )
+            }
+            searchConfigProgressRepository.save(progress)
+            log.debug("[HH.ru API] Saved progress to DB for configKey=$configKey: page $lastPage")
+        } catch (e: Exception) {
+            log.warn("[HH.ru API] Failed to save progress to DB for configKey=$configKey: ${e.message}", e)
+            // Не прерываем выполнение из-за ошибки сохранения прогресса
+        }
+    }
+
+    /**
+     * Удаляет прогресс пагинации из БД для конфигурации
+     *
+     * @param configKey Уникальный ключ конфигурации
+     */
+    private fun deleteProgressFromDatabase(configKey: String) {
+        try {
+            searchConfigProgressRepository.deleteByConfigKey(configKey)
+            log.debug("[HH.ru API] Deleted progress from DB for configKey=$configKey")
+        } catch (e: Exception) {
+            log.warn("[HH.ru API] Failed to delete progress from DB for configKey=$configKey: ${e.message}", e)
+        }
     }
 
     /**
@@ -76,8 +137,8 @@ class HHVacancyClient(
         // Получаем уникальный ключ для этого SearchConfig
         val configKey = getConfigKey(config)
 
-        // Определяем стартовую страницу: используем переданную, сохраненную или 0
-        val actualStartPage = startFromPage ?: lastProcessedPageCache.getOrDefault(configKey, 0)
+        // Определяем стартовую страницу: используем переданную, сохраненную в БД или 0
+        val actualStartPage = startFromPage ?: loadProgressFromDatabase(configKey)
 
         log.debug(
             "[HH.ru API] Searching vacancies: keywords='${config.keywords}', " +
@@ -119,17 +180,17 @@ class HHVacancyClient(
                                     "(started from $actualStartPage) - new vacancies may have appeared, " +
                                     "restarting from page 0",
                             )
-                            // Сбрасываем кэш для этого конфига и перезапускаем с начала
-                            lastProcessedPageCache.remove(configKey)
+                            // Сбрасываем прогресс для этого конфига и перезапускаем с начала
+                            deleteProgressFromDatabase(configKey)
                             // Рекурсивно перезапускаем с начала
                             return searchVacancies(config, startFromPage = 0, isRestart = true)
                         } else if (currentPage == 0 && pageResponse.items.isEmpty()) {
                             log.warn("[HH.ru API] First page (0) is empty - no vacancies found for this search")
-                            // Сбрасываем кэш, так как нет вакансий
-                            lastProcessedPageCache.remove(configKey)
+                            // Удаляем прогресс, так как нет вакансий
+                            deleteProgressFromDatabase(configKey)
                         } else {
                             // Сохраняем последнюю успешную страницу (предыдущую)
-                            lastProcessedPageCache[configKey] = lastSuccessfulPage
+                            saveProgressToDatabase(configKey, lastSuccessfulPage)
                         }
                     }
 
@@ -141,7 +202,7 @@ class HHVacancyClient(
                         allVacancies.addAll(pageResponse.items)
                         hasMorePages = false
                         // Сохраняем текущую страницу как последнюю обработанную
-                        lastProcessedPageCache[configKey] = currentPage
+                        saveProgressToDatabase(configKey, currentPage)
                     }
 
                     // Обычная страница - продолжаем
@@ -184,8 +245,7 @@ class HHVacancyClient(
 
         // Если дошли до конца без ошибок, сохраняем последнюю страницу
         if (!hasMorePages && allVacancies.isNotEmpty()) {
-            lastProcessedPageCache[configKey] = lastPage
-            log.debug("[HH.ru API] Saved last processed page $lastPage for configKey=$configKey")
+            saveProgressToDatabase(configKey, lastPage)
         }
 
         return allVacancies

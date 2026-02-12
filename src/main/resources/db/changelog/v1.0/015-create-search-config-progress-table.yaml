@@ -1,0 +1,40 @@
+databaseChangeLog:
+  - changeSet:
+      id: create-search-config-progress-table
+      author: system
+      changes:
+        - createTable:
+            tableName: search_config_progress
+            columns:
+              - column:
+                  name: id
+                  type: bigint
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+                  autoIncrement: true
+              - column:
+                  name: config_key
+                  type: varchar(500)
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: last_processed_page
+                  type: integer
+                  constraints:
+                    nullable: false
+                  defaultValueNumeric: 0
+              - column:
+                  name: updated_at
+                  type: timestamp
+                  constraints:
+                    nullable: false
+            indexes:
+              - index:
+                  name: idx_search_config_progress_config_key
+                  unique: true
+                  columns:
+                    - column:
+                        name: config_key
+

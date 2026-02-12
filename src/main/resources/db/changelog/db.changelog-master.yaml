@@ -27,3 +27,5 @@ databaseChangeLog:
       file: db/changelog/v1.0/013-add-composite-index-status-fetched-at.yaml
   - include:
       file: db/changelog/v1.0/014-add-version-field.yaml
+  - include:
+      file: db/changelog/v1.0/015-create-search-config-progress-table.yaml
