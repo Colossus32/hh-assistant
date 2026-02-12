@@ -1,0 +1,12 @@
+databaseChangeLog:
+  - changeSet:
+      id: add-index-published-at
+      author: system
+      changes:
+        - createIndex:
+            tableName: vacancies
+            indexName: idx_vacancies_published_at
+            columns:
+              - column:
+                  name: published_at
+
