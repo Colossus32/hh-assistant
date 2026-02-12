@@ -1,0 +1,15 @@
+databaseChangeLog:
+  - changeSet:
+      id: add-index-url
+      author: system
+      changes:
+        - createIndex:
+            tableName: vacancies
+            indexName: idx_vacancies_url
+            columns:
+              - column:
+                  name: url
+            # Примечание: URL может быть длинным (до 1000 символов)
+            # Для PostgreSQL можно использовать hash index для оптимизации, но стандартный индекс тоже работает
+            # Индекс поможет при проверке дубликатов по URL
+
