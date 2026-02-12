@@ -71,6 +71,8 @@ class TelegramChannelService(
         telegramChannelRepository.save(updated)
         
         // Оставляем канал в Telegram
-        telegramChannelClient.leaveChat(channel.channelUsername)
+        runBlocking {
+            telegramChannelClient.leaveChat(channel.channelUsername)
+        }
     }
 }
