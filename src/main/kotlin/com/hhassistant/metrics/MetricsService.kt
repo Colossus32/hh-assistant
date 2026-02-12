@@ -38,6 +38,15 @@ class MetricsService(
         .description("Total number of vacancies rejected by content validator")
         .register(meterRegistry)
 
+    private val vacanciesValidatedCounter: Counter = Counter.builder("vacancies.validated")
+        .description("Total number of vacancies validated by content validator")
+        .register(meterRegistry)
+
+    private val vacanciesPassedValidationCounter: Counter = Counter.builder("vacancies.validation.passed")
+        .description("Total number of vacancies that passed validation")
+        .tag("result", "passed")
+        .register(meterRegistry)
+
     // ========== Счетчики recovery ==========
     private val recoveryAttemptsCounter: Counter = Counter.builder("vacancies.recovery.attempts")
         .description("Total number of recovery attempts for skipped vacancies")
@@ -132,6 +141,14 @@ class MetricsService(
 
     fun incrementVacanciesRejectedByValidator() {
         vacanciesRejectedByValidatorCounter.increment()
+    }
+
+    fun incrementVacanciesValidated() {
+        vacanciesValidatedCounter.increment()
+    }
+
+    fun incrementVacanciesPassedValidation() {
+        vacanciesPassedValidationCounter.increment()
     }
 
     fun incrementRecoveryAttempts() {

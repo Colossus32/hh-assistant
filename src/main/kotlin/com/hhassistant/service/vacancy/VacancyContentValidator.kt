@@ -1,6 +1,7 @@
 package com.hhassistant.service.vacancy
 
 import com.hhassistant.domain.entity.Vacancy
+import com.hhassistant.metrics.MetricsService
 import com.hhassistant.service.exclusion.ExclusionRuleService
 import com.hhassistant.service.resume.ResumeService
 import mu.KotlinLogging
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Component
 class VacancyContentValidator(
     private val exclusionRuleService: ExclusionRuleService,
     private val resumeService: ResumeService,
+    private val metricsService: MetricsService,
     // Fallback to config if DB is empty (for backward compatibility)
     @Value("\${app.analysis.exclusion-keywords:#{T(java.util.Collections).emptyList()}}")
     private val fallbackKeywords: List<String>,
@@ -37,9 +39,13 @@ class VacancyContentValidator(
      * @return ValidationResult with information about whether vacancy is valid and rejection reason
      */
     suspend fun validate(vacancy: Vacancy): ValidationResult {
+        // Увеличиваем счетчик проверенных вакансий
+        metricsService.incrementVacanciesValidated()
+
         // Step 1: Check exclusion keywords
         val exclusionResult = validateExclusionRules(vacancy)
         if (!exclusionResult.isValid) {
+            metricsService.incrementVacanciesRejectedByValidator()
             return exclusionResult
         }
 
@@ -47,10 +53,13 @@ class VacancyContentValidator(
         if (skillMatchingEnabled) {
             val skillsResult = validateResumeSkills(vacancy)
             if (!skillsResult.isValid) {
+                metricsService.incrementVacanciesRejectedByValidator()
                 return skillsResult
             }
         }
 
+        // Вакансия прошла валидацию
+        metricsService.incrementVacanciesPassedValidation()
         return ValidationResult(isValid = true, rejectionReason = null)
     }
 
