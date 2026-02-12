@@ -77,6 +77,28 @@ class MetricsService(
         .description("Total number of cover letter generation failures")
         .tag("status", "failed")
         .register(meterRegistry)
+    
+    // ========== Счетчики Telegram каналов ==========
+    private val telegramChannelsCountGauge: Gauge.builder("telegram.channels.count")
+        .description("Total number of configured Telegram channels")
+        .register(meterRegistry)
+        
+    private val telegramActiveChannelsCountGauge: Gauge.builder("telegram.channels.active")
+        .description("Number of active Telegram channels")
+        .register(meterRegistry)
+        
+    private val telegramMonitoredChannelsCountGauge: Gauge.builder("telegram.channels.monitored")
+        .description("Number of monitored Telegram channels")
+        .register(meterRegistry)
+        
+    private val telegramVacanciesFetchedCounter: Counter = Counter.builder("telegram.vacancies.fetched")
+        .description("Total number of vacancies fetched from Telegram channels")
+        .tag("source", "telegram")
+        .register(meterRegistry)
+        
+    private val telegramFetchErrorsCounter: Counter = Counter.builder("telegram.fetch.errors")
+        .description("Number of errors during Telegram channel fetching")
+        .register(meterRegistry)
 
     private val coverLettersRetryCounter: Counter = Counter.builder("cover_letters.retry")
         .description("Total number of cover letter generation retries")
@@ -152,6 +174,21 @@ class MetricsService(
 
     fun incrementVacanciesPassedValidation() {
         vacanciesPassedValidationCounter.increment()
+    }
+    
+    // ========== Методы для обновления метрик Telegram ==========
+    fun updateTelegramChannelsCount(totalChannels: Int, activeChannels: Int, monitoredChannels: Int) {
+        telegramChannelsCountGauge.set(totalChannels.toDouble())
+        telegramActiveChannelsCountGauge.set(activeChannels.toDouble())
+        telegramMonitoredChannelsCountGauge.set(monitoredChannels.toDouble())
+    }
+    
+    fun incrementTelegramVacanciesFetched(count: Int = 1) {
+        telegramVacanciesFetchedCounter.increment(count.toDouble())
+    }
+    
+    fun incrementTelegramFetchErrors() {
+        telegramFetchErrorsCounter.increment()
     }
 
     fun incrementRecoveryAttempts() {
