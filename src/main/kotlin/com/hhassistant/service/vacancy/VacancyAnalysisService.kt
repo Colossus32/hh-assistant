@@ -24,6 +24,9 @@ import io.github.resilience4j.kotlin.circuitbreaker.executeSuspendFunction
 import io.github.resilience4j.kotlin.retry.executeSuspendFunction
 import io.github.resilience4j.retry.Retry
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -59,6 +62,98 @@ class VacancyAnalysisService(
     // Ограничивает количество одновременных HTTP запросов к HH.ru API для проверки валидности URL
     // Работает в паре с RateLimitService для предотвращения перегрузки API
     private val urlCheckSemaphore = Semaphore(maxConcurrentUrlChecks)
+
+    /**
+     * Проверяет URL вакансии на доступность (существует ли вакансия на HH.ru)
+     * Используется для батчевой проверки нескольких вакансий параллельно
+     *
+     * @param vacancyId ID вакансии для проверки
+     * @return true если вакансия доступна, false если не найдена (404)
+     * @throws HHAPIException.RateLimitException если превышен rate limit
+     * @throws HHAPIException.ConnectionException для других ошибок соединения
+     */
+    private suspend fun checkVacancyUrl(vacancyId: String): Boolean {
+        return urlCheckSemaphore.withPermit {
+            withContext(Dispatchers.IO) {
+                try {
+                    hhVacancyClient.getVacancyDetails(vacancyId)
+                    // Вакансия существует и доступна
+                    true
+                } catch (e: HHAPIException.NotFoundException) {
+                    // Вакансия не найдена (404)
+                    false
+                } catch (e: HHAPIException.RateLimitException) {
+                    // Пробрасываем rate limit для обработки выше
+                    throw e
+                } catch (e: Exception) {
+                    // Другие ошибки - логируем, но считаем URL валидным
+                    log.warn(
+                        "[URL Check] Error checking vacancy $vacancyId URL: ${e.message}, " +
+                            "assuming URL is valid and proceeding",
+                    )
+                    true
+                }
+            }
+        }
+    }
+
+    /**
+     * Батчевая проверка URL нескольких вакансий параллельно
+     * Проверяет до batchSize вакансий одновременно для оптимизации производительности
+     *
+     * @param vacancies Список вакансий для проверки
+     * @param batchSize Размер батча для параллельной проверки (по умолчанию 5-10)
+     * @return Map: vacancyId -> true если доступна, false если не найдена (404)
+     */
+    suspend fun checkVacancyUrlsBatch(
+        vacancies: List<Vacancy>,
+        batchSize: Int = 5,
+    ): Map<String, Boolean> {
+        if (vacancies.isEmpty()) {
+            return emptyMap()
+        }
+
+        val results = mutableMapOf<String, Boolean>()
+        val batches = vacancies.chunked(batchSize)
+
+        for (batch in batches) {
+            // Проверяем каждую вакансию в батче параллельно
+            val batchResults = coroutineScope {
+                batch.map { vacancy ->
+                    async(Dispatchers.IO) {
+                        try {
+                            val isAvailable = checkVacancyUrl(vacancy.id)
+                            vacancy.id to isAvailable
+                        } catch (e: HHAPIException.RateLimitException) {
+                            // Rate limit - помечаем как доступную, чтобы не блокировать обработку
+                            // Ошибка будет обработана в analyzeVacancy
+                            log.warn(
+                                "[URL Check Batch] Rate limit while checking ${vacancy.id}, " +
+                                    "marking as available for retry",
+                            )
+                            vacancy.id to true
+                        } catch (e: Exception) {
+                            // Другие ошибки - считаем доступной
+                            log.warn(
+                                "[URL Check Batch] Error checking ${vacancy.id}: ${e.message}, " +
+                                    "assuming available",
+                            )
+                            vacancy.id to true
+                        }
+                    }
+                }.awaitAll()
+            }
+
+            results.putAll(batchResults)
+        }
+
+        log.debug(
+            "[URL Check Batch] Checked ${vacancies.size} vacancies in ${batches.size} batches, " +
+                "${results.values.count { !it }} not found (404)",
+        )
+
+        return results
+    }
 
     /**
      * Получает анализ вакансии по ID, если он существует
@@ -160,32 +255,9 @@ class VacancyAnalysisService(
         log.info("[Ollama] Starting analysis for vacancy: ${vacancy.id} - '${vacancy.name}' (${vacancy.employer})")
 
         // Шаг 1: Проверяем актуальность URL - доступна ли вакансия на HH.ru (самая первая проверка)
-        // Используем семафор для ограничения параллелизма проверок URL и Dispatchers.IO для распараллеливания HTTP запросов
-        // Это предотвращает перегрузку HH.ru API и работает в паре с RateLimitService
+        // Используем метод checkVacancyUrl для единообразной проверки
         try {
-            val urlCheckResult = urlCheckSemaphore.withPermit {
-                withContext(Dispatchers.IO) {
-                    try {
-                        hhVacancyClient.getVacancyDetails(vacancy.id)
-                        // Вакансия существует и доступна
-                        true
-                    } catch (e: HHAPIException.NotFoundException) {
-                        // Вакансия не найдена (404) - помечаем как IN_ARCHIVE
-                        log.warn(
-                            "[URL Check] Vacancy ${vacancy.id} ('${vacancy.name}') not found on HH.ru (404), " +
-                                "marking as IN_ARCHIVE",
-                        )
-                        false
-                    } catch (e: Exception) {
-                        // Другие ошибки (кроме rate limit) - логируем, но считаем URL валидным
-                        log.warn(
-                            "[URL Check] Error checking vacancy ${vacancy.id} URL: ${e.message}, " +
-                                "assuming URL is valid and proceeding",
-                        )
-                        true
-                    }
-                }
-            }
+            val urlCheckResult = checkVacancyUrl(vacancy.id)
 
             // Если URL неактуален (404) - помечаем как IN_ARCHIVE
             if (!urlCheckResult) {
