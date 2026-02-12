@@ -40,12 +40,9 @@ class TelegramChannelService(
         val chatInfo = telegramChannelClient.getChatInfo(normalizedUsername)
             ?: throw TelegramException.ChannelNotFoundException("Channel $normalizedUsername not found or bot doesn't have access")
         
-        // Создаем запись о канале
-        val channel = TelegramChannel(
+        // Создаем запись о канале используя toEntity() и обновляем поля
+        val channel = chatInfo.toEntity().copy(
             channelUsername = normalizedUsername,
-            channelId = chatInfo.id,
-            displayName = chatInfo.displayName,
-            channelType = chatInfo.channelType,
             isActive = true,
             isMonitored = false, // Не мониторим по умолчанию
             addedBy = addedBy,

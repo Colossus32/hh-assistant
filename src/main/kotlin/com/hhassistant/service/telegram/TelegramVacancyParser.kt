@@ -1,8 +1,8 @@
 package com.hhassistant.service.telegram
 
 import com.hhassistant.domain.entity.Vacancy
-import com.hhassistant.domain.entity.VacancySource
 import com.hhassistant.domain.entity.VacancyStatus
+import com.hhassistant.domain.model.VacancySource
 import com.hhassistant.client.telegram.dto.ChannelMessage
 import mu.KotlinLogging
 import org.springframework.stereotype.Component
@@ -112,7 +112,8 @@ class TelegramVacancyParser {
         for (pattern in patterns) {
             val match = pattern.find(text)
             if (match != null) {
-                return match.groupValues[1].trim().substring(0, minOf(100, it.length))
+                val employerName = match.groupValues[1].trim()
+                return employerName.substring(0, minOf(100, employerName.length))
             }
         }
         return null

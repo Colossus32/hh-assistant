@@ -79,17 +79,9 @@ class MetricsService(
         .register(meterRegistry)
     
     // ========== Счетчики Telegram каналов ==========
-    private val telegramChannelsCountGauge: Gauge.builder("telegram.channels.count")
-        .description("Total number of configured Telegram channels")
-        .register(meterRegistry)
-        
-    private val telegramActiveChannelsCountGauge: Gauge.builder("telegram.channels.active")
-        .description("Number of active Telegram channels")
-        .register(meterRegistry)
-        
-    private val telegramMonitoredChannelsCountGauge: Gauge.builder("telegram.channels.monitored")
-        .description("Number of monitored Telegram channels")
-        .register(meterRegistry)
+    private val telegramChannelsCount = AtomicInteger(0)
+    private val telegramActiveChannelsCount = AtomicInteger(0)
+    private val telegramMonitoredChannelsCount = AtomicInteger(0)
         
     private val telegramVacanciesFetchedCounter: Counter = Counter.builder("telegram.vacancies.fetched")
         .description("Total number of vacancies fetched from Telegram channels")
@@ -144,6 +136,18 @@ class MetricsService(
         Gauge.builder("resume.active", activeResume) { it.get().toDouble() }
             .description("Whether there is an active resume (1 = yes, 0 = no)")
             .register(meterRegistry)
+            
+        Gauge.builder("telegram.channels.count", telegramChannelsCount) { it.get().toDouble() }
+            .description("Total number of configured Telegram channels")
+            .register(meterRegistry)
+            
+        Gauge.builder("telegram.channels.active", telegramActiveChannelsCount) { it.get().toDouble() }
+            .description("Number of active Telegram channels")
+            .register(meterRegistry)
+            
+        Gauge.builder("telegram.channels.monitored", telegramMonitoredChannelsCount) { it.get().toDouble() }
+            .description("Number of monitored Telegram channels")
+            .register(meterRegistry)
     }
 
     // ========== Методы для обновления метрик ==========
@@ -178,9 +182,9 @@ class MetricsService(
     
     // ========== Методы для обновления метрик Telegram ==========
     fun updateTelegramChannelsCount(totalChannels: Int, activeChannels: Int, monitoredChannels: Int) {
-        telegramChannelsCountGauge.set(totalChannels.toDouble())
-        telegramActiveChannelsCountGauge.set(activeChannels.toDouble())
-        telegramMonitoredChannelsCountGauge.set(monitoredChannels.toDouble())
+        telegramChannelsCount.set(totalChannels)
+        telegramActiveChannelsCount.set(activeChannels)
+        telegramMonitoredChannelsCount.set(monitoredChannels)
     }
     
     fun incrementTelegramVacanciesFetched(count: Int = 1) {

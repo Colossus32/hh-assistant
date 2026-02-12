@@ -3,8 +3,10 @@ package com.hhassistant.web
 import com.hhassistant.domain.entity.TelegramChannel
 import com.hhassistant.service.telegram.TelegramChannelService
 import jakarta.validation.Valid
+import kotlinx.coroutines.runBlocking
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.*
+import org.springframework.web.server.ResponseStatusException
 
 @RestController
 @RequestMapping("/api/telegram-channels")
@@ -38,7 +40,9 @@ class TelegramChannelController(
         if (chatId == null) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Missing required header: X-Telegram-Chat-Id")
         }
-        val channel = telegramChannelService.addChannel(request.channelUsername, chatId)
+        val channel = runBlocking {
+            telegramChannelService.addChannel(request.channelUsername, chatId)
+        }
         return channel.toDto()
     }
     

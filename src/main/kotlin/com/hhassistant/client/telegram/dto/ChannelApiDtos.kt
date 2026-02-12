@@ -44,9 +44,22 @@ data class JoinChatRequest(
     val chatId: String
 )
 
+data class LeaveChatRequest(
+    val chatId: String
+)
+
 data class SimpleResponse(
     val ok: Boolean,
     val description: String?
+)
+
+data class ChannelMessage(
+    val messageId: Long,
+    val date: Long,
+    val text: String?,
+    val caption: String?,
+    val entities: List<MessageEntity>?,
+    val authorSignature: String?,
 )
 
 data class MessageEntity(

@@ -15,6 +15,7 @@ import com.hhassistant.service.notification.NotificationService
 import com.hhassistant.service.telegram.TelegramChannelVacancyFetchService
 import com.hhassistant.service.util.SearchConfigFactory
 import com.hhassistant.service.util.TokenRefreshService
+import com.hhassistant.repository.TelegramChannelRepository
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
@@ -41,6 +42,7 @@ class VacancyFetchService(
     private val vacancyProcessingQueueService: VacancyProcessingQueueService,
     private val exclusionKeywordService: ExclusionKeywordService,
     private val telegramChannelVacancyFetchService: TelegramChannelVacancyFetchService,
+    private val telegramChannelRepository: TelegramChannelRepository,
     @Value("\${app.max-vacancies-per-cycle:50}") private val maxVacanciesPerCycle: Int,
     @Value("\${app.telegram-channels.enabled:true}") private val telegramChannelsEnabled: Boolean,
     @Qualifier("vacancyIdsCache") private val vacancyIdsCache:
@@ -92,7 +94,7 @@ class VacancyFetchService(
         
         // Сохраняем вакансии из Telegram каналов и обновляем каналы
         if (telegramVacancies.isNotEmpty()) {
-            val channels = telegramChannelVacancyFetchService.getActiveChannels()
+            val channels = telegramChannelRepository.findByIsActiveTrueAndIsMonitoredTrue()
             
             for (channel in channels) {
                 try {
