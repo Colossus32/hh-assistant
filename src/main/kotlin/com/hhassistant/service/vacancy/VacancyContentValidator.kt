@@ -79,10 +79,15 @@ class VacancyContentValidator(
 
         val normalizedText = if (caseSensitive) textToCheck else textToCheck.lowercase()
 
-        // Check keywords
+        // Check keywords using word boundaries to avoid false positives
+        // For example, "Java" should not match "JavaScript"
         val foundKeywords = exclusionKeywords.filter { keyword ->
             val normalizedKeyword = if (caseSensitive) keyword else keyword.lowercase()
-            normalizedText.contains(normalizedKeyword)
+            // Use word boundaries (\b) for exact word matching
+            // Escape special regex characters in keyword
+            val escapedKeyword = Regex.escape(normalizedKeyword)
+            val pattern = Regex("\\b$escapedKeyword\\b", if (caseSensitive) RegexOption.IGNORE_CASE else RegexOption.IGNORE_CASE)
+            pattern.containsMatchIn(normalizedText)
         }
 
         // If forbidden words found - vacancy is not suitable
@@ -128,12 +133,24 @@ class VacancyContentValidator(
             }
 
             // Check if at least one skill from resume is present in vacancy
+            // Use word boundaries to avoid false positives (e.g., "Java" should not match "JavaScript")
             val matchingSkills = resumeSkills.count { skill ->
                 val skillLower = skill.lowercase().trim()
-                // Check exact match or word match
-                vacancyText.contains(skillLower) ||
+                // Escape special regex characters and use word boundaries for exact word matching
+                val escapedSkill = Regex.escape(skillLower)
+                val pattern = Regex("\\b$escapedSkill\\b", RegexOption.IGNORE_CASE)
+
+                // Check exact match with word boundaries
+                pattern.containsMatchIn(vacancyText) ||
+                    // Also check individual words if skill consists of multiple words
                     skillLower.split(" ").any { word ->
-                        word.length > 3 && vacancyText.contains(word)
+                        if (word.length > 3) {
+                            val escapedWord = Regex.escape(word)
+                            val wordPattern = Regex("\\b$escapedWord\\b", RegexOption.IGNORE_CASE)
+                            wordPattern.containsMatchIn(vacancyText)
+                        } else {
+                            false
+                        }
                     }
             }
 
