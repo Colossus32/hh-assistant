@@ -1,0 +1,13 @@
+databaseChangeLog:
+  - changeSet:
+      id: add-unique-index-vacancy-id
+      author: system
+      changes:
+        - addUniqueConstraint:
+            tableName: vacancies
+            columnNames: id
+            constraintName: uk_vacancies_id
+            # Примечание: id уже является primary key, что автоматически делает его уникальным
+            # Это ограничение добавлено для явной документации и обработки дубликатов в коде
+            # Если ограничение уже существует (через primary key), миграция будет пропущена
+

@@ -17,6 +17,7 @@ import com.hhassistant.service.util.TokenRefreshService
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.concurrent.atomic.AtomicInteger
@@ -281,15 +282,15 @@ class VacancyFetchService(
         val allSaved = mutableListOf<Vacancy>()
 
         if (vacancies.size <= batchSize) {
-            // Если вакансий немного, сохраняем все сразу
-            val saved = vacancyRepository.saveAll(vacancies)
+            // Если вакансий немного, сохраняем все сразу с обработкой дубликатов
+            val saved = saveVacanciesWithDuplicateHandling(vacancies)
             log.debug("[VacancyFetch] Saved ${saved.size} vacancies in single batch")
             return saved
         }
 
-        // Разбиваем на батчи и сохраняем по частям
+        // Разбиваем на батчи и сохраняем по частям с обработкой дубликатов
         vacancies.chunked(batchSize).forEachIndexed { index, batch ->
-            val saved = vacancyRepository.saveAll(batch)
+            val saved = saveVacanciesWithDuplicateHandling(batch)
             allSaved.addAll(saved)
             log.debug(
                 "[VacancyFetch] Saved batch ${index + 1}: ${saved.size} vacancies (total saved: ${allSaved.size}/${vacancies.size})",
@@ -300,6 +301,44 @@ class VacancyFetchService(
             "[VacancyFetch] Saved ${allSaved.size} vacancies in ${(vacancies.size + batchSize - 1) / batchSize} batches",
         )
         return allSaved
+    }
+
+    /**
+     * Сохраняет вакансии с обработкой дубликатов.
+     * Если вакансия с таким ID уже существует, она пропускается.
+     *
+     * @param vacancies Список вакансий для сохранения
+     * @return Список успешно сохраненных вакансий (без дубликатов)
+     */
+    private fun saveVacanciesWithDuplicateHandling(vacancies: List<Vacancy>): List<Vacancy> {
+        val saved = mutableListOf<Vacancy>()
+        var duplicateCount = 0
+
+        for (vacancy in vacancies) {
+            try {
+                // Проверяем, существует ли вакансия (быстрая проверка через кэш)
+                if (vacancyIdsCache.getIfPresent("all")?.contains(vacancy.id) == true) {
+                    log.trace("[VacancyFetch] Vacancy ${vacancy.id} already exists (from cache), skipping")
+                    duplicateCount++
+                    continue
+                }
+
+                // Пытаемся сохранить вакансию
+                val savedVacancy = vacancyRepository.save(vacancy)
+                saved.add(savedVacancy)
+            } catch (e: DataIntegrityViolationException) {
+                // Дубликат обнаружен на уровне БД (race condition или кэш устарел)
+                log.debug("[VacancyFetch] Vacancy ${vacancy.id} already exists (database constraint), skipping: ${e.message}")
+                duplicateCount++
+                // Продолжаем обработку остальных вакансий
+            }
+        }
+
+        if (duplicateCount > 0) {
+            log.debug("[VacancyFetch] Skipped $duplicateCount duplicate vacancies out of ${vacancies.size}")
+        }
+
+        return saved
     }
 
     /**

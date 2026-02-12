@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.cache.annotation.CacheEvict
 import org.springframework.cache.annotation.Cacheable
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.concurrent.atomic.AtomicInteger
@@ -458,16 +459,20 @@ class VacancyService(
 
         if (newVacancies.isNotEmpty()) {
             // Сохраняем в транзакции для обеспечения атомарности
-            saveVacanciesInTransaction(newVacancies)
-            log.info(" [VacancyService]  Saved ${newVacancies.size} new vacancies to database for config ID=$configId")
-            newVacancies.forEach { vacancy ->
+            val savedVacancies = saveVacanciesInTransaction(newVacancies)
+            val duplicatesCount = newVacancies.size - savedVacancies.size
+            log.info(
+                " [VacancyService]  Saved ${savedVacancies.size} new vacancies to database for config ID=$configId " +
+                    "($duplicatesCount duplicates skipped)",
+            )
+            savedVacancies.forEach { vacancy ->
                 log.debug(
                     "   - Saved: ${vacancy.name} (ID: ${vacancy.id}, Employer: ${vacancy.employer}, Salary: ${vacancy.salary})",
                 )
             }
 
             // Инкрементально обновляем кэш ID вакансий (добавляем новые ID вместо полной инвалидации)
-            updateVacancyIdsCacheIncrementally(newVacancies.map { it.id })
+            updateVacancyIdsCacheIncrementally(savedVacancies.map { it.id })
             // Также инвалидируем кэш конфигураций поиска (на случай, если они изменились)
             // Это делается через @CacheEvict в getActiveSearchConfigs, но можно и явно
         } else {
@@ -480,12 +485,41 @@ class VacancyService(
     /**
      * Сохраняет вакансии в транзакции для обеспечения атомарности операции.
      * Используется для сохранения вакансий из suspend функций.
+     * Обрабатывает дубликаты: если вакансия с таким ID уже существует, она пропускается.
      *
      * @param vacancies Список вакансий для сохранения
+     * @return Список успешно сохраненных вакансий (без дубликатов)
      */
     @Transactional(rollbackFor = [Exception::class])
-    fun saveVacanciesInTransaction(vacancies: List<Vacancy>) {
-        vacancyRepository.saveAll(vacancies)
+    fun saveVacanciesInTransaction(vacancies: List<Vacancy>): List<Vacancy> {
+        val saved = mutableListOf<Vacancy>()
+        var duplicateCount = 0
+
+        for (vacancy in vacancies) {
+            try {
+                // Проверяем, существует ли вакансия (быстрая проверка через кэш)
+                if (vacancyIdsCache.getIfPresent("all")?.contains(vacancy.id) == true) {
+                    log.trace(" [VacancyService] Vacancy ${vacancy.id} already exists (from cache), skipping")
+                    duplicateCount++
+                    continue
+                }
+
+                // Пытаемся сохранить вакансию
+                val savedVacancy = vacancyRepository.save(vacancy)
+                saved.add(savedVacancy)
+            } catch (e: DataIntegrityViolationException) {
+                // Дубликат обнаружен на уровне БД (race condition или кэш устарел)
+                log.debug(" [VacancyService] Vacancy ${vacancy.id} already exists (database constraint), skipping: ${e.message}")
+                duplicateCount++
+                // Продолжаем обработку остальных вакансий
+            }
+        }
+
+        if (duplicateCount > 0) {
+            log.debug(" [VacancyService] Skipped $duplicateCount duplicate vacancies out of ${vacancies.size}")
+        }
+
+        return saved
     }
 
     /**
