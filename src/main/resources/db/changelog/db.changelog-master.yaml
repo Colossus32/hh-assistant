@@ -23,3 +23,5 @@ databaseChangeLog:
       file: db/changelog/v1.0/011-add-rejected-by-validator-status.yaml
   - include:
       file: db/changelog/v1.0/012-add-index-url.yaml
+  - include:
+      file: db/changelog/v1.0/013-add-composite-index-status-fetched-at.yaml

@@ -1,0 +1,16 @@
+databaseChangeLog:
+  - changeSet:
+      id: add-composite-index-status-fetched-at
+      author: system
+      changes:
+        - createIndex:
+            tableName: vacancies
+            indexName: idx_vacancies_status_fetched_at
+            columns:
+              - column:
+                  name: status
+              - column:
+                  name: fetched_at
+            # Составной индекс для оптимизации запросов с WHERE status = ? AND fetched_at > ?
+            # Используется для поиска вакансий по статусу с фильтрацией по дате получения
+
