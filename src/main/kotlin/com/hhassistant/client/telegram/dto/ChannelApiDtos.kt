@@ -2,7 +2,6 @@ package com.hhassistant.client.telegram.dto
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.hhassistant.domain.entity.TelegramChannel
-import com.hhassistant.domain.entity.ChannelType
 
 // DTO для работы с каналами
 data class GetChatRequest(
@@ -32,10 +31,13 @@ fun ChatInfoDto.toEntity() = TelegramChannel(
     channelUsername = username ?: "",
     displayName = title,
     channelType = when (type) {
-        "channel" -> ChannelType.PUBLIC
-        "supergroup" -> ChannelType.GROUP
-        else -> ChannelType.PUBLIC
-    }
+        "channel" -> com.hhassistant.domain.entity.ChannelType.PUBLIC
+        "supergroup" -> com.hhassistant.domain.entity.ChannelType.GROUP
+        else -> com.hhassistant.domain.entity.ChannelType.PUBLIC
+    },
+    isActive = true,
+    isMonitored = false,
+)
 )
 
 data class JoinChatRequest(

@@ -43,7 +43,7 @@ class TelegramChannelClient(
      * Получает информацию о канале
      */
     @Loggable
-    suspend fun getChatInfo(channelUsername: String): ChatInfoDto? {
+    suspend fun getChatInfo(channelUsername: String): com.hhassistant.client.telegram.dto.ChatInfoDto? {
         return try {
             val request = GetChatRequest(chatId = "@$channelUsername")
             val response = webClient.post()
