@@ -4,6 +4,7 @@ import com.hhassistant.client.telegram.TelegramChannelClient
 import com.hhassistant.domain.entity.TelegramChannel
 import com.hhassistant.exception.TelegramException
 import com.hhassistant.repository.TelegramChannelRepository
+import kotlinx.coroutines.runBlocking
 import mu.KotlinLogging
 import org.springframework.stereotype.Service
 
