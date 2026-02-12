@@ -1,0 +1,90 @@
+databaseChangeLog:
+  - changeSet:
+      id: create-telegram-channels-table
+      author: system
+      changes:
+        - createTable:
+            tableName: telegram_channels
+            columns:
+              - column:
+                  name: id
+                  type: bigint
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+                  autoIncrement: true
+              - column:
+                  name: channel_username
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: channel_id
+                  type: bigint
+              - column:
+                  name: display_name
+                  type: varchar(255)
+              - column:
+                  name: channel_type
+                  type: varchar(20)
+                  defaultValue: "PUBLIC"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: is_active
+                  type: boolean
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+              - column:
+                  name: is_monitored
+                  type: boolean
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: last_message_id
+                  type: bigint
+              - column:
+                  name: last_message_date
+                  type: timestamp
+              - column:
+                  name: added_at
+                  type: timestamp
+                  constraints:
+                    nullable: false
+              - column:
+                  name: added_by
+                  type: varchar(255)
+              - column:
+                  name: notes
+                  type: text
+              - column:
+                  name: min_relevance_score
+                  type: double precision
+                  defaultValueNumeric: "0.7"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: bigint
+                  defaultValueNumeric: "0"
+                  constraints:
+                    nullable: false
+            uniqueConstraints:
+              - uniqueConstraint:
+                  name: uk_channel_username
+                  columnNames:
+                    - column:
+                        name: channel_username
+            indexes:
+              - index:
+                  name: idx_telegram_channels_active
+                  columns:
+                    - column:
+                        name: is_active
+              - index:
+                  name: idx_telegram_channels_monitored
+                  columns:
+                    - column:
+                        name: is_monitored

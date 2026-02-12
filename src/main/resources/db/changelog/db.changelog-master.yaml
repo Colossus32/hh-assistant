@@ -33,3 +33,5 @@ databaseChangeLog:
       file: db/changelog/v1.0/016-increase-status-field-length.yaml
   - include:
       file: db/changelog/v1.0/017-add-vacancy-source-and-telegram-fields.yaml
+  - include:
+      file: db/changelog/v1.0/018-create-telegram-channels-table.yaml
