@@ -31,14 +31,14 @@ HH Assistant now supports monitoring Telegram channels as an additional source o
    /add_channel @channel_name
    ```
    
-   Example: `/add_channel @devjobs_ua`
+   Example: `/add_channel @devjobs`
 
 3. Start monitoring the channel:
    ```
    /monitor_channel @channel_name
    ```
    
-   Example: `/monitor_channel @devjobs_ua`
+   Example: `/monitor_channel @devjobs`
 
 ### Managing Channels
 
