@@ -34,6 +34,7 @@ import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 
 @Service
 class VacancyAnalysisService(
@@ -408,7 +409,8 @@ class VacancyAnalysisService(
             coverLetterLastAttemptAt = null,
         )
 
-        val savedAnalysis = repository.save(analysis)
+        // Сохраняем анализ и навыки в одной транзакции для обеспечения атомарности
+        val savedAnalysis = saveAnalysisAndSkillsInTransaction(analysis, vacancy, isRelevant, validatedSkills)
         log.info(
             "[Ollama] Saved analysis to database for vacancy ${vacancy.id} (isRelevant=$isRelevant, score=${String.format(
                 "%.2f",
@@ -418,21 +420,6 @@ class VacancyAnalysisService(
 
         // Обновляем кэш обработанных вакансий
         processedVacancyCacheService.markAsProcessed(vacancy.id)
-
-        // Сохраняем навыки в БД, если вакансия релевантна (relevance_score >= minRelevanceScore)
-        if (isRelevant && validatedSkills.isNotEmpty()) {
-            try {
-                saveSkillsFromAnalysis(vacancy, validatedSkills)
-                log.info("[Ollama] Saved ${validatedSkills.size} skills to database for vacancy ${vacancy.id}")
-            } catch (e: Exception) {
-                log.error("[Ollama] Failed to save skills for vacancy ${vacancy.id}: ${e.message}", e)
-                // Не прерываем обработку из-за ошибки сохранения навыков
-            }
-        } else {
-            log.debug(
-                "[Ollama] Skipping skill extraction for vacancy ${vacancy.id} (isRelevant=$isRelevant, skills=${validatedSkills.size})",
-            )
-        }
 
         // Обновляем метрики
         metricsService.incrementVacanciesAnalyzed()
@@ -752,10 +739,50 @@ class VacancyAnalysisService(
     }
 
     /**
+     * Сохраняет анализ и навыки в одной транзакции для обеспечения атомарности.
+     * Если сохранение навыков не удастся, откатится и анализ.
+     *
+     * @param analysis Анализ вакансии для сохранения
+     * @param vacancy Вакансия
+     * @param isRelevant Релевантна ли вакансия
+     * @param validatedSkills Список навыков для сохранения (если релевантна)
+     * @return Сохраненный анализ
+     */
+    @Transactional(rollbackFor = [Exception::class])
+    fun saveAnalysisAndSkillsInTransaction(
+        analysis: VacancyAnalysis,
+        vacancy: Vacancy,
+        isRelevant: Boolean,
+        validatedSkills: List<String>,
+    ): VacancyAnalysis {
+        // Сохраняем анализ
+        val savedAnalysis = repository.save(analysis)
+
+        // Сохраняем навыки в БД, если вакансия релевантна (relevance_score >= minRelevanceScore)
+        if (isRelevant && validatedSkills.isNotEmpty()) {
+            try {
+                saveSkillsFromAnalysis(vacancy, validatedSkills)
+                log.info("[Ollama] Saved ${validatedSkills.size} skills to database for vacancy ${vacancy.id}")
+            } catch (e: Exception) {
+                log.error("[Ollama] Failed to save skills for vacancy ${vacancy.id}: ${e.message}", e)
+                // Выбрасываем исключение, чтобы транзакция откатилась
+                throw e
+            }
+        } else {
+            log.debug(
+                "[Ollama] Skipping skill extraction for vacancy ${vacancy.id} (isRelevant=$isRelevant, skills=${validatedSkills.size})",
+            )
+        }
+
+        return savedAnalysis
+    }
+
+    /**
      * Сохраняет навыки из анализа LLM в БД.
      * Использует SkillExtractionService для нормализации и сохранения.
+     * Вызывается внутри транзакции saveAnalysisAndSkillsInTransaction.
      */
-    private suspend fun saveSkillsFromAnalysis(vacancy: Vacancy, skills: List<String>) {
+    private fun saveSkillsFromAnalysis(vacancy: Vacancy, skills: List<String>) {
         if (skills.isEmpty()) {
             log.debug("[Ollama] No skills to save for vacancy ${vacancy.id}")
             return
@@ -767,7 +794,10 @@ class VacancyAnalysisService(
         }
 
         // Используем существующий сервис для сохранения навыков
-        skillExtractionService.extractAndSaveSkills(vacancy, keySkills)
+        // Используем runBlocking для вызова suspend функции из обычной функции внутри транзакции
+        kotlinx.coroutines.runBlocking {
+            skillExtractionService.extractAndSaveSkills(vacancy, keySkills)
+        }
     }
 
     /**
