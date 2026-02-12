@@ -1,6 +1,7 @@
 package com.hhassistant.service.telegram
 
 import com.hhassistant.client.telegram.TelegramChannelClient
+import com.hhassistant.client.telegram.TelegramChannelWebScraper
 import com.hhassistant.client.telegram.dto.toEntity
 import com.hhassistant.domain.entity.TelegramChannel
 import com.hhassistant.exception.TelegramException
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Service
 class TelegramChannelService(
     private val telegramChannelRepository: TelegramChannelRepository,
     private val telegramChannelClient: TelegramChannelClient,
+    private val webScraper: TelegramChannelWebScraper,
 ) {
     private val log = KotlinLogging.logger {}
     
@@ -37,18 +39,43 @@ class TelegramChannelService(
             throw TelegramException.ChannelAlreadyExistsException("Channel $normalizedUsername already exists")
         }
         
-        // Проверяем, что канал существует и доступен
-        val chatInfo = telegramChannelClient.getChatInfo(normalizedUsername)
-            ?: throw TelegramException.ChannelNotFoundException("Channel $normalizedUsername not found or bot doesn't have access")
+        // Сначала проверяем доступность через веб-скрапинг (не требует прав администратора)
+        val isAccessibleViaWeb = webScraper.isChannelAccessible(normalizedUsername)
         
-        // Создаем запись о канале используя toEntity() и обновляем поля
-        val channel = chatInfo.toEntity().copy(
+        if (!isAccessibleViaWeb) {
+            // Если веб-скрапинг не работает, пробуем через API (требует прав администратора)
+            val chatInfo = telegramChannelClient.getChatInfo(normalizedUsername)
+            if (chatInfo == null) {
+                throw TelegramException.ChannelNotFoundException(
+                    "Channel $normalizedUsername not found or not accessible. " +
+                        "For public channels, ensure the channel is accessible at https://t.me/s/$normalizedUsername. " +
+                        "For private channels, the bot must be added as administrator."
+                )
+            }
+            
+            // Создаем запись о канале используя toEntity() и обновляем поля
+            val channel = chatInfo.toEntity().copy(
+                channelUsername = normalizedUsername,
+                isActive = true,
+                isMonitored = false, // Не мониторим по умолчанию
+                addedBy = addedBy,
+            )
+            
+            return telegramChannelRepository.save(channel)
+        }
+        
+        // Канал доступен через веб-скрапинг, создаем запись без API информации
+        val channel = TelegramChannel(
             channelUsername = normalizedUsername,
+            channelId = null, // Не знаем ID без API
+            displayName = null, // Можно попробовать извлечь из веб-страницы позже
+            channelType = com.hhassistant.domain.entity.ChannelType.PUBLIC,
             isActive = true,
             isMonitored = false, // Не мониторим по умолчанию
             addedBy = addedBy,
         )
         
+        log.info("[TelegramChannelService] Added channel $normalizedUsername via web scraping (no admin rights required)")
         return telegramChannelRepository.save(channel)
     }
     

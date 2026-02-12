@@ -13,32 +13,52 @@ HH Assistant now supports monitoring Telegram channels as an additional source o
 
 ### Prerequisites
 
-1. **Bot must be admin in the channel**: The bot needs to be added as an administrator in the channel to read messages
-2. **Public channels**: For public channels, the bot just needs to be added as admin
-3. **Private channels**: For private channels, you need to invite the bot using an invite link
+**Для публичных каналов (рекомендуется):**
+- **Веб-скрапинг включен по умолчанию**: Для публичных каналов не требуется добавлять бота как администратора
+- Канал должен быть доступен по адресу `https://t.me/s/channel_name`
+- Это самый простой способ - просто добавьте канал через команду `/add_channel`
+
+**Для приватных каналов:**
+- Бот должен быть добавлен как администратор в канал
+- Для приватных каналов используется Telegram Bot API (требует прав администратора)
 
 ### Adding a Channel via Telegram Commands
 
-1. Add the bot to your channel as administrator:
-   - Go to your channel settings
-   - Click "Administrators"
-   - Click "Add Admin"
-   - Search for your bot by username
-   - Confirm with appropriate permissions
+**Для публичных каналов (веб-скрапинг, не требует прав администратора):**
 
-2. Use the `/add_channel` command:
+1. Убедитесь, что канал публичный и доступен по адресу `https://t.me/s/channel_name`
+2. Используйте команду `/add_channel`:
    ```
    /add_channel @channel_name
    ```
    
    Example: `/add_channel @devjobs`
 
-3. Start monitoring the channel:
+3. Запустите мониторинг канала:
    ```
    /monitor_channel @channel_name
    ```
    
    Example: `/monitor_channel @devjobs`
+
+**Для приватных каналов (требует прав администратора):**
+
+1. Добавьте бота в канал как администратора:
+   - Перейдите в настройки канала
+   - Нажмите "Administrators"
+   - Нажмите "Add Admin"
+   - Найдите бота по username
+   - Подтвердите с соответствующими правами
+
+2. Используйте команду `/add_channel`:
+   ```
+   /add_channel @channel_name
+   ```
+
+3. Запустите мониторинг канала:
+   ```
+   /monitor_channel @channel_name
+   ```
 
 ### Managing Channels
 
@@ -110,7 +130,30 @@ app:
     fetch-interval: 900  # Every 15 minutes (same as HH.ru)
     messages-per-fetch: 100  # Number of messages to fetch per request
     min-relevance-score: 0.7  # Minimum score for channel vacancies
+
+telegram:
+  # Использовать веб-скрапинг для публичных каналов (не требует прав администратора)
+  use-web-scraping: true
+  web-scraping:
+    enabled: true  # Включить веб-скрапинг
+    user-agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36..."  # User-Agent для запросов
+    timeout: 10000  # Таймаут запросов в миллисекундах
 ```
+
+### Web Scraping vs Bot API
+
+**Веб-скрапинг (рекомендуется для публичных каналов):**
+- ✅ Не требует прав администратора
+- ✅ Работает для всех публичных каналов
+- ✅ Нет риска бана аккаунта
+- ⚠️ Ограничение: показывает только последние ~50-100 сообщений
+- ⚠️ Может сломаться при изменении верстки Telegram
+
+**Bot API (для приватных каналов):**
+- ✅ Полный доступ к истории сообщений
+- ✅ Более стабильный метод
+- ❌ Требует добавления бота как администратора
+- ❌ Не работает для каналов, где бот не является администратором
 
 ### Channel-Level Settings
 
@@ -121,7 +164,15 @@ Each channel can have individual settings:
 
 ## Troubleshooting
 
-### Bot Can't Read Channel Messages
+### Channel Not Accessible
+
+**Для публичных каналов (веб-скрапинг):**
+1. **Проверьте доступность канала**: Убедитесь, что канал доступен по адресу `https://t.me/s/channel_name`
+2. **Проверьте настройки**: Убедитесь, что `telegram.web-scraping.enabled=true` в `application.yml`
+3. **Проверьте логи**: Посмотрите логи на наличие ошибок парсинга HTML
+4. **Изменение верстки**: Если Telegram изменил верстку, веб-скрапинг может временно не работать
+
+**Для приватных каналов (Bot API):**
 1. **Check bot permissions**: Make sure the bot is an administrator with "Read Messages" permission
 2. **Privacy settings**: Ensure the channel allows bot administrators to read messages
 3. **API rate limits**: Telegram has rate limits; wait if you get rate limit errors

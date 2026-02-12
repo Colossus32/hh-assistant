@@ -67,6 +67,9 @@ dependencies {
     // Aho-Corasick for fast multi-pattern string matching
     implementation("org.ahocorasick:ahocorasick:0.6.3")
 
+    // HTML Parsing for Telegram web scraping
+    implementation("org.jsoup:jsoup:1.17.2")
+
     // Metrics & Monitoring
     implementation("io.micrometer:micrometer-registry-prometheus")
 

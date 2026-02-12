@@ -21,11 +21,14 @@ import org.springframework.web.reactive.function.client.bodyToMono
 class TelegramChannelClient(
     @Qualifier("telegramWebClient") private val webClient: WebClient,
     @Value("\${telegram.bot-token}") private val botToken: String,
+    private val webScraper: TelegramChannelWebScraper,
+    @Value("\${telegram.use-web-scraping:true}") private val useWebScraping: Boolean = true,
 ) {
     private val log = KotlinLogging.logger {}
 
     /**
      * Получает сообщения из канала
+     * Использует веб-скрапинг для публичных каналов (по умолчанию) или API для приватных
      */
     @Loggable
     suspend fun getChannelMessages(
@@ -33,6 +36,20 @@ class TelegramChannelClient(
         limit: Int = 100,
         offset: Int = 0
     ): List<ChannelMessage> {
+        // Пробуем веб-скрапинг сначала (не требует прав администратора)
+        if (useWebScraping) {
+            try {
+                val messages = webScraper.scrapeChannelMessages(channelUsername, limit)
+                if (messages.isNotEmpty()) {
+                    log.debug("[TelegramChannelClient] Successfully scraped ${messages.size} messages from $channelUsername via web scraping")
+                    return messages
+                }
+            } catch (e: Exception) {
+                log.debug("[TelegramChannelClient] Web scraping failed for $channelUsername, trying API: ${e.message}")
+            }
+        }
+
+        // Fallback к API методу (требует прав администратора)
         return try {
             val response = webClient.get()
                 .uri("/bot$botToken/getChatHistory?chat_id=@$channelUsername&limit=$limit&offset=$offset")
@@ -42,7 +59,7 @@ class TelegramChannelClient(
             
             response.result?.filter { message: ChannelMessage -> message.text?.isNotBlank() == true } ?: emptyList()
         } catch (e: Exception) {
-            log.error("Error fetching messages from channel $channelUsername: ${e.message}", e)
+            log.error("Error fetching messages from channel $channelUsername via API: ${e.message}", e)
             emptyList()
         }
     }

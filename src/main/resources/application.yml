@@ -269,6 +269,8 @@ telegram:
   chat-id: ${TELEGRAM_CHAT_ID:}
   enabled: ${TELEGRAM_ENABLED:true}
   content-type: application/json
+  # Использовать веб-скрапинг для публичных каналов (не требует прав администратора)
+  use-web-scraping: ${TELEGRAM_USE_WEB_SCRAPING:true}
   # Авторизация пользователей - только разрешенные пользователи могут использовать команды
   authorization:
     enabled: ${TELEGRAM_AUTHORIZATION_ENABLED:true}  # Включить проверку авторизации
@@ -282,6 +284,11 @@ telegram:
     enabled: ${TELEGRAM_POLLING_ENABLED:true}  # Включить polling для получения команд от пользователей
     interval-seconds: ${TELEGRAM_POLLING_INTERVAL:5}  # Интервал между запросами getUpdates (в секундах)
     timeout-seconds: ${TELEGRAM_POLLING_TIMEOUT:30}  # Таймаут для long polling (в секундах, 0-60)
+  # Настройки веб-скрапинга для публичных Telegram каналов
+  web-scraping:
+    enabled: ${TELEGRAM_WEB_SCRAPING_ENABLED:true}  # Включить веб-скрапинг
+    user-agent: ${TELEGRAM_WEB_SCRAPING_USER_AGENT:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36}  # User-Agent для запросов
+    timeout: ${TELEGRAM_WEB_SCRAPING_TIMEOUT:10000}  # Таймаут запросов в миллисекундах
 
 hh:
   api:
