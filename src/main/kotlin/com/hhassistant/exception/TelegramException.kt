@@ -23,4 +23,24 @@ sealed class TelegramException(message: String, cause: Throwable? = null) : Runt
      * Общая ошибка API.
      */
     class APIException(message: String, cause: Throwable? = null) : TelegramException(message, cause)
+    
+    /**
+     * Канал не найден.
+     */
+    class ChannelNotFoundException(message: String, cause: Throwable? = null) : TelegramException(message, cause)
+    
+    /**
+     * Канал уже существует.
+     */
+    class ChannelAlreadyExistsException(message: String, cause: Throwable? = null) : TelegramException(message, cause)
+    
+    /**
+     * Канал недоступен.
+     */
+    class ChannelNotAccessibleException(message: String, cause: Throwable? = null) : TelegramException(message, cause)
+    
+    /**
+     * Ошибка парсинга вакансии из канала.
+     */
+    class ChannelParsingException(message: String, cause: Throwable? = null) : TelegramException(message, cause)
 }

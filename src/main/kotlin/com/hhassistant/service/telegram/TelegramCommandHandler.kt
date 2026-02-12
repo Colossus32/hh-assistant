@@ -43,6 +43,8 @@ class TelegramCommandHandler(
     private val exclusionRuleService: ExclusionRuleService,
     private val exclusionKeywordService: ExclusionKeywordService,
     private val analysisTimeService: AnalysisTimeService,
+    private val telegramChannelService: TelegramChannelService,
+    private val telegramChannelRepository: com.hhassistant.repository.TelegramChannelRepository,
     @Value("\${app.api.base-url:http://localhost:8080}") private val apiBaseUrl: String,
 ) {
     private val log = KotlinLogging.logger {}
@@ -91,6 +93,11 @@ class TelegramCommandHandler(
                 text == "/pause" -> handlePauseCommand()
                 text == "/resume" -> handleResumeCommand()
                 text == "/help" -> handleHelpCommand(chatId)
+                text == "/channels" -> handleChannelsCommand()
+                text.startsWith("/add_channel ") -> handleAddChannelCommand(text, chatId)
+                text.startsWith("/remove_channel ") -> handleRemoveChannelCommand(text)
+                text.startsWith("/monitor_channel ") -> handleMonitorChannelCommand(text)
+                text.startsWith("/stop_monitoring ") -> handleStopMonitoringCommand(text)
                 text.matches(Regex("/mark-applied-\\d+")) -> handleMarkAppliedCommand(text)
                 text.matches(Regex("/mark-not-interested-\\d+")) -> handleMarkNotInterestedCommand(text)
                 else -> {
@@ -792,6 +799,28 @@ class TelegramCommandHandler(
             appendLine("<b>/mark-not-interested-{id}</b> - Отметить вакансию как \"неинтересная\"")
             appendLine("   Пример: /mark-not-interested-12345678")
             appendLine()
+            appendLine("<b>Telegram каналы:</b>")
+            appendLine()
+            appendLine("<b>/channels</b> - Показать список добавленных Telegram каналов")
+            appendLine()
+            appendLine("<b>/add_channel &lt;@channel_name&gt;</b> - Добавить Telegram канал")
+            appendLine("   Пример: /add_channel @devjobs_ua")
+            appendLine("   ⚠️ Бот должен быть добавлен в канал как администратор")
+            appendLine()
+            appendLine("<b>/remove_channel &lt;@channel_name&gt;</b> - Удалить Telegram канал")
+            appendLine("   Пример: /remove_channel @devjobs_ua")
+            appendLine()
+            appendLine("<b>/monitor_channel &lt;@channel_name&gt;</b> - Запустить мониторинг канала")
+            appendLine("   Пример: /monitor_channel @devjobs_ua")
+            appendLine()
+            appendLine("<b>/stop_monitoring &lt;@channel_name&gt;</b> - Остановить мониторинг канала")
+            appendLine("   Пример: /stop_monitoring @devjobs_ua")
+            appendLine()
+            appendLine("💡 <b>Как добавить канал:</b>")
+            appendLine("1. Добавьте бота в канал как администратор")
+            appendLine("2. Используйте команду /add_channel @channel_name")
+            appendLine("3. Запустите мониторинг: /monitor_channel @channel_name")
+            appendLine()
             appendLine("<b>/help</b> - Показать эту справку")
         }
     }
@@ -1019,6 +1048,135 @@ class TelegramCommandHandler(
         } catch (e: Exception) {
             log.error("[TelegramCommand] Error checking sent status: ${e.message}", e)
             "❌ Ошибка при проверке статуса: ${e.message ?: "Неизвестная ошибка"}"
+        }
+    }
+    
+    /**
+     * Обрабатывает команду /channels
+     */
+    private suspend fun handleChannelsCommand(): String {
+        return try {
+            val channels = telegramChannelService.getAllChannels()
+            
+            if (channels.isEmpty()) {
+                "📋 <b>Telegram каналы:</b>\n\nНет добавленных каналов.\n\n💡 Используйте /add_channel @channel_name для добавления канала."
+            }
+            
+            buildString {
+                appendLine("📋 <b>Telegram каналы (${channels.size}):</b>")
+                appendLine()
+                
+                channels.forEachIndexed { index, channel ->
+                    val status = if (channel.isMonitored) "🟢 Мониторинг" else "⏸️ Остановлен"
+                    appendLine("${index + 1}. <b>@${channel.channelUsername}</b>")
+                    if (channel.displayName != null) {
+                        appendLine("   📌 ${channel.displayName}")
+                    }
+                    appendLine("   $status")
+                    appendLine("   📅 Добавлен: ${channel.addedAt}")
+                    if (channel.lastMessageDate != null) {
+                        appendLine("   📨 Последнее сообщение: ${channel.lastMessageDate}")
+                    }
+                    appendLine()
+                }
+            }
+        } catch (e: Exception) {
+            log.error("[TelegramCommand] Error getting channels: ${e.message}", e)
+            "❌ Ошибка при получении списка каналов: ${e.message ?: "Неизвестная ошибка"}"
+        }
+    }
+    
+    /**
+     * Обрабатывает команду /add_channel
+     */
+    private suspend fun handleAddChannelCommand(text: String, chatId: String): String {
+        val channelUsername = text.removePrefix("/add_channel ").trim()
+        
+        if (channelUsername.isEmpty()) {
+            return "❌ Использование: /add_channel @channel_name\nПример: /add_channel @devjobs_ua"
+        }
+        
+        return try {
+            val channel = telegramChannelService.addChannel(channelUsername, chatId)
+            buildString {
+                appendLine("✅ Канал успешно добавлен!")
+                appendLine()
+                appendLine("<b>Канал:</b> @${channel.channelUsername}")
+                if (channel.displayName != null) {
+                    appendLine("<b>Название:</b> ${channel.displayName}")
+                }
+                appendLine()
+                appendLine("💡 Используйте /monitor_channel @${channel.channelUsername} для начала мониторинга")
+            }
+        } catch (e: Exception) {
+            log.error("[TelegramCommand] Error adding channel: ${e.message}", e)
+            "❌ Ошибка при добавлении канала: ${e.message ?: "Неизвестная ошибка"}"
+        }
+    }
+    
+    /**
+     * Обрабатывает команду /remove_channel
+     */
+    private suspend fun handleRemoveChannelCommand(text: String): String {
+        val channelUsername = text.removePrefix("/remove_channel ").trim().removePrefix("@")
+        
+        if (channelUsername.isEmpty()) {
+            return "❌ Использование: /remove_channel @channel_name\nПример: /remove_channel @devjobs_ua"
+        }
+        
+        return try {
+            val channel = telegramChannelRepository.findByChannelUsername(channelUsername)
+                ?: return "❌ Канал @${channelUsername} не найден"
+            
+            telegramChannelService.removeChannel(channel.id!!)
+            "✅ Канал @${channelUsername} успешно удален"
+        } catch (e: Exception) {
+            log.error("[TelegramCommand] Error removing channel: ${e.message}", e)
+            "❌ Ошибка при удалении канала: ${e.message ?: "Неизвестная ошибка"}"
+        }
+    }
+    
+    /**
+     * Обрабатывает команду /monitor_channel
+     */
+    private suspend fun handleMonitorChannelCommand(text: String): String {
+        val channelUsername = text.removePrefix("/monitor_channel ").trim().removePrefix("@")
+        
+        if (channelUsername.isEmpty()) {
+            return "❌ Использование: /monitor_channel @channel_name\nПример: /monitor_channel @devjobs_ua"
+        }
+        
+        return try {
+            val channel = telegramChannelRepository.findByChannelUsername(channelUsername)
+                ?: return "❌ Канал @${channelUsername} не найден"
+            
+            telegramChannelService.startMonitoring(channel.id!!)
+            "✅ Мониторинг канала @${channelUsername} запущен"
+        } catch (e: Exception) {
+            log.error("[TelegramCommand] Error starting monitoring: ${e.message}", e)
+            "❌ Ошибка при запуске мониторинга: ${e.message ?: "Неизвестная ошибка"}"
+        }
+    }
+    
+    /**
+     * Обрабатывает команду /stop_monitoring
+     */
+    private suspend fun handleStopMonitoringCommand(text: String): String {
+        val channelUsername = text.removePrefix("/stop_monitoring ").trim().removePrefix("@")
+        
+        if (channelUsername.isEmpty()) {
+            return "❌ Использование: /stop_monitoring @channel_name\nПример: /stop_monitoring @devjobs_ua"
+        }
+        
+        return try {
+            val channel = telegramChannelRepository.findByChannelUsername(channelUsername)
+                ?: return "❌ Канал @${channelUsername} не найден"
+            
+            telegramChannelService.stopMonitoring(channel.id!!)
+            "✅ Мониторинг канала @${channelUsername} остановлен"
+        } catch (e: Exception) {
+            log.error("[TelegramCommand] Error stopping monitoring: ${e.message}", e)
+            "❌ Ошибка при остановке мониторинга: ${e.message ?: "Неизвестная ошибка"}"
         }
     }
 }
