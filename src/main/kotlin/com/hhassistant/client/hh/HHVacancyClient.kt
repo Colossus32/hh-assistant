@@ -8,6 +8,8 @@ import com.hhassistant.config.VacancyServiceConfig
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.exception.HHAPIException
 import com.hhassistant.ratelimit.RateLimitService
+import io.github.resilience4j.kotlin.retry.executeSuspendFunction
+import io.github.resilience4j.retry.Retry
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.reactor.awaitSingle
 import mu.KotlinLogging
@@ -27,6 +29,7 @@ class HHVacancyClient(
     private val rateLimitService: RateLimitService,
     @Qualifier("vacancyDetailsCache") private val vacancyDetailsCache: Cache<String, VacancyDto>,
     private val searchConfig: VacancyServiceConfig,
+    @Qualifier("hhApiRetry") private val hhApiRetry: Retry,
 ) {
     private val log = KotlinLogging.logger {}
 
@@ -223,48 +226,54 @@ class HHVacancyClient(
     }
 
     /**
-     * Запрашивает одну страницу вакансий
+     * Запрашивает одну страницу вакансий с retry для временных ошибок
      */
     private suspend fun fetchVacanciesPage(config: SearchConfig, page: Int): VacancySearchResponse {
-        return try {
-            val experienceIds = searchConfig.experienceIds ?: listOf("between1And3", "between3And6")
-            val requestSpec = webClient.get()
-                .uri { builder ->
-                    builder.path("/vacancies")
-                        .queryParam("text", config.keywords)
-                        .apply {
-                            config.area?.let { queryParam("area", it) }
-                            config.minSalary?.let { queryParam("salary", it) }
-                            // Фильтруем по опыту из конфигурации
-                            experienceIds.forEach { experienceId ->
-                                queryParam("experience", experienceId)
+        return hhApiRetry.executeSuspendFunction {
+            try {
+                val experienceIds = searchConfig.experienceIds ?: listOf("between1And3", "between3And6")
+                val requestSpec = webClient.get()
+                    .uri { builder ->
+                        builder.path("/vacancies")
+                            .queryParam("text", config.keywords)
+                            .apply {
+                                config.area?.let { queryParam("area", it) }
+                                config.minSalary?.let { queryParam("salary", it) }
+                                // Фильтруем по опыту из конфигурации
+                                experienceIds.forEach { experienceId ->
+                                    queryParam("experience", experienceId)
+                                }
+                                queryParam("per_page", perPage)
+                                queryParam("page", page)
                             }
-                            queryParam("per_page", perPage)
-                            queryParam("page", page)
-                        }
-                        .build()
+                            .build()
+                    }
+
+                val response = requestSpec
+                    .retrieve()
+                    .bodyToMono<VacancySearchResponse>()
+                    .awaitSingle()
+
+                response
+            } catch (e: WebClientResponseException) {
+                log.error("❌ [HH.ru API] Error searching vacancies on page $page: ${e.message}", e)
+                val exception = mapToHHAPIException(e, "Failed to search vacancies on page $page")
+
+                // Если это ошибка авторизации, логируем детально
+                if (exception is HHAPIException.UnauthorizedException) {
+                    log.error("🚨 [HH.ru API] UNAUTHORIZED: Access token expired or invalid!")
+                    log.error("🚨 [HH.ru API] Status code: ${e.statusCode}, Response: ${e.responseBodyAsString}")
                 }
 
-            val response = requestSpec
-                .retrieve()
-                .bodyToMono<VacancySearchResponse>()
-                .awaitSingle()
-
-            response
-        } catch (e: WebClientResponseException) {
-            log.error("❌ [HH.ru API] Error searching vacancies on page $page: ${e.message}", e)
-            val exception = mapToHHAPIException(e, "Failed to search vacancies on page $page")
-
-            // Если это ошибка авторизации, логируем детально
-            if (exception is HHAPIException.UnauthorizedException) {
-                log.error("🚨 [HH.ru API] UNAUTHORIZED: Access token expired or invalid!")
-                log.error("🚨 [HH.ru API] Status code: ${e.statusCode}, Response: ${e.responseBodyAsString}")
+                // Retry настроен только для ConnectionException (временные ошибки)
+                // Постоянные ошибки (401, 403, 404, 429) не будут ретраиться
+                throw exception
+            } catch (e: Exception) {
+                log.error("Unexpected error searching vacancies on page $page: ${e.message}", e)
+                val connectionException = HHAPIException.ConnectionException("Failed to connect to HH.ru API: ${e.message}", e)
+                // Временная ошибка - будет ретрай
+                throw connectionException
             }
-
-            throw exception
-        } catch (e: Exception) {
-            log.error("Unexpected error searching vacancies on page $page: ${e.message}", e)
-            throw HHAPIException.ConnectionException("Failed to connect to HH.ru API: ${e.message}", e)
         }
     }
 
@@ -280,23 +289,31 @@ class HHVacancyClient(
 
         log.debug("[HH.ru API] Fetching vacancy details for ID: $id (cache miss)")
 
-        return try {
-            val vacancy = webClient.get()
-                .uri("/vacancies/$id")
-                .retrieve()
-                .bodyToMono<VacancyDto>()
-                .awaitSingle()
+        return hhApiRetry.executeSuspendFunction {
+            try {
+                val vacancy = webClient.get()
+                    .uri("/vacancies/$id")
+                    .retrieve()
+                    .bodyToMono<VacancyDto>()
+                    .awaitSingle()
 
-            vacancyDetailsCache.put(id, vacancy)
-            log.debug("[HH.ru API] Fetched and cached vacancy: ${vacancy.name} (ID: $id)")
+                vacancyDetailsCache.put(id, vacancy)
+                log.debug("[HH.ru API] Fetched and cached vacancy: ${vacancy.name} (ID: $id)")
 
-            vacancy
-        } catch (e: WebClientResponseException) {
-            log.error("[HH.ru API] Error getting vacancy details: ${e.message}", e)
-            throw mapToHHAPIException(e, "Failed to get vacancy details for id: $id")
-        } catch (e: Exception) {
-            log.error("[HH.ru API] Unexpected error getting vacancy details: ${e.message}", e)
-            throw HHAPIException.ConnectionException("Failed to connect to HH.ru API: ${e.message}", e)
+                vacancy
+            } catch (e: WebClientResponseException) {
+                log.error("[HH.ru API] Error getting vacancy details: ${e.message}", e)
+                val exception = mapToHHAPIException(e, "Failed to get vacancy details for id: $id")
+
+                // Retry настроен только для ConnectionException (временные ошибки)
+                // Постоянные ошибки (401, 403, 404, 429) не будут ретраиться
+                throw exception
+            } catch (e: Exception) {
+                log.error("[HH.ru API] Unexpected error getting vacancy details: ${e.message}", e)
+                val connectionException = HHAPIException.ConnectionException("Failed to connect to HH.ru API: ${e.message}", e)
+                // Временная ошибка - будет ретрай
+                throw connectionException
+            }
         }
     }
 
@@ -326,10 +343,21 @@ class HHVacancyClient(
                 "Server error from HH.ru API: ${e.statusCode}",
                 e,
             )
-            else -> HHAPIException.APIException(
-                "$defaultMessage: ${e.statusCode} - ${e.message}",
-                e,
-            )
+            else -> {
+                // Для 5xx ошибок создаем ConnectionException для retry
+                // Для других ошибок создаем APIException (не ретраим)
+                if (e.statusCode.is5xxServerError) {
+                    HHAPIException.ConnectionException(
+                        "Server error from HH.ru API: ${e.statusCode} - ${e.message}",
+                        e,
+                    )
+                } else {
+                    HHAPIException.APIException(
+                        "$defaultMessage: ${e.statusCode} - ${e.message}",
+                        e,
+                    )
+                }
+            }
         }
     }
 }

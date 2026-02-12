@@ -92,9 +92,21 @@ class CircuitBreakerConfig {
 
     /**
      * Retry для HH.ru API
+     * Настроен для ретрая только временных ошибок (ConnectionException, 5xx)
      */
     @Bean("hhApiRetry")
-    fun hhApiRetry(registry: RetryRegistry): Retry {
-        return registry.retry("hh-api")
+    fun hhApiRetry(
+        @Value("\${resilience.retry.max-attempts:3}") maxAttempts: Int,
+        @Value("\${resilience.retry.wait-duration-millis:1000}") waitDurationMillis: Long,
+    ): Retry {
+        val config = RetryConfig.custom<Any>()
+            .maxAttempts(maxAttempts)
+            .waitDuration(Duration.ofMillis(waitDurationMillis))
+            // Ретраим только ConnectionException (временные ошибки)
+            // Постоянные ошибки (401, 403, 404, 429) не ретраятся
+            .retryExceptions(com.hhassistant.exception.HHAPIException.ConnectionException::class.java)
+            .build()
+
+        return Retry.of("hh-api", config)
     }
 }
