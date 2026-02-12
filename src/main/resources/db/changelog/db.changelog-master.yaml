@@ -25,3 +25,5 @@ databaseChangeLog:
       file: db/changelog/v1.0/012-add-index-url.yaml
   - include:
       file: db/changelog/v1.0/013-add-composite-index-status-fetched-at.yaml
+  - include:
+      file: db/changelog/v1.0/014-add-version-field.yaml

@@ -6,6 +6,7 @@ import jakarta.persistence.EnumType
 import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.Table
+import jakarta.persistence.Version
 import java.time.LocalDateTime
 
 @Entity
@@ -51,6 +52,15 @@ data class Vacancy(
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20, nullable = false)
     val status: VacancyStatus = VacancyStatus.NEW,
+
+    /**
+     * Версия записи для optimistic locking.
+     * Автоматически увеличивается при каждом обновлении записи.
+     * Предотвращает lost updates при параллельном обновлении.
+     */
+    @Version
+    @Column(name = "version", nullable = false)
+    val version: Long = 0,
 ) {
     /**
      * Rich Domain Model: бизнес-логика внутри entity

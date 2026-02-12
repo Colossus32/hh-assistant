@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: add-version-field
+      author: system
+      changes:
+        - addColumn:
+            tableName: vacancies
+            columns:
+              - column:
+                  name: version
+                  type: bigint
+                  constraints:
+                    nullable: false
+                  defaultValueNumeric: 0
+            # Поле version для optimistic locking
+            # Автоматически увеличивается при каждом обновлении записи
+            # Предотвращает lost updates при параллельном обновлении
+

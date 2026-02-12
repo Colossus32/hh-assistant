@@ -5,6 +5,7 @@ import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.exception.VacancyProcessingException
 import com.hhassistant.repository.VacancyRepository
+import jakarta.persistence.OptimisticLockException
 import mu.KotlinLogging
 import org.springframework.cache.annotation.CacheEvict
 import org.springframework.stereotype.Service
@@ -34,6 +35,40 @@ class VacancyStatusService(
             log.info(
                 "✅ [StatusService] Updated vacancy ${updatedVacancy.id} ('${updatedVacancy.name}') status: $oldStatus -> ${updatedVacancy.status}",
             )
+        } catch (e: OptimisticLockException) {
+            log.warn(
+                "⚠️ [StatusService] Optimistic lock conflict for vacancy ${updatedVacancy.id}: " +
+                    "vacancy was modified by another transaction. Retrying with fresh data...",
+            )
+            // Пытаемся загрузить актуальную версию и обновить снова
+            try {
+                val currentVacancy = vacancyRepository.findById(updatedVacancy.id).orElse(null)
+                if (currentVacancy != null) {
+                    // Обновляем статус с актуальной версией
+                    val updatedWithCurrentVersion = currentVacancy.withStatus(updatedVacancy.status)
+                    vacancyRepository.save(updatedWithCurrentVersion)
+                    log.info(
+                        "✅ [StatusService] Successfully updated vacancy ${updatedVacancy.id} after optimistic lock retry",
+                    )
+                } else {
+                    log.error("❌ [StatusService] Vacancy ${updatedVacancy.id} not found after optimistic lock conflict")
+                    throw VacancyProcessingException(
+                        "Vacancy not found after optimistic lock conflict",
+                        updatedVacancy.id,
+                        e,
+                    )
+                }
+            } catch (retryException: Exception) {
+                log.error(
+                    "❌ [StatusService] Failed to update vacancy ${updatedVacancy.id} after optimistic lock retry: ${retryException.message}",
+                    retryException,
+                )
+                throw VacancyProcessingException(
+                    "Failed to update vacancy status after optimistic lock conflict",
+                    updatedVacancy.id,
+                    retryException,
+                )
+            }
         } catch (e: Exception) {
             log.error("Error updating vacancy ${updatedVacancy.id} status: ${e.message}", e)
             throw VacancyProcessingException(
