@@ -13,7 +13,7 @@ import org.springframework.web.server.ResponseStatusException
 class TelegramChannelController(
     private val telegramChannelService: TelegramChannelService,
 ) {
-    
+
     @GetMapping
     fun getAllChannels(
         @RequestParam activeOnly: Boolean = false
@@ -25,12 +25,12 @@ class TelegramChannelController(
         }
         return channels.map { it.toDto() }
     }
-    
+
     @GetMapping("/{id}")
     fun getChannel(@PathVariable id: Long): TelegramChannelDto {
         return telegramChannelService.getChannelById(id).toDto()
     }
-    
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     fun addChannel(
@@ -45,17 +45,17 @@ class TelegramChannelController(
         }
         return channel.toDto()
     }
-    
+
     @PostMapping("/{id}/monitor")
     fun startMonitoring(@PathVariable id: Long): TelegramChannelDto {
         return telegramChannelService.startMonitoring(id).toDto()
     }
-    
+
     @PostMapping("/{id}/stop")
     fun stopMonitoring(@PathVariable id: Long): TelegramChannelDto {
         return telegramChannelService.stopMonitoring(id).toDto()
     }
-    
+
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun removeChannel(@PathVariable id: Long) {
@@ -64,7 +64,7 @@ class TelegramChannelController(
 }
 
 data class AddChannelRequest(
-    val channelUsername: String
+    val channelUsername: String,
 )
 
 data class TelegramChannelDto(

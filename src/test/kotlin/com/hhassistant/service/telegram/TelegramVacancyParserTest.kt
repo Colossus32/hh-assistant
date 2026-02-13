@@ -1,12 +1,14 @@
 package com.hhassistant.service.telegram
 
 import com.hhassistant.client.telegram.dto.ChannelMessage
-import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancySource
 import com.hhassistant.domain.entity.VacancyStatus
-import org.junit.jupiter.api.Assertions.*
+import com.hhassistant.domain.model.VacancySource
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import java.time.LocalDateTime
 
 class TelegramVacancyParserTest {
     private val parser = TelegramVacancyParser()
@@ -19,18 +21,18 @@ class TelegramVacancyParserTest {
             date = 1672531200L, // Jan 1, 2023
             text = """
                 🔥 [HOT] Senior Java Developer needed at fintech startup
-                
+
                 🏢 Company: FinTech Solutions
                 💰 Salary: $5000-7000
                 📍 Location: Remote (EU timezone)
                 💼 Experience: 5+ years
                 🔗 Link: https://example.com/job/123
-                
+
                 Looking for a Senior Java Developer with experience in fintech...
             """.trimIndent(),
             caption = null,
             entities = null,
-            authorSignature = null
+            authorSignature = null,
         )
         val channelUsername = "test_channel"
 
@@ -39,14 +41,14 @@ class TelegramVacancyParserTest {
 
         // Then
         assertNotNull(vacancy)
-        assertEquals(VacancySource.TELEGRAM_CHANNEL, vacancy.source)
-        assertEquals("tg_test_channel_12345", vacancy.id)
-        assertEquals("Senior Java Developer needed at fintech startup", vacancy.name)
-        assertEquals("FinTech Solutions", vacancy.employer)
-        assertEquals("\$5000-7000", vacancy.salary)
-        assertEquals("Remote (EU timezone)", vacancy.area)
-        assertEquals("https://example.com/job/123", vacancy.url)
-        assertTrue(vacancy.description!!.contains("Looking for a Senior Java Developer"))
+        assertEquals(VacancySource.TELEGRAM_CHANNEL, vacancy?.source)
+        assertEquals("tg_test_channel_12345", vacancy?.id)
+        assertEquals("Senior Java Developer needed at fintech startup", vacancy?.name)
+        assertEquals("FinTech Solutions", vacancy?.employer)
+        assertEquals("\$5000-7000", vacancy?.salary)
+        assertEquals("Remote (EU timezone)", vacancy?.area)
+        assertEquals("https://example.com/job/123", vacancy?.url)
+        assertTrue(vacancy?.description!!.contains("Looking for a Senior Java Developer"))
         assertEquals(VacancyStatus.QUEUED, vacancy.status)
         assertEquals("12345", vacancy.messageId)
         assertEquals("test_channel", vacancy.channelUsername)
@@ -80,7 +82,7 @@ class TelegramVacancyParserTest {
             text = "Just a regular chat message about programming",
             caption = null,
             entities = null,
-            authorSignature = null
+            authorSignature = null,
         )
         val channelUsername = "test_channel"
 
@@ -99,7 +101,7 @@ class TelegramVacancyParserTest {
             date = 1672531200L,
             text = """
                 📋 Вакансія: Middle Frontend React Developer
-                
+
                 💼 Компанія: TechCorp
                 💰 Зарплата: від 2500 до 3500 дол.
                 📍 Локація: Київ
@@ -107,7 +109,7 @@ class TelegramVacancyParserTest {
             """.trimIndent(),
             caption = null,
             entities = null,
-            authorSignature = null
+            authorSignature = null,
         )
         val channelUsername = "test_channel"
 
@@ -116,9 +118,9 @@ class TelegramVacancyParserTest {
 
         // Then
         assertNotNull(vacancy)
-        assertTrue(vacancy.name!!.contains("Frontend"))
-        assertEquals("TechCorp", vacancy.employer)
-        assertTrue(vacancy.description!!.contains("Київ"))
+        assertTrue(vacancy?.name!!.contains("Frontend"))
+        assertEquals("TechCorp", vacancy?.employer)
+        assertTrue(vacancy?.description!!.contains("Київ"))
         assertEquals("від 2500 до 3500 дол.", vacancy.salary)
     }
 
@@ -131,7 +133,7 @@ class TelegramVacancyParserTest {
             text = "Position: Python Developer\nCompany: TestCo\nSalary: 3000\nLocation: Berlin",
             caption = null,
             entities = null,
-            authorSignature = null
+            authorSignature = null,
         )
         val channelUsername = "python_jobs"
 
@@ -140,7 +142,7 @@ class TelegramVacancyParserTest {
 
         // Then
         assertNotNull(vacancy)
-        assertEquals("https://t.me/python_jobs/98765", vacancy.url)
+        assertEquals("https://t.me/python_jobs/98765", vacancy?.url)
     }
 
     // We'll test only public interface methods, not private implementation

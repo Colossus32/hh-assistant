@@ -1,17 +1,23 @@
 package com.hhassistant.service.telegram
 
-import com.hhassistant.domain.entity.TelegramChannel
 import com.hhassistant.domain.entity.ChannelType
-import com.hhassistant.exception.TeleException
+import com.hhassistant.domain.entity.TelegramChannel
+import com.hhassistant.exception.TelegramException
 import com.hhassistant.repository.TelegramChannelRepository
+import io.mockk.any
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.returnsArgument
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
-import java.util.*
+import java.util.Optional
 
 class TelegramChannelServiceTest {
     private lateinit var telegramChannelRepository: TelegramChannelRepository
@@ -34,15 +40,15 @@ class TelegramChannelServiceTest {
                 channelUsername = "test1",
                 isActive = true,
                 isMonitored = false,
-                addedAt = java.time.LocalDateTime.now()
+                addedAt = java.time.LocalDateTime.now(),
             ),
             TelegramChannel(
                 id = 2L,
                 channelUsername = "test2",
                 isActive = true,
                 isMonitored = true,
-                addedAt = java.time.LocalDateTime.now()
-            )
+                addedAt = java.time.LocalDateTime.now(),
+            ),
         )
         every { telegramChannelRepository.findByIsActiveTrueOrderByAddedAtDesc() } returns channels
 
@@ -65,15 +71,15 @@ class TelegramChannelServiceTest {
                 channelUsername = "test1",
                 isActive = true,
                 isMonitored = true,
-                addedAt = java.time.LocalDateTime.now()
+                addedAt = java.time.LocalDateTime.now(),
             ),
             TelegramChannel(
                 id = 2L,
                 channelUsername = "test2",
                 isActive = true,
                 isMonitored = false,
-                addedAt = java.time.LocalDateTime.now()
-            )
+                addedAt = java.time.LocalDateTime.now(),
+            ),
         )
         every { telegramChannelRepository.findByIsActiveTrueAndIsMonitoredTrue() } returns channels
 
@@ -91,25 +97,25 @@ class TelegramChannelServiceTest {
         // Given
         val channelUsername = "new_channel"
         val addedBy = "user123"
-        
+
         every { telegramChannelRepository.existsByChannelUsername(channelUsername) } returns false
-        coEvery { 
-            telegramChannelClient.getChatInfo(channelUsername) 
+        coEvery {
+            telegramChannelClient.getChatInfo(channelUsername)
         } returns com.hhassistant.client.telegram.dto.ChatInfoDto(
             id = 12345L,
             type = "channel",
             title = "Test Channel",
             username = channelUsername,
-            description = "Test Description"
+            description = "Test Description",
         )
         every { telegramChannelRepository.save(any()) } returnsArgument {
-            it.channelUsername == channelUsername && 
-            it.channelId == 12345L &&
-            it.displayName == "Test Channel" &&
-            it.channelType == ChannelType.PUBLIC &&
-            it.isActive == true &&
-            it.isMonitored == false &&
-            it.addedBy == addedBy
+            it.channelUsername == channelUsername &&
+                it.channelId == 12345L &&
+                it.displayName == "Test Channel" &&
+                it.channelType == ChannelType.PUBLIC &&
+                it.isActive == true &&
+                it.isMonitored == false &&
+                it.addedBy == addedBy
         }
 
         // When
@@ -129,7 +135,7 @@ class TelegramChannelServiceTest {
         // Given
         val channelUsername = "existing_channel"
         val addedBy = "user123"
-        
+
         every { telegramChannelRepository.existsByChannelUsername(channelUsername) } returns true
 
         // When & Then
@@ -147,10 +153,10 @@ class TelegramChannelServiceTest {
         // Given
         val channelUsername = "nonexistent_channel"
         val addedBy = "user123"
-        
+
         every { telegramChannelRepository.existsByChannelUsername(channelUsername) } returns false
-        coEvery { 
-            telegramChannelClient.getChatInfo(channelUsername) 
+        coEvery {
+            telegramChannelClient.getChatInfo(channelUsername)
         } returns null
 
         // When & Then
@@ -173,7 +179,7 @@ class TelegramChannelServiceTest {
             channelUsername = "test_channel",
             isActive = true,
             isMonitored = false,
-            addedAt = java.time.LocalDateTime.now()
+            addedAt = java.time.LocalDateTime.now(),
         )
         every { telegramChannelRepository.findById(channelId) } returns Optional.of(channel)
         every { telegramChannelRepository.save(any()) } returnsArgument {

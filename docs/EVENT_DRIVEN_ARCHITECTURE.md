@@ -149,3 +149,4 @@ fun `should process full event flow`() {
 3. **Трассировка**: Добавить correlation ID для отслеживания flow через события
 4. **Тестирование**: Использовать `@SpringBootTest` для интеграционных тестов с реальным Event Bus
 
+

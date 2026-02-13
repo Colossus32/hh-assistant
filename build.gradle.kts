@@ -6,7 +6,6 @@ plugins {
     kotlin("jvm") version "1.9.20"
     kotlin("plugin.spring") version "1.9.20"
     kotlin("plugin.jpa") version "1.9.20"
-    id("org.jlleitschuh.gradle.ktlint") version "11.6.1"
     jacoco
 }
 
@@ -117,32 +116,6 @@ tasks.jacocoTestCoverageVerification {
         }
     }
 }
-
-// KtLint configuration
-ktlint {
-    version.set("0.50.0")
-    debug.set(false)
-    verbose.set(true)
-    android.set(false)
-    outputToConsole.set(true)
-    ignoreFailures.set(false)
-    enableExperimentalRules.set(true)
-    filter {
-        exclude("**/generated/**")
-        exclude("**/build/**")
-    }
-    // Отключаем правило лексикографического порядка импортов
-    disabledRules.set(setOf("import-ordering"))
-}
-
-// KtLint проверка отключена при билдах
-// tasks.named("check") {
-//     dependsOn("ktlintCheck")
-// }
-
-// tasks.named("build") {
-//     dependsOn("ktlintFormat")
-// }
 
 // Быстрый билд без форматирования и тестов (для локальной разработки)
 tasks.register("fastBuild") {
