@@ -10,7 +10,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import mu.KotlinLogging
@@ -85,13 +84,13 @@ class SkillExtractionQueueService(
 
         log.info("🔄 [SkillExtractionQueue] Loading pending relevant vacancies without skills into queue on startup...")
 
-        runBlocking {
+        queueScope.launch {
             try {
                 // Находим релевантные вакансии без навыков
                 val relevantVacanciesWithoutSkills = vacancyRepository.findRelevantVacanciesWithoutSkills()
                 if (relevantVacanciesWithoutSkills.isEmpty()) {
                     log.info("ℹ️ [SkillExtractionQueue] No relevant vacancies without skills found on startup")
-                    return@runBlocking
+                    return@launch
                 }
 
                 log.info(
