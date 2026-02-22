@@ -2,7 +2,10 @@ package com.hhassistant.service.notification
 
 import com.hhassistant.client.telegram.TelegramClient
 import com.hhassistant.config.AppConstants
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
@@ -16,6 +19,7 @@ class NotificationService(
     @Value("\${telegram.enabled:true}") private val telegramEnabled: Boolean,
 ) {
     private val log = KotlinLogging.logger {}
+    private val notificationScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     /**
      * Отправляет уведомление о старте приложения
@@ -38,7 +42,7 @@ class NotificationService(
             appendLine("   • Telegram: готов")
         }
 
-        runBlocking {
+        notificationScope.launch {
             try {
                 val sent = telegramClient.sendMessage(message)
                 if (sent) {
@@ -94,7 +98,7 @@ class NotificationService(
             }
         }
 
-        runBlocking {
+        notificationScope.launch {
             try {
                 val sent = telegramClient.sendMessage(message)
                 if (sent) {
@@ -153,7 +157,7 @@ class NotificationService(
             appendLine("📖 Подробная инструкция: docs/GET_TOKEN_STEP_BY_STEP.md")
         }
 
-        runBlocking {
+        notificationScope.launch {
             try {
                 val sent = telegramClient.sendMessage(message)
                 if (sent) {
@@ -176,7 +180,7 @@ class NotificationService(
             return
         }
 
-        runBlocking {
+        notificationScope.launch {
             try {
                 val sent = telegramClient.sendMessage(text)
                 if (sent) {
