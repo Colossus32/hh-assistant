@@ -5,7 +5,10 @@ import com.hhassistant.exception.HHAPIException
 import com.hhassistant.repository.VacancyAnalysisRepository
 import com.hhassistant.repository.VacancyRepository
 import com.hhassistant.repository.VacancySkillRepository
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.scheduling.annotation.Scheduled
@@ -27,6 +30,7 @@ class VacancyCleanupService(
     @Value("\${app.cleanup.batch-size:50}") private val batchSize: Int,
 ) {
     private val log = KotlinLogging.logger {}
+    private val cleanupScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     /**
      * Периодически проверяет все вакансии на существование и удаляет несуществующие.
@@ -41,7 +45,7 @@ class VacancyCleanupService(
 
         log.info("🧹 [VacancyCleanup] Starting cleanup of non-existent vacancies...")
 
-        runBlocking {
+        cleanupScope.launch {
             val allVacancies = vacancyRepository.findAll()
             log.info("📊 [VacancyCleanup] Checking ${allVacancies.size} vacancies for existence...")
 
@@ -50,8 +54,8 @@ class VacancyCleanupService(
             var errorCount = 0
 
             // Обрабатываем вакансии батчами для избежания перегрузки API
-            allVacancies.chunked(batchSize).forEach batchLoop@{ batch ->
-                batch.forEach { vacancy ->
+            batchLoop@ for (batch in allVacancies.chunked(batchSize)) {
+                for (vacancy in batch) {
                     try {
                         checkedCount++
 
@@ -74,7 +78,7 @@ class VacancyCleanupService(
                         } catch (e: HHAPIException.RateLimitException) {
                             log.warn("⏸️ [VacancyCleanup] Rate limit exceeded, pausing cleanup")
                             errorCount++
-                            return@batchLoop // Пропускаем остальные батчи
+                            break@batchLoop // Пропускаем остальные батчи
                         } catch (e: Exception) {
                             log.warn("⚠️ [VacancyCleanup] Error checking vacancy ${vacancy.id}: ${e.message}")
                             errorCount++
