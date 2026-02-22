@@ -3,7 +3,10 @@ package com.hhassistant.service.util
 import com.hhassistant.client.hh.HHOAuthService
 import com.hhassistant.client.hh.dto.OAuthTokenResponse
 import com.hhassistant.exception.HHAPIException
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import mu.KotlinLogging
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
@@ -17,6 +20,7 @@ class TokenRefreshService(
     private val envFileService: EnvFileService,
 ) {
     private val log = KotlinLogging.logger {}
+    private val refreshScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     /**
      * Проверяет и обновляет токен, если он истек или скоро истечет
@@ -46,7 +50,7 @@ class TokenRefreshService(
 
         log.info("🔄 [TokenRefresh] Attempting to refresh access token...")
 
-        runBlocking {
+        refreshScope.launch {
             try {
                 val tokenResponse: OAuthTokenResponse = oauthService.refreshAccessToken(refreshToken)
 
@@ -87,7 +91,7 @@ class TokenRefreshService(
      * Вручную обновляет токен (можно вызвать через API или при ошибке 401/403)
      * Не работает для application tokens (они имеют неограниченный срок жизни)
      */
-    fun refreshTokenManually(): Boolean {
+    suspend fun refreshTokenManually(): Boolean {
         // Проверяем тип токена - application tokens не обновляются
         val tokenType = envFileService.readEnvVariable("HH_TOKEN_TYPE") ?: "user"
         if (tokenType == "application") {
@@ -108,38 +112,36 @@ class TokenRefreshService(
 
         log.info("🔄 [TokenRefresh] Manual token refresh requested...")
 
-        return runBlocking {
-            try {
-                val tokenResponse: OAuthTokenResponse = oauthService.refreshAccessToken(refreshToken)
+        return try {
+            val tokenResponse: OAuthTokenResponse = oauthService.refreshAccessToken(refreshToken)
 
-                val accessTokenSaved = envFileService.updateEnvVariable("HH_ACCESS_TOKEN", tokenResponse.accessToken)
-                val refreshTokenSaved = tokenResponse.refreshToken?.let { newRefreshToken ->
-                    envFileService.updateEnvVariable("HH_REFRESH_TOKEN", newRefreshToken)
-                } ?: true
+            val accessTokenSaved = envFileService.updateEnvVariable("HH_ACCESS_TOKEN", tokenResponse.accessToken)
+            val refreshTokenSaved = tokenResponse.refreshToken?.let { newRefreshToken ->
+                envFileService.updateEnvVariable("HH_REFRESH_TOKEN", newRefreshToken)
+            } ?: true
 
-                if (accessTokenSaved && refreshTokenSaved) {
-                    log.info("✅ [TokenRefresh] Successfully refreshed and saved access token")
-                    true
-                } else {
-                    log.warn("⚠️ [TokenRefresh] Token refreshed but failed to save to .env file")
-                    false
-                }
-            } catch (e: HHAPIException.APIException) {
-                // Проверяем, не является ли это случаем "token not expired"
-                if (e.message?.contains("Token is still valid", ignoreCase = true) == true ||
-                    e.message?.contains("not expired", ignoreCase = true) == true
-                ) {
-                    log.info("ℹ️ [TokenRefresh] Token is still valid, no refresh needed: ${e.message}")
-                    // Токен валиден, возвращаем true (не ошибка)
-                    true
-                } else {
-                    log.error("❌ [TokenRefresh] Failed to refresh token: ${e.message}", e)
-                    false
-                }
-            } catch (e: Exception) {
+            if (accessTokenSaved && refreshTokenSaved) {
+                log.info("✅ [TokenRefresh] Successfully refreshed and saved access token")
+                true
+            } else {
+                log.warn("⚠️ [TokenRefresh] Token refreshed but failed to save to .env file")
+                false
+            }
+        } catch (e: HHAPIException.APIException) {
+            // Проверяем, не является ли это случаем "token not expired"
+            if (e.message?.contains("Token is still valid", ignoreCase = true) == true ||
+                e.message?.contains("not expired", ignoreCase = true) == true
+            ) {
+                log.info("ℹ️ [TokenRefresh] Token is still valid, no refresh needed: ${e.message}")
+                // Токен валиден, возвращаем true (не ошибка)
+                true
+            } else {
                 log.error("❌ [TokenRefresh] Failed to refresh token: ${e.message}", e)
                 false
             }
+        } catch (e: Exception) {
+            log.error("❌ [TokenRefresh] Failed to refresh token: ${e.message}", e)
+            false
         }
     }
 }
