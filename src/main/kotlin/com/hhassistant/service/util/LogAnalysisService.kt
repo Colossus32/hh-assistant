@@ -5,9 +5,12 @@ import com.hhassistant.client.ollama.dto.ChatMessage
 import com.hhassistant.client.telegram.TelegramClient
 import com.hhassistant.config.AppConstants
 import io.netty.handler.timeout.ReadTimeoutException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.scheduling.annotation.Scheduled
@@ -45,6 +48,7 @@ class LogAnalysisService(
     @Value("\${app.log-analysis.retry.initial-delay-ms:2000}") private val retryInitialDelayMs: Long,
 ) {
     private val log = KotlinLogging.logger {}
+    private val analysisScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     /**
      * Анализирует логи приложения и отправляет отчет в Telegram
@@ -59,14 +63,14 @@ class LogAnalysisService(
 
         log.info(" [LogAnalysis] Starting daily log analysis...")
 
-        runBlocking {
+        analysisScope.launch {
             try {
                 // Читаем логи за последние N часов
                 val logLines = readRecentLogs(lookbackHours)
 
                 if (logLines.isEmpty()) {
                     log.info("ℹ️ [LogAnalysis] No logs found for analysis")
-                    return@runBlocking
+                    return@launch
                 }
 
                 log.info(" [LogAnalysis] Read ${logLines.size} log lines for analysis")
