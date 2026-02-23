@@ -150,3 +150,8 @@ fun `should process full event flow`() {
 4. **Тестирование**: Использовать `@SpringBootTest` для интеграционных тестов с реальным Event Bus
 
 
+
+
+
+
+

@@ -1,16 +1,15 @@
 package com.hhassistant.service
 
-import com.hhassistant.client.hh.HHVacancyClient
-import com.hhassistant.client.hh.dto.VacancyDto
+import com.hhassistant.integration.hh.HHVacancyClient
+import com.hhassistant.integration.hh.dto.VacancyDto
 import com.hhassistant.config.FormattingConfig
 import com.hhassistant.domain.entity.SearchConfig
 import com.hhassistant.domain.entity.Vacancy
-import com.hhassistant.repository.SearchConfigRepository
-import com.hhassistant.repository.VacancyRepository
-import com.hhassistant.service.notification.NotificationService
+import com.hhassistant.domain.entity.VacancyStatus
+import com.hhassistant.notification.service.NotificationService
 import com.hhassistant.service.util.SearchConfigFactory
 import com.hhassistant.service.util.TokenRefreshService
-import com.hhassistant.service.vacancy.VacancyFetchService
+import com.hhassistant.vacancy.service.VacancyFetchService
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -22,51 +21,42 @@ import org.junit.jupiter.api.Test
 class VacancyFetchServiceTest {
 
     private lateinit var hhVacancyClient: HHVacancyClient
-    private lateinit var vacancyRepository: VacancyRepository
-    private lateinit var searchConfigRepository: SearchConfigRepository
     private lateinit var formattingConfig: FormattingConfig
     private lateinit var notificationService: NotificationService
     private lateinit var tokenRefreshService: TokenRefreshService
-    private lateinit var searchConfigFactory: SearchConfigFactory
-    private lateinit var searchConfig: com.hhassistant.config.VacancyServiceConfig
-    private lateinit var vacancyIdsCache: com.github.benmanes.caffeine.cache.Cache<String, Set<String>>
-    private lateinit var metricsService: com.hhassistant.metrics.MetricsService
-    private lateinit var vacancyProcessingQueueService: com.hhassistant.service.vacancy.VacancyProcessingQueueService
+    private lateinit var metricsService: com.hhassistant.monitoring.metrics.MetricsService
+    private lateinit var vacancyProcessingQueueService: com.hhassistant.vacancy.service.VacancyProcessingQueueService
     private lateinit var exclusionKeywordService: com.hhassistant.service.exclusion.ExclusionKeywordService
+    private lateinit var vacancyPersistenceService: com.hhassistant.vacancy.service.VacancyPersistenceService
+    private lateinit var searchConfigProviderService: com.hhassistant.vacancy.service.SearchConfigProviderService
     private lateinit var service: VacancyFetchService
 
     @BeforeEach
     fun setUp() {
         hhVacancyClient = mockk(relaxed = true)
-        vacancyRepository = mockk(relaxed = true)
-        searchConfigRepository = mockk(relaxed = true)
         formattingConfig = FormattingConfig(
             defaultCurrency = "RUR",
             areaNotSpecified = "Не указан",
         )
         notificationService = mockk(relaxed = true)
         tokenRefreshService = mockk(relaxed = true)
-        searchConfigFactory = mockk(relaxed = true)
-        searchConfig = com.hhassistant.config.VacancyServiceConfig()
-        vacancyIdsCache = com.github.benmanes.caffeine.cache.Caffeine.newBuilder().build<String, Set<String>>()
         metricsService = mockk(relaxed = true)
         vacancyProcessingQueueService = mockk(relaxed = true)
         exclusionKeywordService = mockk(relaxed = true)
+        vacancyPersistenceService = mockk(relaxed = true)
+        searchConfigProviderService = mockk(relaxed = true)
 
         service = VacancyFetchService(
             hhVacancyClient = hhVacancyClient,
-            vacancyRepository = vacancyRepository,
-            searchConfigRepository = searchConfigRepository,
-            notificationService = notificationService,
-            tokenRefreshService = tokenRefreshService,
-            searchConfigFactory = searchConfigFactory,
-            searchConfig = searchConfig,
             formattingConfig = formattingConfig,
             metricsService = metricsService,
             vacancyProcessingQueueService = vacancyProcessingQueueService,
             exclusionKeywordService = exclusionKeywordService,
+            vacancyPersistenceService = vacancyPersistenceService,
+            searchConfigProviderService = searchConfigProviderService,
+            notificationService = notificationService,
+            tokenRefreshService = tokenRefreshService,
             maxVacanciesPerCycle = 50,
-            vacancyIdsCache = vacancyIdsCache,
         )
     }
 
@@ -76,11 +66,16 @@ class VacancyFetchServiceTest {
         val vacancyDto1 = createTestVacancyDto("1", "Java Developer")
         val vacancyDto2 = createTestVacancyDto("2", "Kotlin Developer")
         val searchConfig = createTestSearchConfig("Java")
+        val savedVacancies = listOf(
+            createTestVacancy("1", "Java"),
+            createTestVacancy("2", "Kotlin"),
+        )
 
-        every { searchConfigRepository.findByIsActiveTrue() } returns listOf(searchConfig)
+        every { searchConfigProviderService.getActiveSearchConfigs() } returns listOf(searchConfig)
         coEvery { hhVacancyClient.searchVacancies(any()) } returns listOf(vacancyDto1, vacancyDto2)
-        every { vacancyRepository.findAllIds() } returns emptyList()
-        every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { firstArg() }
+        every { vacancyPersistenceService.getAllVacancyIds() } returns emptySet()
+        every { vacancyPersistenceService.saveVacanciesInBatches(any()) } returns savedVacancies
+        every { vacancyPersistenceService.updateVacancyIdsCacheIncrementally(any()) } returns Unit
         coEvery { vacancyProcessingQueueService.enqueueBatch(any()) } returns 2
 
         // When
@@ -88,7 +83,7 @@ class VacancyFetchServiceTest {
 
         // Then
         assertThat(result.vacancies.size).isEqualTo(2)
-        verify(exactly = 1) { vacancyRepository.saveAll(any<List<Vacancy>>()) }
+        verify(exactly = 1) { vacancyPersistenceService.saveVacanciesInBatches(any()) }
     }
 
     @Test
@@ -96,7 +91,7 @@ class VacancyFetchServiceTest {
         // Given
         val searchConfig = createTestSearchConfig("Java")
 
-        every { searchConfigRepository.findByIsActiveTrue() } returns listOf(searchConfig)
+        every { searchConfigProviderService.getActiveSearchConfigs() } returns listOf(searchConfig)
         coEvery { hhVacancyClient.searchVacancies(any()) } returns emptyList()
 
         // When
@@ -108,16 +103,18 @@ class VacancyFetchServiceTest {
 
     @Test
     fun `should filter out existing vacancies`() = runBlocking {
-        // Given
+        // Given - ID "1" already in DB, so only "2" is new
         val vacancyDto1 = createTestVacancyDto("1", "Java Developer")
         val vacancyDto2 = createTestVacancyDto("2", "Kotlin Developer")
         val searchConfig = createTestSearchConfig("Java")
+        val savedVacancies = listOf(createTestVacancy("2", "Kotlin"))
 
-        every { searchConfigRepository.findByIsActiveTrue() } returns listOf(searchConfig)
+        every { searchConfigProviderService.getActiveSearchConfigs() } returns listOf(searchConfig)
         coEvery { hhVacancyClient.searchVacancies(any()) } returns listOf(vacancyDto1, vacancyDto2)
-        every { vacancyRepository.existsById("1") } returns true // Уже существует
-        every { vacancyRepository.existsById("2") } returns false
-        every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { firstArg() }
+        every { vacancyPersistenceService.getAllVacancyIds() } returns setOf("1")
+        every { vacancyPersistenceService.saveVacanciesInBatches(any()) } returns savedVacancies
+        every { vacancyPersistenceService.updateVacancyIdsCacheIncrementally(any()) } returns Unit
+        coEvery { vacancyProcessingQueueService.enqueueBatch(any()) } returns 1
 
         // When
         val result = service.fetchAndSaveNewVacancies()
@@ -134,14 +131,19 @@ class VacancyFetchServiceTest {
         val vacancyDto2 = createTestVacancyDto("2", "Kotlin Developer")
         val searchConfig1 = createTestSearchConfig("Java")
         val searchConfig2 = createTestSearchConfig("Kotlin")
+        val savedVacancies = listOf(
+            Vacancy(id = "1", name = "Java", employer = "E", salary = null, area = "M", url = "u", description = null, experience = null, publishedAt = null, status = com.hhassistant.domain.entity.VacancyStatus.QUEUED),
+            Vacancy(id = "2", name = "Kotlin", employer = "E", salary = null, area = "M", url = "u", description = null, experience = null, publishedAt = null, status = com.hhassistant.domain.entity.VacancyStatus.QUEUED),
+        )
 
-        every { searchConfigRepository.findByIsActiveTrue() } returns listOf(searchConfig1, searchConfig2)
+        every { searchConfigProviderService.getActiveSearchConfigs() } returns listOf(searchConfig1, searchConfig2)
         coEvery { hhVacancyClient.searchVacancies(any()) } returnsMany listOf(
             listOf(vacancyDto1),
             listOf(vacancyDto2),
         )
-        every { vacancyRepository.findAllIds() } returns emptyList()
-        every { vacancyRepository.saveAll(any<List<Vacancy>>()) } answers { firstArg() }
+        every { vacancyPersistenceService.getAllVacancyIds() } returns emptySet()
+        every { vacancyPersistenceService.saveVacanciesInBatches(any()) } returns savedVacancies
+        every { vacancyPersistenceService.updateVacancyIdsCacheIncrementally(any()) } returns Unit
         coEvery { vacancyProcessingQueueService.enqueueBatch(any()) } returns 2
 
         // When
@@ -149,7 +151,7 @@ class VacancyFetchServiceTest {
 
         // Then
         assertThat(result.vacancies.size).isEqualTo(2)
-        verify(exactly = 1) { vacancyRepository.saveAll(any<List<Vacancy>>()) }
+        verify(exactly = 1) { vacancyPersistenceService.saveVacanciesInBatches(any()) }
     }
 
     // Helper methods
@@ -157,9 +159,9 @@ class VacancyFetchServiceTest {
         return VacancyDto(
             id = id,
             name = name,
-            employer = com.hhassistant.client.hh.dto.EmployerDto(id = "1", name = "Test Company"),
+            employer = com.hhassistant.integration.hh.dto.EmployerDto(id = "1", name = "Test Company"),
             salary = null,
-            area = com.hhassistant.client.hh.dto.AreaDto(id = "1", name = "Moscow"),
+            area = com.hhassistant.integration.hh.dto.AreaDto(id = "1", name = "Moscow"),
             url = "https://api.hh.ru/vacancies/$id",
             description = "Test description",
             experience = null,
@@ -177,6 +179,21 @@ class VacancyFetchServiceTest {
             maxSalary = null,
             experience = null,
             isActive = true,
+        )
+    }
+
+    private fun createTestVacancy(id: String, name: String): Vacancy {
+        return Vacancy(
+            id = id,
+            name = name,
+            employer = "Test Company",
+            salary = null,
+            area = "Moscow",
+            url = "https://hh.ru/vacancy/$id",
+            description = null,
+            experience = null,
+            publishedAt = null,
+            status = VacancyStatus.QUEUED,
         )
     }
 }

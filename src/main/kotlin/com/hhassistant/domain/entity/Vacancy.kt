@@ -154,15 +154,84 @@ data class Vacancy(
     )
 }
 
+/**
+ * Статусы вакансии с допустимыми переходами (state machine).
+ *
+ * Диаграмма переходов:
+ * ```
+ * NEW ──────────┬──► QUEUED ──► ANALYZED ──► SENT_TO_USER ──┬──► APPLIED
+ *               │            │              │               └──► NOT_INTERESTED
+ *               │            │              │
+ *               │            ├──► NOT_SUITABLE (final)
+ *               │            ├──► SKIPPED ◄──┐
+ *               │            ├──► IN_ARCHIVE (final)  │
+ *               │            └──► REJECTED_BY_VALIDATOR (final)   │
+ *               │                                              recovery
+ *               └──► SKIPPED ───────────────────────────────────┘
+ *                       │
+ *                       └──► NEW (recovery), NOT_SUITABLE (recovery), IN_ARCHIVE (recovery)
+ * ```
+ */
 enum class VacancyStatus {
-    NEW, // Новая вакансия
-    QUEUED, // В очереди на обработку (добавлена в очередь, но еще не обработана)
-    ANALYZED, // Проанализирована LLM
-    SENT_TO_USER, // Отправлена в Telegram
-    SKIPPED, // Не удалось обработать (технические ошибки, можно восстановить)
-    NOT_SUITABLE, // Не подходит по результатам LLM анализа (финальный статус, не обрабатывать повторно)
-    IN_ARCHIVE, // Вакансия недоступна на HH.ru (404, удалена или в архиве)
-    APPLIED, // Откликнулся на вакансию
-    NOT_INTERESTED, // Неинтересная вакансия (не удалять, но не показывать повторно)
-    REJECTED_BY_VALIDATOR, // Отклонена валидатором (содержит бан-слова или не соответствует критериям, финальный статус)
+    /** Новая вакансия, ожидает постановки в очередь */
+    NEW,
+    /** В очереди на обработку LLM */
+    QUEUED,
+    /** Проанализирована LLM, релевантна */
+    ANALYZED,
+    /** Отправлена пользователю в Telegram */
+    SENT_TO_USER,
+    /** Не удалось обработать (технические ошибки), можно восстановить */
+    SKIPPED,
+    /** Не подходит по результатам LLM (финальный) */
+    NOT_SUITABLE,
+    /** Недоступна на HH.ru (404, финальный) */
+    IN_ARCHIVE,
+    /** Откликнулся (финальный, действие пользователя) */
+    APPLIED,
+    /** Неинтересна (финальный, действие пользователя) */
+    NOT_INTERESTED,
+    /** Отклонена валидатором, бан-слова (финальный) */
+    REJECTED_BY_VALIDATOR;
+
+    companion object {
+        /** Финальные статусы — из них нет переходов */
+        val FINAL_STATUSES = setOf(
+            NOT_SUITABLE,
+            IN_ARCHIVE,
+            APPLIED,
+            NOT_INTERESTED,
+            REJECTED_BY_VALIDATOR,
+        )
+
+        /** Допустимые переходы: from -> set of valid to */
+        private val VALID_TRANSITIONS: Map<VacancyStatus, Set<VacancyStatus>> = mapOf(
+            NEW to setOf(QUEUED, SKIPPED),
+            QUEUED to setOf(
+                ANALYZED,
+                NOT_SUITABLE,
+                SENT_TO_USER,
+                SKIPPED,
+                IN_ARCHIVE,
+                REJECTED_BY_VALIDATOR,
+            ),
+            ANALYZED to setOf(SENT_TO_USER, NOT_SUITABLE), // NOT_SUITABLE — sync из кэша
+            SENT_TO_USER to setOf(APPLIED, NOT_INTERESTED),
+            SKIPPED to setOf(NEW, NOT_SUITABLE, IN_ARCHIVE), // recovery
+            NOT_SUITABLE to emptySet(),
+            IN_ARCHIVE to emptySet(),
+            APPLIED to emptySet(),
+            NOT_INTERESTED to emptySet(),
+            REJECTED_BY_VALIDATOR to emptySet(),
+        )
+
+        /** Проверяет, допустим ли переход из from в to */
+        fun canTransition(from: VacancyStatus, to: VacancyStatus): Boolean {
+            if (from == to) return true
+            return VALID_TRANSITIONS[from]?.contains(to) == true
+        }
+
+        /** Проверяет, является ли статус финальным */
+        fun isFinal(status: VacancyStatus): Boolean = status in FINAL_STATUSES
+    }
 }

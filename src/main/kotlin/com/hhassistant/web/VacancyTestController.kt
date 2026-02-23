@@ -1,6 +1,6 @@
 package com.hhassistant.web
 
-import com.hhassistant.client.hh.HHVacancyClient
+import com.hhassistant.integration.hh.HHVacancyClient
 import com.hhassistant.domain.entity.SearchConfig
 import mu.KotlinLogging
 import org.springframework.http.ResponseEntity

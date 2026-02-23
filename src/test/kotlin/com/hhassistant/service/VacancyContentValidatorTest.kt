@@ -4,7 +4,7 @@ import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.service.exclusion.ExclusionRuleService
 import com.hhassistant.service.resume.ResumeService
-import com.hhassistant.service.vacancy.VacancyContentValidator
+import com.hhassistant.vacancy.service.VacancyContentValidator
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -15,7 +15,7 @@ import java.time.LocalDateTime
 class VacancyContentValidatorTest {
     private val exclusionRuleService = mockk<ExclusionRuleService>(relaxed = true)
     private val resumeService = mockk<ResumeService>(relaxed = true)
-    private val metricsService = mockk<com.hhassistant.metrics.MetricsService>(relaxed = true)
+    private val metricsService = mockk<com.hhassistant.monitoring.metrics.MetricsService>(relaxed = true)
 
     @Test
     fun `validate returns valid when no exclusion rules configured`() = runBlocking {

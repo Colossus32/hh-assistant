@@ -1,6 +1,6 @@
 package com.hhassistant.service.health
 
-import com.hhassistant.client.telegram.TelegramClient
+import com.hhassistant.integration.telegram.TelegramClient
 import com.hhassistant.health.HHAPIHealthIndicator
 import com.hhassistant.health.OllamaHealthIndicator
 import jakarta.annotation.PreDestroy

@@ -1,6 +1,7 @@
 package com.hhassistant.repository
 
 import com.hhassistant.domain.entity.Vacancy
+import com.hhassistant.vacancy.repository.VacancyRepository
 import com.hhassistant.domain.entity.VacancyStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test

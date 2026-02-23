@@ -1,7 +1,7 @@
 package com.hhassistant.service.util
 
-import com.hhassistant.client.hh.HHOAuthService
-import com.hhassistant.client.hh.dto.OAuthTokenResponse
+import com.hhassistant.integration.hh.HHOAuthService
+import com.hhassistant.integration.hh.dto.OAuthTokenResponse
 import com.hhassistant.exception.HHAPIException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

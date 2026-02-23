@@ -2,8 +2,8 @@ package com.hhassistant.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.hhassistant.client.hh.HHResumeClient
-import com.hhassistant.client.hh.dto.ResumeDto
+import com.hhassistant.integration.hh.HHResumeClient
+import com.hhassistant.integration.hh.dto.ResumeDto
 import com.hhassistant.domain.entity.Resume
 import com.hhassistant.domain.entity.ResumeSource
 import com.hhassistant.repository.ResumeRepository
@@ -76,8 +76,8 @@ class ResumeServiceTest {
                 firstName = "Ivan",
                 lastName = "Ivanov",
                 skills = listOf(
-                    com.hhassistant.client.hh.dto.SkillDto("Kotlin"),
-                    com.hhassistant.client.hh.dto.SkillDto("Spring Boot"),
+                    com.hhassistant.integration.hh.dto.SkillDto("Kotlin"),
+                    com.hhassistant.integration.hh.dto.SkillDto("Spring Boot"),
                 ),
                 experience = emptyList(),
                 education = emptyList(),

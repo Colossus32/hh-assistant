@@ -2,13 +2,14 @@ package com.hhassistant.service.resume
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.github.benmanes.caffeine.cache.Cache
-import com.hhassistant.client.hh.HHResumeClient
+import com.hhassistant.integration.hh.HHResumeClient
 import com.hhassistant.domain.entity.Resume
 import com.hhassistant.domain.entity.ResumeSource
 import com.hhassistant.repository.ResumeRepository
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
+import com.hhassistant.vacancy.port.ResumeProvider
 import org.springframework.stereotype.Service
 import java.io.File
 
@@ -20,7 +21,7 @@ class ResumeService(
     private val objectMapper: ObjectMapper,
     @Value("\${app.resume.path:./resumes/resume.pdf}") private val resumePath: String?,
     @Qualifier("resumeStructureCache") private val resumeStructureCache: Cache<String, com.hhassistant.domain.model.ResumeStructure>,
-) {
+) : ResumeProvider {
     private val log = KotlinLogging.logger {}
 
     // Финальный путь к резюме (по умолчанию из конфигурации)
@@ -34,7 +35,7 @@ class ResumeService(
      * Загружает резюме из кэша или из источника (БД, HH.ru API, PDF)
      * Если резюме уже загружено в память, возвращает кэшированное
      */
-    suspend fun loadResume(): Resume {
+    override suspend fun loadResume(): Resume {
         // Используем кэшированное резюме, если оно уже загружено
         cachedResume?.let {
             log.debug("Using cached resume from memory: ${it.fileName}")
@@ -150,7 +151,7 @@ class ResumeService(
         }
     }
 
-    private fun buildResumeText(resumeDto: com.hhassistant.client.hh.dto.ResumeDto): String {
+    private fun buildResumeText(resumeDto: com.hhassistant.integration.hh.dto.ResumeDto): String {
         val sb = StringBuilder()
 
         sb.appendLine("${resumeDto.firstName ?: ""} ${resumeDto.lastName ?: ""}".trim())
@@ -207,7 +208,7 @@ class ResumeService(
         )
     }
 
-    fun getResumeStructure(resume: Resume): com.hhassistant.domain.model.ResumeStructure? {
+    override fun getResumeStructure(resume: Resume): com.hhassistant.domain.model.ResumeStructure? {
         // Используем Caffeine cache для кэширования структуры резюме
         val cacheKey = (resume.id ?: "default").toString()
 

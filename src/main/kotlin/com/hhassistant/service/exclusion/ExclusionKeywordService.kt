@@ -1,7 +1,7 @@
 package com.hhassistant.service.exclusion
 
 import com.hhassistant.domain.entity.ExclusionRule
-import com.hhassistant.repository.ExclusionRuleRepository
+import com.hhassistant.vacancy.repository.ExclusionRuleRepository
 import jakarta.annotation.PostConstruct
 import mu.KotlinLogging
 import org.ahocorasick.trie.Trie

@@ -2,7 +2,7 @@ package com.hhassistant.service
 
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
-import com.hhassistant.service.vacancy.VacancyStatusService
+import com.hhassistant.vacancy.service.VacancyStatusService
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -14,7 +14,7 @@ import java.util.*
 
 class VacancyStatusServiceTest {
 
-    private lateinit var vacancyRepository: com.hhassistant.repository.VacancyRepository
+    private lateinit var vacancyRepository: com.hhassistant.vacancy.repository.VacancyRepository
     private lateinit var service: VacancyStatusService
 
     @BeforeEach

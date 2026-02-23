@@ -1,45 +1,50 @@
 package com.hhassistant.service
 
 import com.hhassistant.domain.entity.Vacancy
-import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.domain.entity.VacancyStatus
-import com.hhassistant.exception.OllamaException
-import com.hhassistant.service.notification.NotificationService
+import com.hhassistant.notification.service.NotificationService
 import com.hhassistant.service.resume.ResumeService
-import com.hhassistant.service.vacancy.VacancyAnalysisService
-import com.hhassistant.service.vacancy.VacancyFetchService
-import com.hhassistant.service.vacancy.VacancySchedulerService
-import com.hhassistant.service.vacancy.VacancyService
-import com.hhassistant.service.vacancy.VacancyStatusService
+import com.hhassistant.vacancy.service.VacancyFetchService
+import com.hhassistant.vacancy.service.VacancySchedulerService
+import com.hhassistant.vacancy.service.VacancyService
+import com.hhassistant.vacancy.service.VacancyStatusService
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
+/**
+ * Тесты VacancySchedulerService.
+ *
+ * Текущая архитектура:
+ * - checkNewVacancies() вызывает vacancyFetchService.fetchAndSaveNewVacancies().
+ *   VacancyFetchService сохраняет вакансии и передаёт их в VacancyProcessingQueueService.
+ *   Анализ выполняется в очереди, не в scheduler.
+ * - processQueuedVacancies() подхватывает QUEUED из БД и добавляет в очередь.
+ */
 class VacancySchedulerServiceTest {
 
     private lateinit var vacancyFetchService: VacancyFetchService
     private lateinit var vacancyService: VacancyService
-    private lateinit var vacancyAnalysisService: VacancyAnalysisService
     private lateinit var vacancyStatusService: VacancyStatusService
     private lateinit var notificationService: NotificationService
     private lateinit var resumeService: ResumeService
-    private lateinit var metricsService: com.hhassistant.metrics.MetricsService
-    private lateinit var skillExtractionService: com.hhassistant.service.skill.SkillExtractionService
-    private lateinit var vacancyProcessingQueueService: com.hhassistant.service.vacancy.VacancyProcessingQueueService
-    private lateinit var skillExtractionQueueService: com.hhassistant.service.skill.SkillExtractionQueueService
-    private lateinit var vacancyRepository: com.hhassistant.repository.VacancyRepository
+    private lateinit var metricsService: com.hhassistant.monitoring.metrics.MetricsService
+    private lateinit var skillExtractionService: com.hhassistant.analysis.service.SkillExtractionService
+    private lateinit var vacancyProcessingQueueService: com.hhassistant.vacancy.service.VacancyProcessingQueueService
+    private lateinit var skillExtractionQueueService: com.hhassistant.analysis.service.SkillExtractionQueueService
+    private lateinit var vacancyRepository: com.hhassistant.vacancy.repository.VacancyRepository
     private lateinit var service: VacancySchedulerService
 
     @BeforeEach
     fun setup() {
         vacancyFetchService = mockk<VacancyFetchService>()
         vacancyService = mockk<VacancyService>()
-        vacancyAnalysisService = mockk<VacancyAnalysisService>()
         vacancyStatusService = mockk<VacancyStatusService>()
         notificationService = mockk<NotificationService>(relaxed = true)
         resumeService = mockk<ResumeService>(relaxed = true)
@@ -48,15 +53,14 @@ class VacancySchedulerServiceTest {
         vacancyProcessingQueueService = mockk(relaxed = true)
         skillExtractionQueueService = mockk(relaxed = true)
         vacancyRepository = mockk(relaxed = true)
-        val vacancyContentValidator = mockk<com.hhassistant.service.vacancy.VacancyContentValidator>(relaxed = true)
-        val vacancyRecoveryService = mockk<com.hhassistant.service.vacancy.VacancyRecoveryService>(relaxed = true)
-        val circuitBreakerStateService = mockk<com.hhassistant.service.monitoring.CircuitBreakerStateService>(relaxed = true)
-        val ollamaMonitoringService = mockk<com.hhassistant.service.monitoring.OllamaMonitoringService>(relaxed = true)
+        val vacancyContentValidator = mockk<com.hhassistant.vacancy.service.VacancyContentValidator>(relaxed = true)
+        val vacancyRecoveryService = mockk<com.hhassistant.vacancy.service.VacancyRecoveryService>(relaxed = true)
+        val circuitBreakerStateService = mockk<com.hhassistant.monitoring.service.CircuitBreakerStateService>(relaxed = true)
+        val ollamaMonitoringService = mockk<com.hhassistant.monitoring.service.OllamaMonitoringService>(relaxed = true)
 
         service = VacancySchedulerService(
             vacancyFetchService = vacancyFetchService,
             vacancyService = vacancyService,
-            vacancyAnalysisService = vacancyAnalysisService,
             vacancyStatusService = vacancyStatusService,
             notificationService = notificationService,
             resumeService = resumeService,
@@ -69,87 +73,30 @@ class VacancySchedulerServiceTest {
             vacancyRecoveryService = vacancyRecoveryService,
             circuitBreakerStateService = circuitBreakerStateService,
             ollamaMonitoringService = ollamaMonitoringService,
-            maxConcurrentRequests = 3,
         )
     }
 
     @Test
-    fun `should process vacancies and send relevant ones to Telegram`() {
+    fun `checkNewVacancies calls fetchAndSaveNewVacancies and does not call analysis directly`() {
         runBlocking {
             val newVacancies = listOf(createTestVacancy())
-            val vacanciesToAnalyze = listOf(createTestVacancy())
-            val analysis = createTestAnalysis(isRelevant = true, score = 0.85)
             val fetchResult = VacancyFetchService.FetchResult(
                 vacancies = newVacancies,
                 searchKeywords = listOf("Kotlin"),
             )
 
             coEvery { vacancyFetchService.fetchAndSaveNewVacancies() } returns fetchResult
-            every { vacancyService.getNewVacanciesForAnalysis() } returns vacanciesToAnalyze
-            coEvery { vacancyAnalysisService.analyzeVacancy(any()) } returns analysis
-            every { vacancyStatusService.updateVacancyStatus(any()) } returns Unit
 
             service.checkNewVacancies()
+            delay(300)
 
             coVerify { vacancyFetchService.fetchAndSaveNewVacancies() }
-            verify { vacancyService.getNewVacanciesForAnalysis() }
-            coVerify { vacancyAnalysisService.analyzeVacancy(any()) }
-            verify { vacancyStatusService.updateVacancyStatus(any()) }
+            verify(exactly = 0) { vacancyService.getNewVacanciesForAnalysis() }
         }
     }
 
     @Test
-    fun `should skip non-relevant vacancies`() {
-        runBlocking {
-            val vacanciesToAnalyze = listOf(createTestVacancy())
-            val analysis = createTestAnalysis(isRelevant = false, score = 0.3)
-            val fetchResult = VacancyFetchService.FetchResult(
-                vacancies = emptyList(),
-                searchKeywords = listOf("Kotlin"),
-            )
-
-            coEvery { vacancyFetchService.fetchAndSaveNewVacancies() } returns fetchResult
-            every { vacancyService.getNewVacanciesForAnalysis() } returns vacanciesToAnalyze
-            coEvery { vacancyAnalysisService.analyzeVacancy(any()) } returns analysis
-            every { vacancyStatusService.updateVacancyStatus(any()) } returns Unit
-
-            service.checkNewVacancies()
-
-            coVerify { vacancyAnalysisService.analyzeVacancy(any()) }
-            verify { vacancyStatusService.updateVacancyStatus(any()) }
-        }
-    }
-
-    @Test
-    fun `should continue processing when one vacancy fails`() {
-        runBlocking {
-            val vacancy1 = createTestVacancy(id = "1")
-            val vacancy2 = createTestVacancy(id = "2")
-            val analysis = createTestAnalysis(isRelevant = true, score = 0.8)
-            val fetchResult = VacancyFetchService.FetchResult(
-                vacancies = emptyList(),
-                searchKeywords = listOf("Kotlin"),
-            )
-
-            coEvery { vacancyFetchService.fetchAndSaveNewVacancies() } returns fetchResult
-            every { vacancyService.getNewVacanciesForAnalysis() } returns listOf(vacancy1, vacancy2)
-            coEvery {
-                vacancyAnalysisService.analyzeVacancy(vacancy1)
-            } throws OllamaException.ConnectionException("Connection error")
-            coEvery { vacancyAnalysisService.analyzeVacancy(vacancy2) } returns analysis
-            every { vacancyStatusService.updateVacancyStatus(any()) } returns Unit
-
-            service.checkNewVacancies()
-
-            // Должен обработать обе вакансии, несмотря на ошибку первой
-            coVerify { vacancyAnalysisService.analyzeVacancy(vacancy1) }
-            coVerify { vacancyAnalysisService.analyzeVacancy(vacancy2) }
-            verify { vacancyStatusService.updateVacancyStatus(any()) }
-        }
-    }
-
-    @Test
-    fun `should handle empty vacancy list`() {
+    fun `checkNewVacancies handles empty fetch result`() {
         runBlocking {
             val fetchResult = VacancyFetchService.FetchResult(
                 vacancies = emptyList(),
@@ -157,13 +104,44 @@ class VacancySchedulerServiceTest {
             )
 
             coEvery { vacancyFetchService.fetchAndSaveNewVacancies() } returns fetchResult
-            every { vacancyService.getNewVacanciesForAnalysis() } returns emptyList()
 
             service.checkNewVacancies()
+            delay(300)
 
             coVerify { vacancyFetchService.fetchAndSaveNewVacancies() }
-            verify { vacancyService.getNewVacanciesForAnalysis() }
-            coVerify(exactly = 0) { vacancyAnalysisService.analyzeVacancy(any()) }
+            verify(exactly = 0) { vacancyService.getNewVacanciesForAnalysis() }
+        }
+    }
+
+    @Test
+    fun `processQueuedVacancies fetches queued vacancies and enqueues to processing queue`() {
+        runBlocking {
+            val queuedVacancies = listOf(
+                createTestVacancy(id = "1", status = VacancyStatus.QUEUED),
+                createTestVacancy(id = "2", status = VacancyStatus.QUEUED),
+            )
+
+            every { vacancyService.getQueuedVacanciesForProcessing(limit = 50) } returns queuedVacancies
+            coEvery { vacancyProcessingQueueService.enqueueBatch(any()) } returns 2
+
+            service.processQueuedVacancies()
+            delay(300)
+
+            verify { vacancyService.getQueuedVacanciesForProcessing(limit = 50) }
+            coVerify { vacancyProcessingQueueService.enqueueBatch(listOf("1", "2")) }
+        }
+    }
+
+    @Test
+    fun `processQueuedVacancies does nothing when no queued vacancies`() {
+        runBlocking {
+            every { vacancyService.getQueuedVacanciesForProcessing(limit = 50) } returns emptyList()
+
+            service.processQueuedVacancies()
+            delay(300)
+
+            verify { vacancyService.getQueuedVacanciesForProcessing(limit = 50) }
+            coVerify(exactly = 0) { vacancyProcessingQueueService.enqueueBatch(any()) }
         }
     }
 
@@ -182,20 +160,6 @@ class VacancySchedulerServiceTest {
             experience = "От 3 лет",
             publishedAt = java.time.LocalDateTime.now(),
             status = status,
-        )
-    }
-
-    private fun createTestAnalysis(
-        isRelevant: Boolean,
-        score: Double,
-    ): VacancyAnalysis {
-        return VacancyAnalysis(
-            vacancyId = "12345",
-            isRelevant = isRelevant,
-            relevanceScore = score,
-            reasoning = "Test reasoning",
-            matchedSkills = """["Kotlin", "Spring Boot"]""",
-            suggestedCoverLetter = if (isRelevant) "Test cover letter" else null,
         )
     }
 }

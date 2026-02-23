@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ru">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Вакансии — HH Assistant</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
+</head>
+<body>
+<div th:replace="~{layout :: nav}"></div>
+<main class="container-fluid py-4">
+    <h1>Вакансии</h1>
+    <p class="text-muted" th:text="'Всего: ' + ${totalElements} + ', страница ' + (${currentPage} + 1) + ' из ' + (${totalPages} == 0 ? 1 : ${totalPages})">Всего: 0</p>
+    <div class="table-responsive">
+        <table class="table table-striped table-hover">
+            <thead>
+            <tr>
+                <th>ID</th>
+                <th>Название</th>
+                <th>Работодатель</th>
+                <th>Зарплата</th>
+                <th>Регион</th>
+                <th>Статус</th>
+                <th>Дата</th>
+                <th>Ссылка</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="v : ${vacancies}">
+                <td th:text="${v.id}">-</td>
+                <td th:text="${v.name}">-</td>
+                <td th:text="${v.employer}">-</td>
+                <td th:text="${v.salary} ?: '-'">-</td>
+                <td th:text="${v.area}">-</td>
+                <td th:text="${v.status}">-</td>
+                <td th:text="${#temporals.format(v.fetchedAt, 'dd.MM.yyyy HH:mm')}">-</td>
+                <td><a th:href="${v.url}" th:text="'Открыть'" target="_blank" rel="noopener">Открыть</a></td>
+            </tr>
+            <tr th:if="${#lists.isEmpty(vacancies)}">
+                <td colspan="8" class="text-center text-muted">Нет вакансий</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+    <nav aria-label="Пагинация" th:if="${totalPages > 1}">
+        <ul class="pagination justify-content-center">
+            <li class="page-item" th:classappend="${currentPage == 0} ? 'disabled'">
+                <a class="page-link" th:href="@{/ui/vacancies(page=${currentPage - 1}, size=${pageSize})}" th:if="${currentPage > 0}">Назад</a>
+                <span class="page-link" th:if="${currentPage == 0}">Назад</span>
+            </li>
+            <li class="page-item disabled">
+                <span class="page-link" th:text="'Страница ' + (${currentPage} + 1) + ' из ' + (${totalPages} == 0 ? 1 : ${totalPages})">Страница 1 из 1</span>
+            </li>
+            <li class="page-item" th:classappend="${currentPage >= totalPages - 1} ? 'disabled'">
+                <a class="page-link" th:href="@{/ui/vacancies(page=${currentPage + 1}, size=${pageSize})}" th:if="${currentPage < totalPages - 1}">Вперёд</a>
+                <span class="page-link" th:if="${currentPage >= totalPages - 1}">Вперёд</span>
+            </li>
+        </ul>
+    </nav>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

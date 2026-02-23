@@ -2,24 +2,23 @@ package com.hhassistant.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.github.benmanes.caffeine.cache.Caffeine
-import com.hhassistant.client.ollama.OllamaClient
-import com.hhassistant.config.PromptConfig
 import com.hhassistant.domain.entity.Resume
 import com.hhassistant.domain.entity.ResumeSource
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.domain.model.ResumeStructure
 import com.hhassistant.exception.OllamaException
-import com.hhassistant.repository.VacancyAnalysisRepository
-import com.hhassistant.service.resume.ResumeService
-import com.hhassistant.service.skill.SkillExtractionService
+import com.hhassistant.vacancy.repository.VacancyAnalysisRepository
 import com.hhassistant.service.util.AnalysisTimeService
-import com.hhassistant.service.vacancy.VacancyAnalysisService
-import com.hhassistant.service.vacancy.VacancyContentValidator
-import com.hhassistant.service.vacancy.VacancyProcessingControlService
+import com.hhassistant.vacancy.service.VacancyAnalysisService
+import com.hhassistant.vacancy.service.VacancyProcessingControlService
+import com.hhassistant.vacancy.port.ContentValidatorPort
+import com.hhassistant.vacancy.port.ResumeProvider
+import com.hhassistant.vacancy.port.SkillSaverPort
+import com.hhassistant.vacancy.port.VacancyLlmAnalyzer
+import com.hhassistant.vacancy.port.VacancyStatusUpdater
+import com.hhassistant.vacancy.port.VacancyUrlChecker
 import io.github.resilience4j.circuitbreaker.CircuitBreaker
-import io.github.resilience4j.retry.Retry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -34,66 +33,55 @@ import java.time.LocalDateTime
 
 class VacancyAnalysisServiceTest {
 
-    private lateinit var ollamaClient: OllamaClient
-    private lateinit var resumeService: ResumeService
+    private lateinit var resumeProvider: ResumeProvider
     private lateinit var repository: VacancyAnalysisRepository
     private lateinit var objectMapper: ObjectMapper
-    private lateinit var promptConfig: PromptConfig
-    private lateinit var vacancyContentValidator: VacancyContentValidator
-    private lateinit var vacancyStatusService: com.hhassistant.service.vacancy.VacancyStatusService
-    private lateinit var metricsService: com.hhassistant.metrics.MetricsService
+    private lateinit var contentValidator: ContentValidatorPort
+    private lateinit var statusUpdater: VacancyStatusUpdater
+    private lateinit var metricsService: com.hhassistant.monitoring.metrics.MetricsService
     private lateinit var analysisTimeService: AnalysisTimeService
-    private lateinit var skillExtractionService: SkillExtractionService
-    private lateinit var hhVacancyClient: com.hhassistant.client.hh.HHVacancyClient
-    private lateinit var circuitBreakerStateService: com.hhassistant.service.monitoring.CircuitBreakerStateService
-    private lateinit var processedVacancyCacheService: com.hhassistant.service.vacancy.ProcessedVacancyCacheService
+    private lateinit var skillSaver: SkillSaverPort
+    private lateinit var circuitBreakerStateService: com.hhassistant.monitoring.service.CircuitBreakerStateService
+    private lateinit var processedVacancyCacheService: com.hhassistant.vacancy.service.ProcessedVacancyCacheService
     private lateinit var vacancyProcessingControlService: VacancyProcessingControlService
+    private lateinit var vacancyUrlChecker: VacancyUrlChecker
+    private lateinit var llmAnalyzer: VacancyLlmAnalyzer
     private lateinit var ollamaCircuitBreaker: CircuitBreaker
-    private lateinit var ollamaRetry: Retry
-    private lateinit var vacancyUrlCheckCache: com.github.benmanes.caffeine.cache.Cache<String, Boolean>
     private lateinit var service: VacancyAnalysisService
 
     @BeforeEach
     fun setup() {
-        ollamaClient = mockk(relaxed = true)
-        resumeService = mockk(relaxed = true)
+        resumeProvider = mockk(relaxed = true)
         repository = mockk(relaxed = true)
         objectMapper = jacksonObjectMapper()
-        promptConfig = PromptConfig()
-        vacancyContentValidator = mockk(relaxed = true)
-        vacancyStatusService = mockk(relaxed = true)
+        contentValidator = mockk(relaxed = true)
+        statusUpdater = mockk(relaxed = true)
         metricsService = mockk(relaxed = true)
         analysisTimeService = mockk(relaxed = true)
-        skillExtractionService = mockk(relaxed = true)
-        hhVacancyClient = mockk(relaxed = true)
+        skillSaver = mockk(relaxed = true)
         circuitBreakerStateService = mockk(relaxed = true)
         processedVacancyCacheService = mockk(relaxed = true)
         vacancyProcessingControlService = mockk(relaxed = true) {
             every { isProcessingPaused() } returns false
         }
+        vacancyUrlChecker = mockk(relaxed = true)
+        llmAnalyzer = mockk(relaxed = true)
         ollamaCircuitBreaker = CircuitBreaker.ofDefaults("ollamaTest")
-        ollamaRetry = Retry.ofDefaults("ollamaTest")
-        vacancyUrlCheckCache = Caffeine.newBuilder().build()
         service = VacancyAnalysisService(
-            ollamaClient = ollamaClient,
-            resumeService = resumeService,
+            resumeProvider = resumeProvider,
             repository = repository,
             objectMapper = objectMapper,
-            promptConfig = promptConfig,
-            vacancyContentValidator = vacancyContentValidator,
-            vacancyStatusService = vacancyStatusService,
+            contentValidator = contentValidator,
+            statusUpdater = statusUpdater,
             metricsService = metricsService,
             analysisTimeService = analysisTimeService,
-            skillExtractionService = skillExtractionService,
-            hhVacancyClient = hhVacancyClient,
+            skillSaver = skillSaver,
             circuitBreakerStateService = circuitBreakerStateService,
             processedVacancyCacheService = processedVacancyCacheService,
             vacancyProcessingControlService = vacancyProcessingControlService,
+            vacancyUrlChecker = vacancyUrlChecker,
+            llmAnalyzer = llmAnalyzer,
             ollamaCircuitBreaker = ollamaCircuitBreaker,
-            ollamaRetry = ollamaRetry,
-            vacancyUrlCheckCache = vacancyUrlCheckCache,
-            minRelevanceScore = 0.6,
-            maxConcurrentUrlChecks = 2,
         )
     }
 
@@ -105,22 +93,18 @@ class VacancyAnalysisServiceTest {
             val resumeStructure = createTestResumeStructure()
 
             every { repository.findByVacancyId(vacancy.id) } returns null
+            coEvery { vacancyUrlChecker.checkVacancyUrl(vacancy.id) } returns true
+            coEvery { contentValidator.validate(vacancy) } returns ContentValidatorPort.ValidationResult(isValid = true, rejectionReason = null)
+            coEvery { resumeProvider.loadResume() } returns resume
+            every { resumeProvider.getResumeStructure(resume) } returns resumeStructure
             coEvery {
-                vacancyContentValidator.validate(vacancy)
-            } returns VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
-            coEvery { resumeService.loadResume() } returns resume
-            every { resumeService.getResumeStructure(resume) } returns resumeStructure
-
-            val analysisResponse = """
-                {
-                    "is_relevant": true,
-                    "relevance_score": 0.85,
-                    "reasoning": "Вакансия хорошо подходит: требуются навыки Kotlin и Spring Boot, которые есть в резюме",
-                    "matched_skills": ["Kotlin", "Spring Boot", "PostgreSQL"]
-                }
-            """.trimIndent()
-
-            coEvery { ollamaClient.chat(any()) } returns analysisResponse
+                llmAnalyzer.analyze(vacancy, resume, resumeStructure)
+            } returns VacancyLlmAnalyzer.AnalysisResult(
+                skills = listOf("Kotlin", "Spring Boot", "PostgreSQL"),
+                relevanceScore = 0.85,
+                isRelevant = true,
+                reasoning = "Вакансия хорошо подходит",
+            )
 
             val savedAnalysis = com.hhassistant.domain.entity.VacancyAnalysis(
                 id = 1L,
@@ -143,7 +127,7 @@ class VacancyAnalysisServiceTest {
             assertThat(result.matchedSkills as Any).isNotNull
             assertThat(result.suggestedCoverLetter).isNull()
 
-            coVerify { ollamaClient.chat(any()) }
+            coVerify { llmAnalyzer.analyze(any(), any(), any()) }
             verify { repository.save(any()) }
         }
     }
@@ -156,22 +140,18 @@ class VacancyAnalysisServiceTest {
             val resumeStructure = createTestResumeStructure()
 
             every { repository.findByVacancyId(vacancy.id) } returns null
+            coEvery { vacancyUrlChecker.checkVacancyUrl(vacancy.id) } returns true
+            coEvery { contentValidator.validate(vacancy) } returns ContentValidatorPort.ValidationResult(isValid = true, rejectionReason = null)
+            coEvery { resumeProvider.loadResume() } returns resume
+            every { resumeProvider.getResumeStructure(resume) } returns resumeStructure
             coEvery {
-                vacancyContentValidator.validate(vacancy)
-            } returns VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
-            coEvery { resumeService.loadResume() } returns resume
-            every { resumeService.getResumeStructure(resume) } returns resumeStructure
-
-            val analysisResponse = """
-                {
-                    "is_relevant": false,
-                    "relevance_score": 0.25,
-                    "reasoning": "Вакансия не подходит: требуется опыт в Python, а в резюме только Kotlin",
-                    "matched_skills": []
-                }
-            """.trimIndent()
-
-            coEvery { ollamaClient.chat(any()) } returns analysisResponse
+                llmAnalyzer.analyze(vacancy, resume, resumeStructure)
+            } returns VacancyLlmAnalyzer.AnalysisResult(
+                skills = emptyList(),
+                relevanceScore = 0.25,
+                isRelevant = false,
+                reasoning = "Вакансия не подходит",
+            )
 
             val savedAnalysis = com.hhassistant.domain.entity.VacancyAnalysis(
                 id = 1L,
@@ -192,7 +172,7 @@ class VacancyAnalysisServiceTest {
             assertThat(result.relevanceScore).isEqualTo(0.25)
             assertThat(result.suggestedCoverLetter).isNull()
 
-            coVerify(exactly = 1) { ollamaClient.chat(any()) } // Only analysis, no cover letter
+            coVerify(exactly = 1) { llmAnalyzer.analyze(any(), any(), any()) }
             verify { repository.save(any()) }
         }
     }
@@ -210,13 +190,14 @@ class VacancyAnalysisServiceTest {
             suggestedCoverLetter = null,
         )
 
+        every { processedVacancyCacheService.isProcessed(vacancy.id) } returns true
         every { repository.findByVacancyId(vacancy.id) } returns existingAnalysis
 
         runBlocking {
             val result: com.hhassistant.domain.entity.VacancyAnalysis? = service.analyzeVacancy(vacancy)
 
             assertThat(result).isEqualTo(existingAnalysis)
-            coVerify(exactly = 0) { ollamaClient.chat(any()) }
+            coVerify(exactly = 0) { llmAnalyzer.analyze(any(), any(), any()) }
             verify(exactly = 0) { repository.save(any()) }
         }
     }
@@ -228,16 +209,11 @@ class VacancyAnalysisServiceTest {
         val resumeStructure = createTestResumeStructure()
 
         every { repository.findByVacancyId(vacancy.id) } returns null
-        coEvery {
-            vacancyContentValidator.validate(vacancy)
-        } returns com.hhassistant.service.vacancy.VacancyContentValidator.ValidationResult(
-            isValid = true,
-            rejectionReason = null,
-        )
-        coEvery { resumeService.loadResume() } returns resume
-        every { resumeService.getResumeStructure(resume) } returns resumeStructure
-
-        coEvery { ollamaClient.chat(any()) } throws RuntimeException("Connection refused")
+        coEvery { vacancyUrlChecker.checkVacancyUrl(vacancy.id) } returns true
+        coEvery { contentValidator.validate(vacancy) } returns ContentValidatorPort.ValidationResult(isValid = true, rejectionReason = null)
+        coEvery { resumeProvider.loadResume() } returns resume
+        every { resumeProvider.getResumeStructure(resume) } returns resumeStructure
+        coEvery { llmAnalyzer.analyze(any(), any(), any()) } throws OllamaException.ConnectionException("Failed to connect to Ollama service")
 
         assertThatThrownBy {
             runBlocking {
@@ -246,7 +222,7 @@ class VacancyAnalysisServiceTest {
         }.isInstanceOf(OllamaException.ConnectionException::class.java)
             .hasMessageContaining("Failed to connect to Ollama service")
 
-        coVerify { ollamaClient.chat(any()) }
+        coVerify { llmAnalyzer.analyze(any(), any(), any()) }
         verify(exactly = 0) { repository.save(any()) }
     }
 
@@ -257,17 +233,11 @@ class VacancyAnalysisServiceTest {
         val resumeStructure = createTestResumeStructure()
 
         every { repository.findByVacancyId(vacancy.id) } returns null
-        coEvery {
-            vacancyContentValidator.validate(vacancy)
-        } returns com.hhassistant.service.vacancy.VacancyContentValidator.ValidationResult(
-            isValid = true,
-            rejectionReason = null,
-        )
-        coEvery { resumeService.loadResume() } returns resume
-        every { resumeService.getResumeStructure(resume) } returns resumeStructure
-
-        val invalidResponse = "This is not a valid JSON response"
-        coEvery { ollamaClient.chat(any()) } returns invalidResponse
+        coEvery { vacancyUrlChecker.checkVacancyUrl(vacancy.id) } returns true
+        coEvery { contentValidator.validate(vacancy) } returns ContentValidatorPort.ValidationResult(isValid = true, rejectionReason = null)
+        coEvery { resumeProvider.loadResume() } returns resume
+        every { resumeProvider.getResumeStructure(resume) } returns resumeStructure
+        coEvery { llmAnalyzer.analyze(any(), any(), any()) } throws OllamaException.ParsingException("Invalid JSON")
 
         assertThatThrownBy {
             runBlocking {
@@ -275,36 +245,22 @@ class VacancyAnalysisServiceTest {
             }
         }.isInstanceOf(OllamaException.ParsingException::class.java)
 
-        coVerify { ollamaClient.chat(any()) }
+        coVerify { llmAnalyzer.analyze(any(), any(), any()) }
         verify(exactly = 0) { repository.save(any()) }
     }
 
     @Test
-    fun `should throw OllamaException when relevance score is out of range`() {
+    fun `should throw when relevance score is out of range`() {
         val vacancy = createTestVacancy()
         val resume = createTestResume()
         val resumeStructure = createTestResumeStructure()
 
         every { repository.findByVacancyId(vacancy.id) } returns null
-        coEvery {
-            vacancyContentValidator.validate(vacancy)
-        } returns com.hhassistant.service.vacancy.VacancyContentValidator.ValidationResult(
-            isValid = true,
-            rejectionReason = null,
-        )
-        coEvery { resumeService.loadResume() } returns resume
-        every { resumeService.getResumeStructure(resume) } returns resumeStructure
-
-        val invalidResponse = """
-            {
-                "is_relevant": true,
-                "relevance_score": 1.5,
-                "reasoning": "Test",
-                "matched_skills": []
-            }
-        """.trimIndent()
-
-        coEvery { ollamaClient.chat(any()) } returns invalidResponse
+        coEvery { vacancyUrlChecker.checkVacancyUrl(vacancy.id) } returns true
+        coEvery { contentValidator.validate(vacancy) } returns ContentValidatorPort.ValidationResult(isValid = true, rejectionReason = null)
+        coEvery { resumeProvider.loadResume() } returns resume
+        every { resumeProvider.getResumeStructure(resume) } returns resumeStructure
+        coEvery { llmAnalyzer.analyze(any(), any(), any()) } throws IllegalArgumentException("Relevance score must be between 0.0 and 1.0")
 
         assertThatThrownBy {
             runBlocking {
@@ -313,7 +269,7 @@ class VacancyAnalysisServiceTest {
         }.isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("Relevance score must be between 0.0 and 1.0")
 
-        coVerify { ollamaClient.chat(any()) }
+        coVerify { llmAnalyzer.analyze(any(), any(), any()) }
         verify(exactly = 0) { repository.save(any()) }
     }
 
@@ -325,23 +281,18 @@ class VacancyAnalysisServiceTest {
             val resumeStructure = createTestResumeStructure()
 
             every { repository.findByVacancyId(vacancy.id) } returns null
+            coEvery { vacancyUrlChecker.checkVacancyUrl(vacancy.id) } returns true
+            coEvery { contentValidator.validate(vacancy) } returns ContentValidatorPort.ValidationResult(isValid = true, rejectionReason = null)
+            coEvery { resumeProvider.loadResume() } returns resume
+            every { resumeProvider.getResumeStructure(resume) } returns resumeStructure
             coEvery {
-                vacancyContentValidator.validate(vacancy)
-            } returns VacancyContentValidator.ValidationResult(isValid = true, rejectionReason = null)
-            coEvery { resumeService.loadResume() } returns resume
-            every { resumeService.getResumeStructure(resume) } returns resumeStructure
-
-            val analysisResponse = """
-                {
-                    "is_relevant": true,
-                    "relevance_score": 0.85,
-                    "reasoning": "Вакансия хорошо подходит",
-                    "matched_skills": ["Kotlin", "Spring Boot"]
-                }
-            """.trimIndent()
-
-            // Анализ выполняется один раз; сопроводительное письмо генерируется асинхронно в очереди
-            coEvery { ollamaClient.chat(any()) } returns analysisResponse
+                llmAnalyzer.analyze(vacancy, resume, resumeStructure)
+            } returns VacancyLlmAnalyzer.AnalysisResult(
+                skills = listOf("Kotlin", "Spring Boot"),
+                relevanceScore = 0.85,
+                isRelevant = true,
+                reasoning = "Вакансия хорошо подходит",
+            )
 
             val savedAnalysis = com.hhassistant.domain.entity.VacancyAnalysis(
                 id = 1L,
@@ -361,11 +312,9 @@ class VacancyAnalysisServiceTest {
             assertThat(result as Any).isNotNull
             assertThat(result!!.isRelevant).isTrue
             assertThat(result.suggestedCoverLetter).isNull()
-            assertThat(
-                result.coverLetterGenerationStatus,
-            ).isEqualTo(com.hhassistant.domain.entity.CoverLetterGenerationStatus.RETRY_QUEUED)
+            assertThat(result.coverLetterGenerationStatus).isEqualTo(com.hhassistant.domain.entity.CoverLetterGenerationStatus.RETRY_QUEUED)
 
-            coVerify(exactly = 1) { ollamaClient.chat(any()) }
+            coVerify(exactly = 1) { llmAnalyzer.analyze(any(), any(), any()) }
             verify { repository.save(any()) }
         }
     }

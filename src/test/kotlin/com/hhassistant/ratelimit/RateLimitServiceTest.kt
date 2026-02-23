@@ -1,7 +1,7 @@
 package com.hhassistant.ratelimit
 
 import com.hhassistant.exception.HHAPIException
-import com.hhassistant.metrics.MetricsService
+import com.hhassistant.monitoring.metrics.MetricsService
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat

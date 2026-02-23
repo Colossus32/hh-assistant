@@ -3,9 +3,9 @@ package com.hhassistant.web
 import com.hhassistant.config.AppConstants
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
-import com.hhassistant.service.vacancy.VacancyProcessingQueueService
-import com.hhassistant.service.vacancy.VacancyService
-import com.hhassistant.service.vacancy.VacancyStatusService
+import com.hhassistant.vacancy.service.VacancyProcessingQueueService
+import com.hhassistant.vacancy.service.VacancyService
+import com.hhassistant.vacancy.service.VacancyStatusService
 import mu.KotlinLogging
 import org.springframework.cache.annotation.CacheEvict
 import org.springframework.cache.annotation.Cacheable

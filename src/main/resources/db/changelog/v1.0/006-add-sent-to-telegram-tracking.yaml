@@ -18,3 +18,8 @@ databaseChangeLog:
               - column:
                   name: sent_to_telegram_at
 
+
+
+
+
+

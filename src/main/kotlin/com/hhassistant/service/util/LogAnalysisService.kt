@@ -1,8 +1,8 @@
 package com.hhassistant.service.util
 
-import com.hhassistant.client.ollama.OllamaClient
-import com.hhassistant.client.ollama.dto.ChatMessage
-import com.hhassistant.client.telegram.TelegramClient
+import com.hhassistant.integration.ollama.OllamaClient
+import com.hhassistant.integration.ollama.dto.ChatMessage
+import com.hhassistant.integration.telegram.TelegramClient
 import com.hhassistant.config.AppConstants
 import io.netty.handler.timeout.ReadTimeoutException
 import kotlinx.coroutines.CoroutineScope
@@ -321,7 +321,7 @@ class LogAnalysisService(
                 ChatMessage(role = "system", content = systemPrompt),
                 ChatMessage(role = "user", content = userPrompt),
             ),
-            taskType = com.hhassistant.service.monitoring.OllamaTaskType.LOG_ANALYSIS,
+            taskType = com.hhassistant.monitoring.service.OllamaTaskType.LOG_ANALYSIS,
         )
     }
 
@@ -385,7 +385,7 @@ class LogAnalysisService(
                     ChatMessage(role = "system", content = systemPrompt),
                     ChatMessage(role = "user", content = userPrompt),
                 ),
-                taskType = com.hhassistant.service.monitoring.OllamaTaskType.LOG_ANALYSIS,
+                taskType = com.hhassistant.monitoring.service.OllamaTaskType.LOG_ANALYSIS,
             )
         } catch (e: Exception) {
             val errorInfo = extractErrorInfo(e)
@@ -526,7 +526,7 @@ class LogAnalysisService(
                 ChatMessage(role = "system", content = systemPrompt),
                 ChatMessage(role = "user", content = userPrompt),
             ),
-            taskType = com.hhassistant.service.monitoring.OllamaTaskType.LOG_ANALYSIS,
+            taskType = com.hhassistant.monitoring.service.OllamaTaskType.LOG_ANALYSIS,
         )
     }
 
@@ -563,7 +563,7 @@ class LogAnalysisService(
                     ChatMessage(role = "system", content = systemPrompt),
                     ChatMessage(role = "user", content = userPrompt),
                 ),
-                taskType = com.hhassistant.service.monitoring.OllamaTaskType.LOG_ANALYSIS,
+                taskType = com.hhassistant.monitoring.service.OllamaTaskType.LOG_ANALYSIS,
             )
         } catch (e: Exception) {
             val errorInfo = extractErrorInfo(e)

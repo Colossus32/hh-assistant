@@ -48,11 +48,6 @@ app:
     enabled: true  # Включить периодическую проверку здоровья системы
     schedule: "0 0 * * * *"  # Каждый час (cron: секунда минута час день месяц день_недели)
     max-vacancies-per-cycle: 2000  # Максимальное количество вакансий за цикл (ограничение HH.ru API: 2000)
-  telegram-channels:
-    enabled: true
-    fetch-interval: 900  # Каждые 15 минут (как и HH.ru)
-    messages-per-fetch: 100
-    min-relevance-score: 0.7
   cleanup:
     enabled: true  # Включить автоматическую очистку несуществующих вакансий
     schedule: "0 0 2 * * *"  # Каждый день в 2:00 (cron: секунда минута час день месяц день_недели)
@@ -65,6 +60,10 @@ app:
   # 1. Убедитесь, что HH_ACCESS_TOKEN указан в .env
   # 2. Настройте поиск через БД (см. docs/WINDOWS_SETUP.md) ИЛИ через application.yml (см. ниже)
   search:
+    # rotation-strategy: all (default) | rotation
+    # - all: все ключевые слова keywords-rotation за один цикл
+    # - rotation: одно ключевое слово за цикл (round-robin по keywords-rotation)
+    # rotation-strategy: all
     # Альтернативный способ настройки поиска через application.yml
     # Если указаны keywords, они будут использованы вместо конфигураций из БД
     # keywords: ${APP_SEARCH_KEYWORDS:}  # Например: "Kotlin Developer" (одно ключевое слово)
@@ -253,6 +252,10 @@ ollama:
   # Оптимизированные temperature для анализа вакансий
   analysis:
     temperature: 0.3  # Низкая temperature для детерминированного анализа
+  rate-limit:
+    requests-per-second: 2  # Ограничение запросов к LLM (защита от перегрузки)
+    burst-capacity: 4
+    wait-on-limit-seconds: 1
   timeout-seconds: 90  # Таймаут для HTTP запросов к Ollama (responseTimeout и ReadTimeoutHandler)
   max-in-memory-size-mb: 10
   # Таймауты на уровне корутин для разных типов задач (защита от "задумавшихся" запросов)
@@ -265,6 +268,10 @@ ollama:
 telegram:
   api:
     base-url: https://api.telegram.org
+  rate-limit:
+    requests-per-second: 10  # Telegram: ~30 msg/sec limit, используем 10 для безопасности
+    burst-capacity: 20
+    wait-on-limit-seconds: 1
   bot-token: ${TELEGRAM_BOT_TOKEN:}
   chat-id: ${TELEGRAM_CHAT_ID:}
   enabled: ${TELEGRAM_ENABLED:true}
@@ -308,6 +315,7 @@ hh:
     search:
       per-page: 100  # Количество вакансий на страницу (максимум согласно документации HH.ru API)
       default-page: 0
+      always-start-from-zero: true  # Всегда начинать с первой страницы при каждом фетче (true = перебирать все вакансии заново, false = использовать сохраненный прогресс)
     pagination:
       restart-cooldown-hours: 1  # Cooldown между перезапусками пагинации (в часах) для предотвращения бесконечных циклов
   oauth:

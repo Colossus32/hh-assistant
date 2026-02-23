@@ -1,17 +1,17 @@
 package com.hhassistant.service
 
-import com.hhassistant.client.telegram.TelegramClient
-import com.hhassistant.client.telegram.dto.User
+import com.hhassistant.integration.telegram.TelegramClient
+import com.hhassistant.integration.telegram.dto.User
 import com.hhassistant.service.exclusion.ExclusionKeywordService
 import com.hhassistant.service.exclusion.ExclusionRuleService
-import com.hhassistant.service.skill.SkillExtractionQueueService
-import com.hhassistant.service.skill.SkillExtractionService
-import com.hhassistant.service.skill.SkillStatisticsService
-import com.hhassistant.service.telegram.TelegramAuthorizationService
-import com.hhassistant.service.telegram.TelegramCommandHandler
+import com.hhassistant.analysis.service.SkillExtractionQueueService
+import com.hhassistant.analysis.service.SkillExtractionService
+import com.hhassistant.analysis.service.SkillStatisticsService
+import com.hhassistant.notification.service.TelegramAuthorizationService
+import com.hhassistant.notification.service.TelegramCommandHandler
 import com.hhassistant.service.util.AnalysisTimeService
-import com.hhassistant.service.vacancy.VacancyProcessingControlService
-import com.hhassistant.service.vacancy.VacancyService
+import com.hhassistant.vacancy.service.VacancyProcessingControlService
+import com.hhassistant.vacancy.service.VacancyService
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -51,7 +51,7 @@ class TelegramCommandHandlerTest {
         exclusionRuleService = mockk(relaxed = true)
         exclusionKeywordService = mockk(relaxed = true)
         analysisTimeService = mockk(relaxed = true)
-        val vacancyProcessingQueueService = mockk<com.hhassistant.service.vacancy.VacancyProcessingQueueService>(relaxed = true)
+        val vacancyProcessingQueueService = mockk<com.hhassistant.vacancy.service.VacancyProcessingQueueService>(relaxed = true)
         val vacancyProcessingControlService = mockk<VacancyProcessingControlService>(relaxed = true) {
             every { isProcessingPaused() } returns false
         }

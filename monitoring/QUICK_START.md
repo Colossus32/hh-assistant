@@ -102,3 +102,8 @@ vacancy_analysis_duration_seconds_count
 docker-compose -f docker-compose.monitoring.yml down
 ```
 
+
+
+
+
+

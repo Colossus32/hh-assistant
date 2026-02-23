@@ -1,6 +1,7 @@
 package com.hhassistant.repository
 
 import com.hhassistant.domain.entity.SearchConfig
+import com.hhassistant.vacancy.repository.SearchConfigRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired

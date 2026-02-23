@@ -1,6 +1,6 @@
 package com.hhassistant.web
 
-import com.hhassistant.client.hh.HHVacancyClient
+import com.hhassistant.integration.hh.HHVacancyClient
 import com.hhassistant.service.util.EnvFileService
 import com.ninjasquad.springmockk.MockkBean
 import io.mockk.every

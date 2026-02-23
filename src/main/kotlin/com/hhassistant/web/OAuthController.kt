@@ -1,7 +1,7 @@
 package com.hhassistant.web
 
-import com.hhassistant.client.hh.HHOAuthService
-import com.hhassistant.client.hh.dto.OAuthTokenResponse
+import com.hhassistant.integration.hh.HHOAuthService
+import com.hhassistant.integration.hh.dto.OAuthTokenResponse
 import com.hhassistant.service.util.EnvFileService
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value

@@ -1,7 +1,7 @@
 package com.hhassistant.service.exclusion
 
 import com.hhassistant.domain.entity.ExclusionRule
-import com.hhassistant.repository.ExclusionRuleRepository
+import com.hhassistant.vacancy.repository.ExclusionRuleRepository
 import mu.KotlinLogging
 import org.springframework.cache.annotation.CacheEvict
 import org.springframework.cache.annotation.Cacheable

@@ -1,6 +1,6 @@
 package com.hhassistant.config
 
-import com.hhassistant.client.ProxyManager
+import com.hhassistant.integration.ProxyManager
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value

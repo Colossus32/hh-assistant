@@ -3,6 +3,8 @@ package com.hhassistant.repository
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.domain.entity.VacancyStatus
+import com.hhassistant.vacancy.repository.VacancyAnalysisRepository
+import com.hhassistant.vacancy.repository.VacancyRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -24,7 +26,7 @@ class VacancyAnalysisRepositoryTest {
     private lateinit var repository: VacancyAnalysisRepository
 
     @Autowired
-    private lateinit var vacancyRepository: com.hhassistant.repository.VacancyRepository
+    private lateinit var vacancyRepository: VacancyRepository
 
     companion object {
         @Container

@@ -25,7 +25,7 @@ class CacheConfig {
      * TTL: 1 час (детали вакансий редко меняются)
      */
     @Bean("vacancyDetailsCache")
-    fun vacancyDetailsCache(): com.github.benmanes.caffeine.cache.Cache<String, com.hhassistant.client.hh.dto.VacancyDto> {
+    fun vacancyDetailsCache(): com.github.benmanes.caffeine.cache.Cache<String, com.hhassistant.integration.hh.dto.VacancyDto> {
         return Caffeine.newBuilder()
             .maximumSize(AppConstants.Cache.VACANCY_DETAILS_MAX_SIZE.toLong())
             .expireAfterWrite(1, TimeUnit.HOURS) // TTL: 1 час

@@ -1,7 +1,7 @@
 package com.hhassistant.ratelimit
 
 import com.hhassistant.exception.HHAPIException
-import com.hhassistant.metrics.MetricsService
+import com.hhassistant.monitoring.metrics.MetricsService
 import io.github.bucket4j.Bandwidth
 import io.github.bucket4j.Bucket
 import kotlinx.coroutines.delay

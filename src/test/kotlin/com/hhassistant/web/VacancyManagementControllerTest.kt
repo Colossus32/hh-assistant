@@ -2,8 +2,8 @@ package com.hhassistant.web
 
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyStatus
-import com.hhassistant.service.vacancy.VacancyService
-import com.hhassistant.service.vacancy.VacancyStatusService
+import com.hhassistant.vacancy.service.VacancyService
+import com.hhassistant.vacancy.service.VacancyStatusService
 import com.ninjasquad.springmockk.MockkBean
 import io.mockk.every
 import io.mockk.verify

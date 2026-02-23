@@ -1,0 +1,508 @@
+package com.hhassistant.integration.hh
+
+import com.github.benmanes.caffeine.cache.Cache
+import com.hhassistant.aspect.Loggable
+import com.hhassistant.integration.hh.dto.VacancyDto
+import com.hhassistant.integration.hh.dto.VacancySearchResponse
+import com.hhassistant.config.VacancyServiceConfig
+import com.hhassistant.domain.entity.SearchConfig
+import com.hhassistant.domain.entity.SearchConfigProgress
+import com.hhassistant.exception.HHAPIException
+import com.hhassistant.ratelimit.RateLimitService
+import com.hhassistant.vacancy.repository.SearchConfigProgressRepository
+import io.github.resilience4j.kotlin.retry.executeSuspendFunction
+import io.github.resilience4j.retry.Retry
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.reactor.awaitSingle
+import mu.KotlinLogging
+import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.http.HttpStatus
+import org.springframework.stereotype.Component
+import org.springframework.web.reactive.function.client.WebClient
+import org.springframework.web.reactive.function.client.WebClientResponseException
+import org.springframework.web.reactive.function.client.bodyToMono
+import java.time.LocalDateTime
+import java.util.concurrent.ConcurrentHashMap
+
+@Component
+class HHVacancyClient(
+    @Qualifier("hhWebClient") private val webClient: WebClient,
+    @Value("\${hh.api.search.per-page}") private val perPage: Int,
+    @Value("\${hh.api.search.default-page}") private val defaultPage: Int,
+    private val rateLimitService: RateLimitService,
+    @Qualifier("vacancyDetailsCache") private val vacancyDetailsCache: Cache<String, VacancyDto>,
+    private val searchConfig: VacancyServiceConfig,
+    @Qualifier("hhApiRetry")     private val hhApiRetry: Retry,
+    private val searchConfigProgressRepository: SearchConfigProgressRepository,
+    @Value("\${hh.api.pagination.restart-cooldown-hours:1}") private val restartCooldownHours: Long = 1,
+    @Value("\${hh.api.search.always-start-from-zero:true}") private val alwaysStartFromZero: Boolean = true,
+) {
+    private val log = KotlinLogging.logger {}
+
+    /**
+     * Максимальная глубина результатов согласно документации HH.ru API
+     * per_page * page не может быть больше 2000
+     */
+    private val maxVacanciesDepth = 2000
+
+    /**
+     * Время последнего перезапуска пагинации для каждого configKey
+     * Используется для предотвращения частых перезапусков (cooldown)
+     */
+    private val lastRestartTime = ConcurrentHashMap<String, LocalDateTime>()
+
+    /**
+     * Генерирует уникальный ключ для SearchConfig
+     */
+    private fun getConfigKey(config: SearchConfig): String {
+        return "${config.keywords}|${config.area ?: "null"}|${config.minSalary ?: "null"}"
+    }
+
+    /**
+     * Загружает прогресс пагинации из БД для конфигурации
+     *
+     * @param configKey Уникальный ключ конфигурации
+     * @return Последняя обработанная страница или 0, если прогресс не найден
+     */
+    private fun loadProgressFromDatabase(configKey: String): Int {
+        return try {
+            val progress = searchConfigProgressRepository.findByConfigKey(configKey)
+            progress.map { it.lastProcessedPage }.orElse(0).also {
+                if (it > 0) {
+                    log.debug("[HH.ru API] Loaded progress from DB for configKey=$configKey: page $it")
+                }
+            }
+        } catch (e: Exception) {
+            log.warn("[HH.ru API] Failed to load progress from DB for configKey=$configKey: ${e.message}", e)
+            0
+        }
+    }
+
+    /**
+     * Сохраняет прогресс пагинации в БД для конфигурации
+     * Если включен режим always-start-from-zero, прогресс не сохраняется
+     *
+     * @param configKey Уникальный ключ конфигурации
+     * @param lastPage Последняя обработанная страница
+     */
+    private fun saveProgressToDatabase(configKey: String, lastPage: Int) {
+        // Если включен режим always-start-from-zero, не сохраняем прогресс
+        if (alwaysStartFromZero) {
+            log.debug("[HH.ru API] always-start-from-zero=true, skipping progress save for configKey=$configKey")
+            return
+        }
+
+        try {
+            val existingProgress = searchConfigProgressRepository.findByConfigKey(configKey)
+            val progress = if (existingProgress.isPresent) {
+                val existing = existingProgress.get()
+                existing.copy(
+                    lastProcessedPage = lastPage,
+                    updatedAt = LocalDateTime.now(),
+                )
+            } else {
+                SearchConfigProgress(
+                    configKey = configKey,
+                    lastProcessedPage = lastPage,
+                    updatedAt = LocalDateTime.now(),
+                )
+            }
+            searchConfigProgressRepository.save(progress)
+            log.debug("[HH.ru API] Saved progress to DB for configKey=$configKey: page $lastPage")
+        } catch (e: Exception) {
+            log.warn("[HH.ru API] Failed to save progress to DB for configKey=$configKey: ${e.message}", e)
+            // Не прерываем выполнение из-за ошибки сохранения прогресса
+        }
+    }
+
+    /**
+     * Удаляет прогресс пагинации из БД для конфигурации
+     *
+     * @param configKey Уникальный ключ конфигурации
+     */
+    private fun deleteProgressFromDatabase(configKey: String) {
+        try {
+            searchConfigProgressRepository.deleteByConfigKey(configKey)
+            log.debug("[HH.ru API] Deleted progress from DB for configKey=$configKey")
+        } catch (e: Exception) {
+            log.warn("[HH.ru API] Failed to delete progress from DB for configKey=$configKey: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Поиск вакансий с улучшенной пагинацией.
+     * Определяет конец пагинации по пустой/неполной странице и автоматически перезапускается
+     * с начала при обнаружении новых вакансий.
+     *
+     * Каждый уникальный SearchConfig (по keywords + area + minSalary) имеет свой независимый прогресс пагинации.
+     *
+     * @param config Конфигурация поиска
+     * @param startFromPage Страница, с которой начинать поиск (по умолчанию используется сохраненный прогресс или 0)
+     * @param isRestart Флаг, указывающий что это перезапуск (для предотвращения бесконечной рекурсии)
+     * @return Список найденных вакансий
+     */
+    @Loggable
+    suspend fun searchVacancies(
+        config: SearchConfig,
+        startFromPage: Int? = null,
+        isRestart: Boolean = false,
+    ): List<VacancyDto> {
+        val experienceIds = searchConfig.experienceIds ?: listOf("between1And3", "between3And6")
+
+        // Получаем уникальный ключ для этого SearchConfig
+        val configKey = getConfigKey(config)
+
+        // Определяем стартовую страницу:
+        // - Если alwaysStartFromZero=true, всегда начинаем с 0 и удаляем существующий прогресс
+        // - Иначе используем переданную страницу, сохраненную в БД или 0
+        val actualStartPage = when {
+            alwaysStartFromZero -> {
+                log.info("[HH.ru API] always-start-from-zero=true, starting from page 0")
+                // Удаляем существующий прогресс для чистоты
+                deleteProgressFromDatabase(configKey)
+                0
+            }
+            else -> startFromPage ?: loadProgressFromDatabase(configKey)
+        }
+
+        log.debug(
+            "[HH.ru API] Searching vacancies: keywords='${config.keywords}', " +
+                "area=${config.area}, minSalary=${config.minSalary}, " +
+                "experience=$experienceIds, startFromPage=$actualStartPage (configKey=$configKey)",
+        )
+
+        val allVacancies = mutableListOf<VacancyDto>()
+        var currentPage = actualStartPage
+        var hasMorePages = true
+        var totalFound = 0
+        var lastSuccessfulPage = actualStartPage
+
+        while (hasMorePages && currentPage * perPage < maxVacanciesDepth) {
+            try {
+                rateLimitService.tryConsume()
+
+                val pageResponse = fetchVacanciesPage(config, currentPage)
+
+                // Сохраняем totalFound из первой страницы для логирования
+                if (currentPage == actualStartPage) {
+                    totalFound = pageResponse.found
+                    log.info(
+                        "[HH.ru API] Page $currentPage: ${pageResponse.items.size} vacancies, total found: $totalFound",
+                    )
+                }
+
+                // Проверяем признаки конца пагинации
+                when {
+                    // Пустая страница - достигли конца
+                    pageResponse.items.isEmpty() -> {
+                        log.info("[HH.ru API] Empty page $currentPage detected - reached end of results")
+                        hasMorePages = false
+
+                        // Если начали не с 0 и это не перезапуск, значит были новые вакансии - начинаем сначала
+                        if (currentPage > 0 && actualStartPage > 0 && !isRestart) {
+                            // Проверяем cooldown перед перезапуском
+                            val lastRestart = lastRestartTime[configKey]
+                            val now = LocalDateTime.now()
+                            val canRestart = lastRestart == null || now.isAfter(lastRestart.plusHours(restartCooldownHours))
+
+                            if (!canRestart) {
+                                val timeSinceLastRestart = java.time.Duration.between(lastRestart, now)
+                                log.warn(
+                                    "[HH.ru API] Restart cooldown active for configKey=$configKey. " +
+                                        "Last restart: $lastRestart, " +
+                                        "cooldown: ${restartCooldownHours}h, " +
+                                        "time since last restart: ${timeSinceLastRestart.toHours()}h. " +
+                                        "Skipping restart to prevent infinite loop.",
+                                )
+                                // Сохраняем последнюю успешную страницу вместо перезапуска
+                                saveProgressToDatabase(configKey, lastSuccessfulPage)
+                            } else {
+                                log.info(
+                                    "[HH.ru API] Empty page detected at $currentPage " +
+                                        "(started from $actualStartPage) - new vacancies may have appeared, " +
+                                        "restarting from page 0 (cooldown: ${restartCooldownHours}h)",
+                                )
+                                // Обновляем время последнего перезапуска
+                                lastRestartTime[configKey] = now
+                                // Сбрасываем прогресс для этого конфига и перезапускаем с начала
+                                deleteProgressFromDatabase(configKey)
+                                // Рекурсивно перезапускаем с начала
+                                return searchVacancies(config, startFromPage = 0, isRestart = true)
+                            }
+                        } else if (currentPage == 0 && pageResponse.items.isEmpty()) {
+                            log.warn("[HH.ru API] First page (0) is empty - no vacancies found for this search")
+                            // Удаляем прогресс, так как нет вакансий
+                            deleteProgressFromDatabase(configKey)
+                        } else {
+                            // Сохраняем последнюю успешную страницу (предыдущую)
+                            saveProgressToDatabase(configKey, lastSuccessfulPage)
+                        }
+                    }
+
+                    // Неполная страница - последняя страница
+                    pageResponse.items.size < perPage -> {
+                        log.info(
+                            "[HH.ru API] Incomplete page $currentPage (${pageResponse.items.size} < $perPage) - last page detected",
+                        )
+                        allVacancies.addAll(pageResponse.items)
+                        hasMorePages = false
+
+                        // Если начали не с 0 и это не перезапуск, значит были новые вакансии - начинаем сначала
+                        if (currentPage > 0 && actualStartPage > 0 && !isRestart) {
+                            // Проверяем cooldown перед перезапуском
+                            val lastRestart = lastRestartTime[configKey]
+                            val now = LocalDateTime.now()
+                            val canRestart = lastRestart == null || now.isAfter(lastRestart.plusHours(restartCooldownHours))
+
+                            if (!canRestart) {
+                                val timeSinceLastRestart = java.time.Duration.between(lastRestart, now)
+                                log.warn(
+                                    "[HH.ru API] Restart cooldown active for configKey=$configKey. " +
+                                        "Last restart: $lastRestart, " +
+                                        "cooldown: ${restartCooldownHours}h, " +
+                                        "time since last restart: ${timeSinceLastRestart.toHours()}h. " +
+                                        "Skipping restart to prevent infinite loop.",
+                                )
+                                // Сохраняем последнюю успешную страницу вместо перезапуска
+                                saveProgressToDatabase(configKey, lastSuccessfulPage)
+                            } else {
+                                log.info(
+                                    "[HH.ru API] Incomplete page detected at $currentPage " +
+                                        "(${pageResponse.items.size} < $perPage) - new vacancies may have appeared, " +
+                                        "restarting from page 0 (cooldown: ${restartCooldownHours}h)",
+                                )
+                                // Обновляем время последнего перезапуска
+                                lastRestartTime[configKey] = now
+                                // Сбрасываем прогресс для этого конфига и перезапускаем с начала
+                                deleteProgressFromDatabase(configKey)
+                                // Рекурсивно перезапускаем с начала
+                                return searchVacancies(config, startFromPage = 0, isRestart = true)
+                            }
+                        } else if (currentPage == 0 && pageResponse.items.isEmpty()) {
+                            log.warn("[HH.ru API] First page (0) is empty - no vacancies found for this search")
+                            // Удаляем прогресс, так как нет вакансий
+                            deleteProgressFromDatabase(configKey)
+                        } else {
+                            // Сохраняем текущую страницу как последнюю обработанную
+                            saveProgressToDatabase(configKey, currentPage)
+                        }
+                    }
+
+                    // Обычная страница - продолжаем
+                    else -> {
+                        allVacancies.addAll(pageResponse.items)
+                        lastSuccessfulPage = currentPage
+                        currentPage++
+                    }
+                }
+
+                log.trace(
+                    "[HH.ru API] Page $currentPage: ${pageResponse.items.size} vacancies (total so far: ${allVacancies.size})",
+                )
+
+                // Адаптивная задержка между запросами на основе доступных токенов rate limit
+                if (hasMorePages) {
+                    val adaptiveDelay = calculateAdaptiveDelay()
+                    if (adaptiveDelay > 0) {
+                        delay(adaptiveDelay)
+                    }
+                }
+            } catch (e: HHAPIException.RateLimitException) {
+                log.warn("[HH.ru API] Rate limit exceeded on page $currentPage, stopping pagination")
+                break
+            } catch (e: Exception) {
+                log.warn("[HH.ru API] Error fetching page $currentPage: ${e.message}, continuing with next page")
+                // При ошибке продолжаем со следующей страницы
+                currentPage++
+                if (currentPage * perPage >= maxVacanciesDepth) {
+                    log.warn("[HH.ru API] Reached max depth limit ($maxVacanciesDepth), stopping pagination")
+                    break
+                }
+            }
+        }
+
+        val lastPage = if (hasMorePages && currentPage > actualStartPage) currentPage - 1 else currentPage
+        log.info(
+            "[HH.ru API] Total fetched: ${allVacancies.size} vacancies from pages $actualStartPage..$lastPage (total available: $totalFound, configKey=$configKey)",
+        )
+
+        // Если дошли до конца без ошибок, сохраняем последнюю страницу
+        // Метод saveProgressToDatabase сам проверит флаг always-start-from-zero
+        if (!hasMorePages && allVacancies.isNotEmpty()) {
+            saveProgressToDatabase(configKey, lastPage)
+        }
+
+        return allVacancies
+    }
+
+    /**
+     * Вычисляет адаптивную задержку между запросами на основе доступных токенов rate limit.
+     *
+     * Логика:
+     * - Если токенов нет (0) - ждем 500ms (половина секунды для пополнения при 2 req/s)
+     * - Если мало токенов (1-2) - небольшая задержка 100ms
+     * - Если достаточно токенов (3+) - минимальная задержка 10ms
+     *
+     * Это позволяет оптимизировать скорость загрузки, не превышая rate limit.
+     *
+     * @return Задержка в миллисекундах
+     */
+    private fun calculateAdaptiveDelay(): Long {
+        val availableTokens = rateLimitService.getAvailableTokens()
+
+        return when {
+            availableTokens == 0L -> {
+                // Нет токенов - ждем пополнения (500ms = половина секунды для 2 req/s)
+                log.trace("[HH.ru API] No tokens available, using delay 500ms")
+                500
+            }
+            availableTokens <= 2 -> {
+                // Мало токенов - небольшая задержка для безопасности
+                log.trace("[HH.ru API] Low tokens ($availableTokens), using delay 100ms")
+                100
+            }
+            else -> {
+                // Достаточно токенов - минимальная задержка
+                log.trace("[HH.ru API] Sufficient tokens ($availableTokens), using delay 10ms")
+                10
+            }
+        }
+    }
+
+    /**
+     * Запрашивает одну страницу вакансий с retry для временных ошибок
+     */
+    private suspend fun fetchVacanciesPage(config: SearchConfig, page: Int): VacancySearchResponse {
+        return hhApiRetry.executeSuspendFunction {
+            try {
+                val experienceIds = searchConfig.experienceIds ?: listOf("between1And3", "between3And6")
+                val requestSpec = webClient.get()
+                    .uri { builder ->
+                        builder.path("/vacancies")
+                            .queryParam("text", config.keywords)
+                            .apply {
+                                config.area?.let { queryParam("area", it) }
+                                config.minSalary?.let { queryParam("salary", it) }
+                                // Фильтруем по опыту из конфигурации
+                                experienceIds.forEach { experienceId ->
+                                    queryParam("experience", experienceId)
+                                }
+                                queryParam("per_page", perPage)
+                                queryParam("page", page)
+                            }
+                            .build()
+                    }
+
+                val response = requestSpec
+                    .retrieve()
+                    .bodyToMono<VacancySearchResponse>()
+                    .awaitSingle()
+
+                response
+            } catch (e: WebClientResponseException) {
+                log.error("❌ [HH.ru API] Error searching vacancies on page $page: ${e.message}", e)
+                val exception = mapToHHAPIException(e, "Failed to search vacancies on page $page")
+
+                // Если это ошибка авторизации, логируем детально
+                if (exception is HHAPIException.UnauthorizedException) {
+                    log.error("🚨 [HH.ru API] UNAUTHORIZED: Access token expired or invalid!")
+                    log.error("🚨 [HH.ru API] Status code: ${e.statusCode}, Response: ${e.responseBodyAsString}")
+                }
+
+                // Retry настроен только для ConnectionException (временные ошибки)
+                // Постоянные ошибки (401, 403, 404, 429) не будут ретраиться
+                throw exception
+            } catch (e: Exception) {
+                log.error("Unexpected error searching vacancies on page $page: ${e.message}", e)
+                val connectionException = HHAPIException.ConnectionException("Failed to connect to HH.ru API: ${e.message}", e)
+                // Временная ошибка - будет ретрай
+                throw connectionException
+            }
+        }
+    }
+
+    @Loggable
+    suspend fun getVacancyDetails(id: String): VacancyDto {
+        // Check cache before API request
+        vacancyDetailsCache.getIfPresent(id)?.let { cached ->
+            log.trace("[HH.ru API] Using cached vacancy details for ID: $id")
+            return cached
+        }
+
+        rateLimitService.tryConsume()
+
+        log.debug("[HH.ru API] Fetching vacancy details for ID: $id (cache miss)")
+
+        return hhApiRetry.executeSuspendFunction {
+            try {
+                val vacancy = webClient.get()
+                    .uri("/vacancies/$id")
+                    .retrieve()
+                    .bodyToMono<VacancyDto>()
+                    .awaitSingle()
+
+                vacancyDetailsCache.put(id, vacancy)
+                log.debug("[HH.ru API] Fetched and cached vacancy: ${vacancy.name} (ID: $id)")
+
+                vacancy
+            } catch (e: WebClientResponseException) {
+                log.error("[HH.ru API] Error getting vacancy details: ${e.message}", e)
+                val exception = mapToHHAPIException(e, "Failed to get vacancy details for id: $id")
+
+                // Retry настроен только для ConnectionException (временные ошибки)
+                // Постоянные ошибки (401, 403, 404, 429) не будут ретраиться
+                throw exception
+            } catch (e: Exception) {
+                log.error("[HH.ru API] Unexpected error getting vacancy details: ${e.message}", e)
+                val connectionException = HHAPIException.ConnectionException("Failed to connect to HH.ru API: ${e.message}", e)
+                // Временная ошибка - будет ретрай
+                throw connectionException
+            }
+        }
+    }
+
+    private fun mapToHHAPIException(e: WebClientResponseException, defaultMessage: String): HHAPIException {
+        return when (e.statusCode) {
+            HttpStatus.UNAUTHORIZED -> HHAPIException.UnauthorizedException(
+                "Unauthorized access to HH.ru API. Check your access token.",
+                e,
+            )
+            HttpStatus.FORBIDDEN -> HHAPIException.UnauthorizedException(
+                "Forbidden (403): Access token may be invalid, expired, or lacks required permissions. " +
+                    "Response: ${e.responseBodyAsString}",
+                e,
+            )
+            HttpStatus.NOT_FOUND -> HHAPIException.NotFoundException(
+                "Resource not found in HH.ru API: ${e.message}",
+                e,
+            )
+            HttpStatus.TOO_MANY_REQUESTS -> HHAPIException.RateLimitException(
+                "Rate limit exceeded for HH.ru API. Please wait before retrying.",
+                e,
+            )
+            HttpStatus.INTERNAL_SERVER_ERROR,
+            HttpStatus.BAD_GATEWAY,
+            HttpStatus.SERVICE_UNAVAILABLE,
+            -> HHAPIException.ConnectionException(
+                "Server error from HH.ru API: ${e.statusCode}",
+                e,
+            )
+            else -> {
+                // Для 5xx ошибок создаем ConnectionException для retry
+                // Для других ошибок создаем APIException (не ретраим)
+                if (e.statusCode.is5xxServerError) {
+                    HHAPIException.ConnectionException(
+                        "Server error from HH.ru API: ${e.statusCode} - ${e.message}",
+                        e,
+                    )
+                } else {
+                    HHAPIException.APIException(
+                        "$defaultMessage: ${e.statusCode} - ${e.message}",
+                        e,
+                    )
+                }
+            }
+        }
+    }
+}

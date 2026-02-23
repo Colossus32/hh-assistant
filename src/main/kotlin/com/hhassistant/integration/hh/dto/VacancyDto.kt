@@ -1,0 +1,86 @@
+package com.hhassistant.integration.hh.dto
+
+import com.fasterxml.jackson.annotation.JsonProperty
+import java.time.LocalDateTime
+
+data class VacancyDto(
+    val id: String,
+    val name: String,
+    val employer: EmployerDto?,
+    val salary: SalaryDto?,
+    val area: AreaDto?,
+    val url: String? = null, // API URL (например, https://api.hh.ru/vacancies/123) - может отсутствовать в некоторых ответах API
+    @JsonProperty("alternate_url")
+    val alternateUrl: String? = null, // Браузерная ссылка (например, https://hh.ru/vacancy/123)
+    val description: String?,
+    val experience: ExperienceDto?,
+    @JsonProperty("published_at")
+    val publishedAt: String?,
+    val snippet: SnippetDto?,
+    @JsonProperty("key_skills")
+    val keySkills: List<KeySkillDto>? = null,
+) {
+    fun toSalaryString(defaultCurrency: String = "RUR"): String? {
+        return salary?.let {
+            val currency = it.currency ?: defaultCurrency
+            when {
+                it.from != null && it.to != null -> "${it.from} - ${it.to} $currency"
+                it.from != null -> "от ${it.from} $currency"
+                it.to != null -> "до ${it.to} $currency"
+                else -> null
+            }
+        }
+    }
+
+    fun toAreaString(areaNotSpecified: String = "Не указан"): String {
+        return area?.name ?: areaNotSpecified
+    }
+
+    fun toExperienceString(): String? {
+        return experience?.name
+    }
+
+    /**
+     * Возвращает строку с годами опыта для быстрой фильтрации
+     * Оптимизированная версия для проверки опыта без парсинга
+     */
+    fun getExperienceYearsString(): String? {
+        return experience?.name?.lowercase() ?: experience?.id?.lowercase()
+    }
+
+    fun toPublishedAt(): LocalDateTime? {
+        return publishedAt?.let {
+            try {
+                LocalDateTime.parse(it.replace("Z", ""))
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+}
+
+data class EmployerDto(
+    val id: String?,
+    val name: String,
+)
+
+data class SalaryDto(
+    val from: Int?,
+    val to: Int?,
+    val currency: String?,
+)
+
+data class AreaDto(
+    val id: String?,
+    val name: String,
+)
+
+data class ExperienceDto(
+    val id: String?,
+    val name: String,
+)
+
+data class SnippetDto(
+    val requirement: String?,
+    val responsibility: String?,
+)

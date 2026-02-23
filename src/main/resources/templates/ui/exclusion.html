@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ru">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Бан-слова — HH Assistant</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
+</head>
+<body>
+<div th:replace="~{layout :: nav}"></div>
+<main class="container-fluid py-4">
+    <h1>Бан-слова валидатора</h1>
+    <p class="text-muted">Слова, при наличии которых в названии вакансия отбрасывается. Можно добавить несколько слов через пробел.</p>
+    <div th:if="${message}" class="alert alert-info" th:text="${message}">Сообщение</div>
+    <form th:action="@{/ui/exclusion/add}" method="post" class="row g-2 mb-4">
+        <div class="col-auto">
+            <label for="keywords" class="col-form-label">Добавить слова:</label>
+        </div>
+        <div class="col-md-4">
+            <input type="text" id="keywords" name="keywords" class="form-control" placeholder="слово1 слово2"/>
+        </div>
+        <div class="col-auto">
+            <button type="submit" class="btn btn-primary">Добавить</button>
+        </div>
+    </form>
+    <h2>Текущий список</h2>
+    <div class="table-responsive">
+        <table class="table table-striped">
+            <thead>
+            <tr>
+                <th>Слово</th>
+                <th>Действие</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="kw : ${keywords}">
+                <td th:text="${kw}">-</td>
+                <td>
+                    <form th:action="@{/ui/exclusion/remove}" method="post" class="d-inline">
+                        <input type="hidden" name="keyword" th:value="${kw}"/>
+                        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Удалить это слово?');">Удалить</button>
+                    </form>
+                </td>
+            </tr>
+            <tr th:if="${#lists.isEmpty(keywords)}">
+                <td colspan="2" class="text-center text-muted">Нет бан-слов</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

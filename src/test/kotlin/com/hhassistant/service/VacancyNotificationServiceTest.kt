@@ -1,14 +1,14 @@
 package com.hhassistant.service
 
-import com.hhassistant.client.telegram.TelegramClient
-import com.hhassistant.client.telegram.dto.InlineKeyboardMarkup
+import com.hhassistant.integration.telegram.TelegramClient
+import com.hhassistant.integration.telegram.dto.InlineKeyboardMarkup
 import com.hhassistant.domain.entity.CoverLetterGenerationStatus
 import com.hhassistant.domain.entity.Vacancy
 import com.hhassistant.domain.entity.VacancyAnalysis
 import com.hhassistant.domain.entity.VacancyStatus
 import com.hhassistant.exception.TelegramException
-import com.hhassistant.service.vacancy.VacancyNotificationService
-import com.hhassistant.service.vacancy.VacancyStatusService
+import com.hhassistant.vacancy.service.VacancyNotificationService
+import com.hhassistant.vacancy.service.VacancyStatusService
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -24,7 +24,7 @@ class VacancyNotificationServiceTest {
 
     private lateinit var telegramClient: TelegramClient
     private lateinit var vacancyStatusService: VacancyStatusService
-    private lateinit var metricsService: com.hhassistant.metrics.MetricsService
+    private lateinit var metricsService: com.hhassistant.monitoring.metrics.MetricsService
     private lateinit var service: VacancyNotificationService
     private lateinit var capturedMessages: MutableList<Pair<String, InlineKeyboardMarkup?>>
 
