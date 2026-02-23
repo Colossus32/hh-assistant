@@ -7,6 +7,7 @@ build/
 .idea/
 *.iml
 .vscode/
+.cursor/
 *.swp
 *.swo
 *~
@@ -35,8 +36,25 @@ scripts/set-webhook.ps1
 scripts/*-webhook*.ps1
 scripts/*-token*.ps1
 
-
-
-
+# Internal docs (not for end users)
+AGENTS_GUIDE.md
+AGENTS_QUICK_REF.md
+PROJECT_REVIEW_AND_IMPROVEMENTS.md
+agent_review_today.md
+CONTROLLERS_REFACTORING_PLAN.md
+ENQUEUE_REFACTORING_PLAN.md
+RUNBLOCKING_ANALYSIS.md
+VACANCY_CORE_IMPROVEMENTS_PLAN.md
+commit_message.txt
+get-token-manual.md
+docs/AGENTS_API_CONTRACTS.md
+docs/BOUNDED_CONTEXTS_*.md
+docs/LOGGING_REVIEW.md
+docs/PAGINATION_FIX.md
+docs/VACANCY_LOGIC_*.md
+docs/WEB_UI_PLAN.md
+docs/WEB_UI_REVIEW.md
+АРХИТЕКТУРНОЕ_РЕВЬЮ.md
+ПРОМЕЖУТОЧНЫЙ_РЕВЬЮ.md
 
 
